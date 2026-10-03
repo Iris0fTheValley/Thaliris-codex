@@ -64,9 +64,12 @@ be recovered through the managed chain. Disconnect the global Thaliris hooks
 and global startup block first. The separate reviewed repository source runner
 `tools/thaliris_offline_recovery.py --core-source-root <reviewed-core-checkout>` accepts the exact task UUID, revision,
 state SHA-256, lifecycle SHA-256 (or `ABSENT`), and an explicit reason, with
-`--operator-asserted-user-delegation --integration-disconnected`. Use a trusted
-platform Python with `-I -B`; the runner compiles the repository's `.py` files
-directly and never imports installed Thaliris or repository bytecode caches.
+`--operator-asserted-user-delegation --integration-disconnected`. The Core
+argument must name an explicit reviewed Core source checkout containing
+`src/thaliris/core.py`; an installed Core package is not a reviewed checkout.
+Use a trusted platform Python with `-I -B`; the runner compiles the repository's
+`.py` files directly and never imports installed Thaliris or repository
+bytecode caches.
 It holds the repository lock, verifies the exact packet, archives original
 state and lifecycle bytes verbatim (including the incomplete goal), fences
 extractable session and agent identities even in partial or malformed ledgers,

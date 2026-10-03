@@ -17,8 +17,21 @@ thaliris version
 ```sh
 python -m pip install -e '../Thaliris[test]'
 python -m pip install --no-deps -e '.[test]'
+```
+
+The offline-recovery source-runner test needs `THALIRIS_CORE_SOURCE` set to
+that checkout's root (the directory containing `src/thaliris/core.py`). The
+runner deliberately loads this explicit checkout and does not treat the
+installed Core package as reviewed source. In PowerShell, set it before running
+the tests:
+
+```powershell
+$env:THALIRIS_CORE_SOURCE = (Resolve-Path '../Thaliris').Path
 pytest
 ```
+
+In POSIX shells, use `export THALIRIS_CORE_SOURCE=../Thaliris` before `pytest`.
+CI sets this variable to its `shared-core` checkout.
 
 安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。正式 Host 安装应将两个 wheel 安装进禁用 system site packages 的专用环境；editable .pth 路径不会通过运行时 pin 验证。整个环境的文件（含共享 Core）被纳入 manifest。
 

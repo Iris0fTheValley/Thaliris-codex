@@ -34,6 +34,20 @@ def _packet(root, task, ledger, home):
                 operator_asserted_user_delegation=True, integration_disconnected=True)
 
 
+def _reviewed_core_source_root():
+    configured = os.environ.get("THALIRIS_CORE_SOURCE")
+    assert configured, (
+        "THALIRIS_CORE_SOURCE must point to the reviewed Thaliris Core source "
+        "checkout (the directory containing src/thaliris/core.py)"
+    )
+    source_root = Path(configured).expanduser().resolve(strict=True)
+    assert (source_root / "src/thaliris/core.py").is_file(), (
+        "THALIRIS_CORE_SOURCE must be a Core source checkout containing "
+        "src/thaliris/core.py; an installed package path is not a reviewed checkout"
+    )
+    return source_root
+
+
 @pytest.mark.parametrize("malformed", [False, True])
 def test_offline_recovery_exact_archival_and_partial_identity_fencing(tmp_path, malformed):
     root, task, ledger, home = _repo(tmp_path)
@@ -177,7 +191,7 @@ def test_reviewed_source_runner_releases_only_disposable_exact_task(tmp_path):
     packet = _packet(root, task, ledger, home)
     runner = Path(__file__).resolve().parents[1] / "tools/thaliris_offline_recovery.py"
     result = subprocess.run([sys.executable, "-I", "-B", str(runner),
-        "--core-source-root", str(Path(core.__file__).parents[2]), "--root", str(root),
+        "--core-source-root", str(_reviewed_core_source_root()), "--root", str(root),
         "--codex-home", str(home), "--task-id", task["task_id"], "--revision", "1",
         "--state-sha256", packet["state_sha256"], "--lifecycle-sha256", "ABSENT",
         "--reason", packet["reason"], "--operator-asserted-user-delegation", "--integration-disconnected"],
