@@ -144,8 +144,16 @@ def test_session_start_records_project_and_host_file_snapshot_without_catalog_ev
     session_hash = hashlib.sha256(b"snapshot-session").hexdigest()
     runtime = json.loads((tmp_path / ".context" / "audit" / session_hash[:24] / "runtime.json").read_text(encoding="utf-8"))
     assert runtime["profile_files_present_at_session_start"] == {
+        "configuration_sha256": {
+            str(tmp_path / ".codex" / "config.toml"): "ABSENT",
+            str(host_home.resolve() / "config.toml"): "ABSENT",
+        },
         "project": {"directory": ".codex/agents", "files": ["thaliris-implementer.toml"]},
-        "user_host": {"directory": str(host_home.resolve() / "agents"), "files": ["thaliris-investigator.toml"]},
+        "user_host": {
+            "directory": str(host_home.resolve() / "agents"),
+            "files": ["thaliris-investigator.toml"],
+            "sha256": {"thaliris-investigator.toml": hashlib.sha256(host_profile.read_bytes()).hexdigest()},
+        },
     }
     assert "native_role_profile_names_at_start" not in runtime
     assert runtime["host_role_catalog_status"] == lifecycle_module.HOST_ROLE_CATALOG_UNKNOWN
@@ -2468,7 +2476,7 @@ def test_role_profiles_keep_routing_and_model_choice_with_the_controller(tmp_pat
     assert "installed pinned `thaliris-run.cmd` command named by the global startup block" in " ".join(codex_adapter.MANAGED.split())
     assert "Do not choose `bootstrap-check` or `init` for normal startup" in codex_adapter.MANAGED
     assert "task_start_receipt" in codex_adapter.MANAGED
-    assert "task-start --bootstrap-receipt" in codex_adapter.MANAGED
+    assert "standalone direct `task-start --bootstrap-receipt <receipt> --authority-contract FILE_PATH` call described by the global startup block" in " ".join(codex_adapter.MANAGED.split())
     assert "managed child inside an ACTIVE task" in codex_adapter.MANAGED
     assert "do not run project bootstrap, task-start, or task-abandon" in codex_adapter.MANAGED
     assert "report blocked work honestly" in codex_adapter.MANAGED
@@ -2487,7 +2495,10 @@ def test_role_profiles_keep_routing_and_model_choice_with_the_controller(tmp_pat
     assert "Importance, file count, cross-module\nscope, number of local closures, or ordinary alternatives alone do not determine\nthe choice." in codex_adapter.MANAGED
     assert "Before choosing an opportunistic discovered slice" in codex_adapter.MANAGED
     managed = " ".join(codex_adapter.MANAGED.split())
-    assert "Use Reasoning Specialist on Sol when an independent challenge may materially change direction" in managed
+    assert "Use Reasoning Specialist when an independent challenge may materially change direction" in managed
+    assert "Default bindings above remain unchanged without an explicit constraint" in managed
+    assert "codex-install --execution-constraint luna-only" in managed
+    assert "mutable config and children cannot change this policy" in managed
     assert "framing appears coherent or an outcome is unexpected" in managed
     assert "difficulty alone is not a trigger" in managed
     assert "Automatic routing stops at Sol" in managed

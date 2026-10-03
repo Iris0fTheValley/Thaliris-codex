@@ -231,10 +231,26 @@ Focused Implementer or Reasoning Specialist before spawn, and only with current-
 user authorization. Automatic routing stops at Sol, including when uncertainty
 crosses surfaces. Each profile retains
 the same semantic role identity and does not create another role.
-These fixed profiles retain the same stable role IDs; default profiles remain
+These default profiles retain the same stable role IDs; default profiles remain
 on Luna or Sol. Per-spawn model/effort overrides are denied;
 role sessions never select their own model or effort.
-Use Reasoning Specialist on Sol when an independent challenge may materially
+Semantic role responsibilities, routing, isolation and readonly restrictions do
+not depend on execution model. Default bindings above remain unchanged without
+an explicit constraint. A dedicated Codex installation may select
+`codex-install --execution-constraint luna-only`; its ordinary profiles use
+`gpt-6-luna/xhigh` for every semantic worker role, with the same IDs and
+instructions. Each task must explicitly select `"execution_constraint":
+"luna-only"` in its authority contract. The external task anchor freezes the
+validated profile and configuration hashes; mutable config and children cannot
+change this policy. Admission compares profile and public config file snapshots
+from SessionStart; these disk observations do not prove the effective Host role
+map or CLI `-c` overrides. SubagentStart checks the Host-reported model for each
+constrained child; a missing or mismatching model leaves the handoff unbound,
+so later child tools are denied. SubagentStart cannot prevent the child model
+invocation. A fresh Host session is required after installing profiles.
+Per-spawn model/effort overrides remain denied, and Astra profiles are forbidden
+under luna-only. This is an execution constraint, not a change of role or routing.
+Use Reasoning Specialist when an independent challenge may materially
 change direction, including when the framing appears coherent or an outcome is
 unexpected; difficulty alone is not a trigger. It challenges the decision basis
 and reports its analysis without making the final decision.
@@ -493,13 +509,13 @@ block. Bootstrap confirms repository identity, checks
 existing task state, and establishes missing project definitions without
 reinstalling Host hooks or profiles. On READY or DEFINITION_READY_ACTOR_UNKNOWN,
 first create a UTF-8 JSON contract file in a separate tool call. Its non-mode
-fields are nonempty strings; `execution_mode` is `delegated`,
+fields are nonempty strings; set `execution_mode` to `delegated`,
 `controller-direct`, or `single-agent`. `--authority-contract` takes a file
-path, not inline JSON. Then use only the returned `task_start_receipt` in the
-standalone direct invocation described by the global startup block, with the
-quoted absolute contract file path. The current Hook witnesses the explicit
-Controller operation without proving native Root or human authorship.
-Never combine task-start with bootstrap or another command.
+path, not inline JSON. Then use the returned `task_start_receipt` in the
+standalone direct `task-start --bootstrap-receipt <receipt> --authority-contract FILE_PATH` call described by the global startup block, with
+the quoted absolute contract file path. Do not combine task-start with bootstrap
+or another command. The current Hook witnesses the explicit Controller
+operation without proving native Root or human authorship.
 Never manufacture a Root receipt. Ordinary work and explicit task admission
 are governed by the human instruction with Host actor assurance UNKNOWN.
 Codex 0.159.2 ThreadSpawn fields positively identify children; built-in Review

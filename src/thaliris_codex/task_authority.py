@@ -36,15 +36,28 @@ def write(root: Path, record: dict) -> None:
     _store(root).write(record)
 
 
+def _validate_contract(value: object) -> dict:
+    from . import roles
+    if isinstance(value, dict) and "execution_constraint" in value and value["execution_constraint"] not in roles.EXECUTION_CONSTRAINTS:
+        raise ValueError("UNSUPPORTED_EXECUTION_CONSTRAINT")
+    return authority.validate_contract(value)
+
+
 def contract(filename: str) -> dict:
-    return authority.validate_contract(json.loads(Path(filename).read_text(encoding="utf-8")))
+    return _validate_contract(json.loads(Path(filename).read_text(encoding="utf-8")))
 
 
 def establish(root: Path, state: dict, intent: dict, session_hash: str) -> dict:
     prior = read(root)
     if prior is not None and prior["status"] == "ACTIVE":
         raise ValueError("TASK_AUTHORITY_ALREADY_ACTIVE")
+    intent = _validate_contract(intent)
+    fields = {}
+    if intent.get("execution_constraint") is not None:
+        from . import codex_adapter
+        fields["execution_profiles"] = codex_adapter.execution_profile_snapshot(root, intent["execution_constraint"])
     return _store(root).establish(state, intent, adapter_fields={
+        **fields,
         "provenance": "CONTROLLER_ASSERTED_HUMAN_INSTRUCTION", "host_actor_assurance": "UNKNOWN",
         "origin_session_hash": session_hash, "lifecycle_sha256": "ABSENT",
         "fenced_sessions": prior.get("fenced_sessions", []) if prior else [],
@@ -62,6 +75,11 @@ def check(root: Path) -> dict | None:
     record = store.check()
     if record is None:
         return None
+    if record["contract"].get("execution_constraint") is not None:
+        from . import codex_adapter
+        constraint = _validate_contract(record["contract"])["execution_constraint"]
+        if codex_adapter.execution_profile_snapshot(root, constraint) != record.get("execution_profiles"):
+            raise ValueError("TASK_AUTHORITY_EXECUTION_PROFILES_CHANGED")
     return store.check(evidence=_evidence(root, record))
 
 

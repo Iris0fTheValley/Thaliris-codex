@@ -279,3 +279,14 @@ root prompt, delegation, native Codex child, and result. They do not invoke a mo
 block completion based on model judgment, or inject corrections into the
 Controller. Model-based intent evaluation belongs in explicit offline/debug
 work only.
+
+An explicit `execution_constraint: "luna-only"` in the authority contract
+requires a dedicated `codex-install --execution-constraint luna-only`
+installation. Core 0.4.3 retains the selected constraint as immutable intent;
+Codex validates the matching ordinary role profiles and freezes their public
+configuration hashes. The same role IDs, instructions, routing and readonly
+restrictions apply. SessionStart hashes require a fresh session, while the
+effective Host role map and CLI overrides remain UNKNOWN. Missing or
+mismatching SubagentStart models leave the child unbound with tools denied;
+the hook cannot prevent the first model invocation. Astra profiles and
+per-spawn model/effort overrides remain denied under this constraint.

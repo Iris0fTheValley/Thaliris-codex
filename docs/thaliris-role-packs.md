@@ -19,10 +19,26 @@ Host/user selection applies. The native child profiles are Investigator (`gpt-6-
 Only Controller may select static Astra medium or xhigh profiles for Focused
 Implementer or Reasoning Specialist before spawn, only with current-task user
 authorization. Automatic routing stops at Sol, including cross-surface
-uncertainty. These fixed profiles map to
+uncertainty. These default profiles map to
 the same stable roles; defaults remain on Luna or
 Sol. Per-spawn model/effort overrides are denied. Role sessions never
 override their own model or effort.
+Semantic role responsibilities, routing, isolation and readonly restrictions do
+not depend on execution model. Default bindings above remain unchanged without
+an explicit constraint. A dedicated Codex installation may select
+`codex-install --execution-constraint luna-only`; its ordinary profiles use
+`gpt-6-luna/xhigh` for every semantic worker role, with the same IDs and
+instructions. Each task must explicitly select `"execution_constraint":
+"luna-only"` in its authority contract. The external task anchor freezes the
+validated profile and configuration hashes; mutable config and children cannot
+change this policy. Admission compares profile and public config file snapshots
+from SessionStart; these disk observations do not prove the effective Host role
+map or CLI `-c` overrides. SubagentStart checks the Host-reported model for each
+constrained child; a missing or mismatching model leaves the handoff unbound,
+so later child tools are denied. SubagentStart cannot prevent the child model
+invocation. A fresh Host session is required after installing profiles.
+Per-spawn model/effort overrides remain denied, and Astra profiles are forbidden
+under luna-only. This is an execution constraint, not a change of role or routing.
 Before choosing an opportunistic discovered slice, the Controller confirms that
 each explicit user goal has been addressed, explicitly deferred, or has a
 decision-changing blocker. This is a semantic rule, not a mechanical checklist

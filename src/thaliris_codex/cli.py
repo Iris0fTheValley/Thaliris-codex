@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 from . import __version__
-from . import codex_adapter, codex_bootstrap, lifecycle, task_authority
+from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles
 from thaliris.core import TaskStateSchemaIncompatible, artifact_get, catalog, document_get, milestone_check, rollback, stale, task_artifact, task_get, task_promote, task_show, task_status, task_update
 
 
@@ -75,6 +75,7 @@ def _parser() -> argparse.ArgumentParser:
     install = sub.add_parser("codex-install", help="install stable Thaliris Host identities and hook ABI")
     install.add_argument("--executable", help="absolute Thaliris executable for Host hooks")
     install.add_argument("--sha256", help="exact SHA-256 pin for --executable")
+    install.add_argument("--execution-constraint", choices=roles.EXECUTION_CONSTRAINTS, help="install constrained execution bindings for the same semantic roles; tasks must explicitly select the matching constraint")
     sub.add_parser("codex-uninstall", help="remove only Thaliris-owned Host integration")
     q = sub.add_parser("codex-bootstrap", help="perform one-shot project-external Codex bootstrap")
     q.add_argument("--hook-attestation", help=argparse.SUPPRESS)
@@ -209,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "init": out = codex_adapter.init(root, accept_managed_instruction_sha256=args.accept_managed_instruction_sha256)
         elif args.command == "bootstrap-check": out = codex_adapter.bootstrap_check(root)
-        elif args.command == "codex-install": out = codex_adapter.codex_install(executable=args.executable, executable_sha256=args.sha256)
+        elif args.command == "codex-install": out = codex_adapter.codex_install(executable=args.executable, executable_sha256=args.sha256, execution_constraint=args.execution_constraint)
         elif args.command == "codex-uninstall": out = codex_adapter.codex_uninstall()
         elif args.command == "codex-bootstrap":
             try:

@@ -172,3 +172,14 @@ does not generate either claim. External anchors and evidence are private local
 state and must not be committed. Deleting or forging the external store through
 shared OS access is outside this governance boundary; it is not treated as an
 authenticated human decision.
+
+An explicit `execution_constraint: "luna-only"` in the authority contract
+requires a dedicated `codex-install --execution-constraint luna-only`
+installation. Core 0.4.3 retains the selected constraint as immutable intent;
+Codex validates the matching ordinary role profiles and freezes their public
+configuration hashes. The same role IDs, instructions, routing and readonly
+restrictions apply. SessionStart hashes require a fresh session, while the
+effective Host role map and CLI overrides remain UNKNOWN. Missing or
+mismatching SubagentStart models leave the child unbound with tools denied;
+the hook cannot prevent the first model invocation. Astra profiles and
+per-spawn model/effort overrides remain denied under this constraint.

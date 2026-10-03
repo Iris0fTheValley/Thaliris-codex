@@ -314,6 +314,7 @@ for _profile_name, _profile_hash in _EC1AD7B_FOCUSED_PROFILE_HASHES.items():
         | frozenset({_profile_hash})
     )
 _KNOWN_GENERATED_ROLE_PACK_HASHES = frozenset({
+    "fd5542ef501e16bc3d409f1e463e465080e1e7e0063164ce113a917ef397a95d",  # immutable 4a754d2 renderer
     "4e4a1af986df48f8c9e0e632506ef13636531dba163fa7ae7032a7d18ab2c36a",  # ec1ad7b committed generated role pack
     "4f6f4a41baedc5bc0b01fa8a37b86d3bdee2384846e260bf8f896cff12b650f4",  # e4b6975 committed generated role pack
     "7009fc69d97ca403404c57d739e354cc3ebf7656fdca690c0fd60b2cfa9f6267",  # 9b5bcf2
@@ -341,12 +342,15 @@ _KNOWN_GENERATED_ROLE_PACK_HASHES = frozenset({
 # from immutable commit b1d517f (blob 9c410a4d2af5d3780f4b415429227150d08626bd),
 # not an ownership claim derived from the current registry.
 _KNOWN_GENERATED_ROLE_REGISTRY_DOC_HASHES = frozenset({
+    "8a1393b2e175860242923d7387a6207b44fb13fc5b2900b10219458264ca3fad",  # immutable split 158690b document, independently compared with its renderer
+    "b4ed3e53315009c79bb48f3b221e8599c36a47574b90e6ba56e0e7791a2fe982",  # immutable 4a754d2 document, blob f3ed5169eb5ed53e1c3bde4445ce0c275fb64e4a
     "b55b370ac265e4802f19d4034b234d8725437ade2e286eb52d1f0c4142a04e91",
 })
 # Exact managed spans from immutable repository revisions that carried the
 # renderer equality test. A marker alone never establishes generated ownership.
 # 3485ec4 is the predecessor release, not the candidate's generated output.
 _KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES = frozenset({
+    "90c383ae48e7a0c0bac9e6f9cff5191bef01ecd901a58d8cb475570b5b42984c",  # immutable 4a754d2 renderer; not its user-edited AGENTS block
     "df7c8832a47f59fac6ba2692bb54166a629cc4bdbc4b58661582a42bc04fb152",  # e4b6975 committed managed span
     "d249d418ccf38ca3f159065715c3930d492682e93402025d067e99e2225b91fd",  # 3485ec4
     "1b1cb7331dddc504a0908af91e32fba2b72cced74af1b56007099bb088b36c56",  # a33db5b
@@ -392,8 +396,8 @@ def _agent_profile(name: str, role: str, model: str, effort: str) -> bytes:
     ).encode("utf-8")
 
 
-def _agent_profile_state(value: bytes, name: str) -> str:
-    profile = _agent_profiles().get(name)
+def _agent_profile_state(value: bytes, name: str, execution_constraint: str | None = None) -> str:
+    profile = roles.agent_profiles(execution_constraint).get(name)
     if profile is None:
         return "user"
     expected = _agent_profile(name.removesuffix(".toml"), profile[2], profile[0], profile[1])
@@ -413,14 +417,73 @@ def _host_profile_definition_present(codex_home: Path | None = None) -> str:
     if home.is_symlink() or agents.is_symlink() or not agents.is_dir():
         return "NO"
     try:
-        return "YES" if all(
+        return "YES" if any(all(
             not (agents / name).is_symlink()
             and (agents / name).is_file()
-            and _agent_profile_state((agents / name).read_bytes(), name) == "current"
-            for name in _agent_profiles()
-        ) else "NO"
+            and _agent_profile_state((agents / name).read_bytes(), name, constraint) == "current"
+            for name in roles.agent_profiles(constraint)
+        ) for constraint in (None, *roles.EXECUTION_CONSTRAINTS)) else "NO"
     except OSError:
         return "UNKNOWN"
+
+
+def execution_profile_snapshot(root: Path, constraint: str | None) -> dict:
+    """Validate the installed binding, without claiming a loaded Host catalog.
+
+    The external task anchor retains these exact public configuration bytes.
+    A child cannot switch policy through mutable installation/project files.
+    Actual native execution still requires Host rollout evidence.
+    """
+    from . import task_authority
+    home = _codex_home()
+    agents = home / "agents"
+    if any(runtime_identity._is_link(path) for path in (home, *home.parents, agents)):
+        raise ValueError("EXECUTION_PROFILE_UNSAFE_PATH")
+    project_agents = root / ".codex" / "agents"
+    if project_agents.exists() and (project_agents.is_symlink() or any(project_agents.glob("*.toml"))):
+        raise ValueError("EXECUTION_PROFILE_PROJECT_SHADOW")
+    snapshot = {"home": str(home), "files": {}}
+    for config in (home / "config.toml", root / ".codex" / "config.toml"):
+        if config.exists():
+            runtime_identity._safe_file(config)
+            value = tomllib.loads(config.read_text(encoding="utf-8"))
+            # An explicitly configured native role can override file discovery.
+            if any(isinstance(entry, dict) for entry in value.get("agents", {}).values()):
+                raise ValueError("EXECUTION_PROFILE_CONFIG_SHADOW")
+        snapshot["files"][str(config)] = task_authority.digest(config)
+    for name, (model, effort, role) in roles.agent_profiles(constraint).items():
+        target = agents / name
+        runtime_identity._safe_file(target)
+        if target.read_bytes() != _agent_profile(name.removesuffix(".toml"), role, model, effort):
+            raise ValueError("EXECUTION_PROFILE_CONSTRAINT_MISMATCH")
+        snapshot["files"][str(target)] = task_authority.digest(target)
+    return snapshot
+
+
+def _installed_execution_constraint() -> str | None:
+    agents = _codex_home() / "agents"
+    profiles = roles.agent_profiles("luna-only")
+    defaults = roles.agent_profiles()
+    distinguishing_profiles = {
+        name for name, profile in profiles.items()
+        if profile[:2] != defaults[name][:2]
+    }
+    observed_luna_profiles = 0
+    complete_luna_install = True
+    for name in profiles:
+        try:
+            current = _agent_profile_state((agents / name).read_bytes(), name, "luna-only") == "current"
+        except OSError:
+            current = False
+        observed_luna_profiles += current and name in distinguishing_profiles
+        complete_luna_install = complete_luna_install and current
+    if complete_luna_install:
+        return "luna-only"
+    if observed_luna_profiles:
+        # Do not treat a partially reverted constrained installation as an
+        # unconstrained legacy Host.  Every role must agree on one mapping.
+        raise ValueError("EXECUTION_PROFILE_CONSTRAINT_MISMATCH")
+    return None
 
 
 def _project_local_profile_files_present(root: Path) -> str:
@@ -940,10 +1003,26 @@ Focused Implementer or Reasoning Specialist before spawn, and only with current-
 user authorization. Automatic routing stops at Sol, including when uncertainty
 crosses surfaces. Each profile retains
 the same semantic role identity and does not create another role.
-These fixed profiles retain the same stable role IDs; default profiles remain
+These default profiles retain the same stable role IDs; default profiles remain
 on Luna or Sol. Per-spawn model/effort overrides are denied;
 role sessions never select their own model or effort.
-Use Reasoning Specialist on Sol when an independent challenge may materially
+Semantic role responsibilities, routing, isolation and readonly restrictions do
+not depend on execution model. Default bindings above remain unchanged without
+an explicit constraint. A dedicated Codex installation may select
+`codex-install --execution-constraint luna-only`; its ordinary profiles use
+`gpt-6-luna/xhigh` for every semantic worker role, with the same IDs and
+instructions. Each task must explicitly select `"execution_constraint":
+"luna-only"` in its authority contract. The external task anchor freezes the
+validated profile and configuration hashes; mutable config and children cannot
+change this policy. Admission compares profile and public config file snapshots
+from SessionStart; these disk observations do not prove the effective Host role
+map or CLI `-c` overrides. SubagentStart checks the Host-reported model for each
+constrained child; a missing or mismatching model leaves the handoff unbound,
+so later child tools are denied. SubagentStart cannot prevent the child model
+invocation. A fresh Host session is required after installing profiles.
+Per-spawn model/effort overrides remain denied, and Astra profiles are forbidden
+under luna-only. This is an execution constraint, not a change of role or routing.
+Use Reasoning Specialist when an independent challenge may materially
 change direction, including when the framing appears coherent or an outcome is
 unexpected; difficulty alone is not a trigger. It challenges the decision basis
 and reports its analysis without making the final decision.
@@ -1294,10 +1373,26 @@ Host/user selection applies. {_native_profile_facts()}
 Only Controller may select static Astra medium or xhigh profiles for Focused
 Implementer or Reasoning Specialist before spawn, only with current-task user
 authorization. Automatic routing stops at Sol, including cross-surface
-uncertainty. These fixed profiles map to
+uncertainty. These default profiles map to
 the same stable roles; defaults remain on Luna or
 Sol. Per-spawn model/effort overrides are denied. Role sessions never
 override their own model or effort.
+Semantic role responsibilities, routing, isolation and readonly restrictions do
+not depend on execution model. Default bindings above remain unchanged without
+an explicit constraint. A dedicated Codex installation may select
+`codex-install --execution-constraint luna-only`; its ordinary profiles use
+`gpt-6-luna/xhigh` for every semantic worker role, with the same IDs and
+instructions. Each task must explicitly select `"execution_constraint":
+"luna-only"` in its authority contract. The external task anchor freezes the
+validated profile and configuration hashes; mutable config and children cannot
+change this policy. Admission compares profile and public config file snapshots
+from SessionStart; these disk observations do not prove the effective Host role
+map or CLI `-c` overrides. SubagentStart checks the Host-reported model for each
+constrained child; a missing or mismatching model leaves the handoff unbound,
+so later child tools are denied. SubagentStart cannot prevent the child model
+invocation. A fresh Host session is required after installing profiles.
+Per-spawn model/effort overrides remain denied, and Astra profiles are forbidden
+under luna-only. This is an execution constraint, not a change of role or routing.
 Before choosing an opportunistic discovered slice, the Controller confirms that
 each explicit user goal has been addressed, explicitly deferred, or has a
 decision-changing blocker. This is a semantic rule, not a mechanical checklist
@@ -2182,6 +2277,23 @@ reports an inert retained runner for later direct cleanup or reinstall.
 After task start, follow the effective project role router.
 ## Thaliris routing and goal coverage
 
+Semantic role responsibilities, routing, isolation and readonly restrictions do
+not depend on execution model. Default bindings above remain unchanged without
+an explicit constraint. A dedicated Codex installation may select
+`codex-install --execution-constraint luna-only`; its ordinary profiles use
+`gpt-6-luna/xhigh` for every semantic worker role, with the same IDs and
+instructions. Each task must explicitly select `"execution_constraint":
+"luna-only"` in its authority contract. The external task anchor freezes the
+validated profile and configuration hashes; mutable config and children cannot
+change this policy. Admission compares profile and public config file snapshots
+from SessionStart; these disk observations do not prove the effective Host role
+map or CLI `-c` overrides. SubagentStart checks the Host-reported model for each
+constrained child; a missing or mismatching model leaves the handoff unbound,
+so later child tools are denied. SubagentStart cannot prevent the child model
+invocation. A fresh Host session is required after installing profiles.
+Per-spawn model/effort overrides remain denied, and Astra profiles are forbidden
+under luna-only. This is an execution constraint, not a change of role or routing.
+
 Investigator, Implementer, and Focused Implementer are semantic roles. Scanner
 is a nested Investigator discovery working pattern, not a separate role.
 Executor is a category covering Implementer and Focused Implementer, not a
@@ -2343,6 +2455,7 @@ def codex_install(
     codex_home: Path | None = None,
     executable: str | Path | None = None,
     executable_sha256: str | None = None,
+    execution_constraint: str | None = None,
 ) -> dict[str, object]:
     """Install stable Host integration and the global startup instruction."""
     home = _codex_home(codex_home)
@@ -2366,7 +2479,7 @@ def codex_install(
         manual.append(str(agents))
     role_writes: list[tuple[Path, bytes]] = []
     if str(agents) not in manual and home_safe:
-        for name, (model, effort, role) in _agent_profiles().items():
+        for name, (model, effort, role) in roles.agent_profiles(execution_constraint).items():
             path = agents / name
             rendered = _agent_profile(name.removesuffix(".toml"), role, model, effort)
             if path.is_symlink():
@@ -2380,7 +2493,9 @@ def codex_install(
             except OSError:
                 manual.append(str(path))
                 continue
-            state = _agent_profile_state(current, name)
+            state = _agent_profile_state(current, name, execution_constraint)
+            if state == "user" and any(_agent_profile_state(current, name, candidate) == "current" for candidate in (None, *roles.EXECUTION_CONSTRAINTS)):
+                state = "legacy"  # Exact generated alternative, never arbitrary user bytes.
             if state == "legacy":
                 role_writes.append((path, rendered))
             elif state != "current":
@@ -2597,6 +2712,7 @@ def codex_install(
         "ok": host_integration_ready and global_instruction_ready,
         "changed": changed,
         "target": str(home),
+        "execution_constraint": execution_constraint,
         "files": sorted(set(files)),
         "manual_action_required": sorted(set(manual)),
         "host_profile_definition_present": _host_profile_definition_present(home),
@@ -2759,7 +2875,10 @@ def codex_uninstall(codex_home: Path | None = None) -> dict[str, object]:
             if not path.is_file():
                 continue
             try:
-                state = _agent_profile_state(path.read_bytes(), name)
+                current = path.read_bytes()
+                state = _agent_profile_state(current, name)
+                if state == "user" and any(_agent_profile_state(current, name, constraint) == "current" for constraint in roles.EXECUTION_CONSTRAINTS):
+                    state = "current"
             except OSError:
                 manual.append(str(path))
                 continue
@@ -2966,6 +3085,24 @@ def task_start(
         return {"ok": False, "status": "CONTROLLER_BRIDGE_REQUIRED", "expected_controller_bridge_sha256": bridge["controller_bridge_sha256"], "host_instruction_activation": "UNKNOWN"}
     session_hash = lifecycle.consume_task_start_attestation(root, hook_attestation, controller_bridge_sha256,
         task_authority.digest(Path(authority_contract)) if authority_contract else None)
+    installed_constraint = _installed_execution_constraint()
+    if (intent is not None and intent.get("execution_constraint") is not None) or installed_constraint is not None:
+        profiles = execution_profile_snapshot(root, intent.get("execution_constraint") if intent else None)
+        if hook_attestation is not None:
+            observed = lifecycle._load_runtime(root / ".context" / "audit" / session_hash[:24] / "runtime.json")
+            host = observed.get(lifecycle._PROFILE_FILES_PRESENT_AT_SESSION_START, {}).get("user_host", {})
+            if host.get("directory") != str(_codex_home() / "agents") or any(
+                host.get("sha256", {}).get(name) != profiles["files"][str(_codex_home() / "agents" / name)]
+                for name in roles.agent_profiles(intent.get("execution_constraint") if intent else None)
+            ):
+                raise ValueError("EXECUTION_PROFILES_REQUIRE_FRESH_HOST_SESSION")
+            config_snapshot = observed.get(lifecycle._PROFILE_FILES_PRESENT_AT_SESSION_START, {}).get("configuration_sha256")
+            config_paths = (str(_codex_home() / "config.toml"), str(root / ".codex" / "config.toml"))
+            if not isinstance(config_snapshot, dict) or any(
+                config_snapshot.get(path) != profiles["files"].get(path)
+                for path in config_paths
+            ):
+                raise ValueError("EXECUTION_CONFIGS_REQUIRE_FRESH_HOST_SESSION")
     if hook_attestation is not None:
         catalog_status = lifecycle.role_catalog_session_status(root, session_hash)
         if catalog_status == "NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE":
@@ -3270,12 +3407,19 @@ def doctor(root: Path) -> dict[str, object]:
         definitions.append({"surface": "hook", "path": name, "expected": wanted, "actual": actual,
                             "status": "MATCH" if actual == wanted else "UNKNOWN" if actual == "UNKNOWN" else "CHANGED"})
     profiles = []
-    for name, (model, effort, role) in _agent_profiles().items():
+    try:
+        execution_constraint = _installed_execution_constraint()
+    except ValueError as exc:
+        if str(exc) != "EXECUTION_PROFILE_CONSTRAINT_MISMATCH":
+            raise
+        execution_constraint = "incoherent"
+    expected_constraint = execution_constraint if execution_constraint in roles.EXECUTION_CONSTRAINTS else None
+    for name, (model, effort, role) in roles.agent_profiles(expected_constraint).items():
         path = home / "agents" / name
         actual = path.read_bytes() if path.is_file() and not path.is_symlink() else None
         expected = _agent_profile(name.removesuffix(".toml"), role, model, effort)
         profiles.append({"surface": "profile", "path": name,
-                         "ownership": _agent_profile_state(actual, name) if actual is not None else "missing",
+                         "ownership": _agent_profile_state(actual, name, expected_constraint) if actual is not None else "missing",
                          "expected": hashlib.sha256(expected).hexdigest(),
                          "actual": hashlib.sha256(actual).hexdigest() if actual is not None else "UNKNOWN"})
     result["drift_evidence"] = {"installed_runtime": runtime_drift, "hook_definitions": definitions,
@@ -3294,6 +3438,7 @@ def doctor(root: Path) -> dict[str, object]:
     )
     result["role_registry"] = {
         "roles": list(_role_choices()),
+        "installed_execution_constraint": execution_constraint,
         "native_profiles": sorted(roles.native_profile_names()),
         "host_profile_definition_present": _host_profile_definition_present(),
         "project_local_profile_files_present": _project_local_profile_files_present(root),

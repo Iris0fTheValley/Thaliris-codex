@@ -1350,7 +1350,17 @@ def _profile_files_present_at_session_start(root: Path) -> dict[str, dict[str, o
     """Capture known Thaliris profile files in both relevant directories."""
     project_dir = root / ".codex" / "agents"
     host_dir = _host_role_profile_dir()
+    configuration_sha256: dict[str, str] = {}
+    for config in (_host_home_path() / "config.toml", root / ".codex" / "config.toml"):
+        try:
+            if any(runtime_identity._is_link(parent) for parent in (config, *config.parents)):
+                configuration_sha256[str(config)] = "UNSAFE"
+            else:
+                configuration_sha256[str(config)] = task_authority.digest(config)
+        except (OSError, ValueError):
+            configuration_sha256[str(config)] = "UNSAFE"
     return {
+        "configuration_sha256": configuration_sha256,
         "project": {
             "directory": ".codex/agents",
             "files": sorted(
@@ -1364,6 +1374,9 @@ def _profile_files_present_at_session_start(root: Path) -> dict[str, dict[str, o
                 name for name in roles.agent_profiles()
                 if (host_dir / name).is_file()
             ),
+            "sha256": {name: hashlib.sha256((host_dir / name).read_bytes()).hexdigest()
+                       for name in roles.agent_profiles()
+                       if (host_dir / name).is_file() and not (host_dir / name).is_symlink()},
         },
     }
 
@@ -2022,7 +2035,12 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
     nested = payload.get("agent_id") is not None or payload.get("agent_type") is not None
     overrides = {key: tool_input[key] for key in ("model", "reasoning_effort", "thinking", "model_reasoning_effort") if tool_input.get(key) is not None}
     if overrides:
-        return _permission_deny("THALIRIS_ROLE_MODEL_OVERRIDE: named native profiles have fixed model/effort; Controller selects an explicit exceptional xhigh profile instead.")
+        return _permission_deny("THALIRIS_ROLE_MODEL_OVERRIDE: native profiles use the installed execution binding; per-spawn model/effort overrides are denied.")
+    authority = task_authority.check(root)
+    if authority is not None and authority["contract"].get("execution_constraint") == "luna-only":
+        binding = roles.get_codex_binding(role)
+        if binding is not None and expected_agent_type != binding.native_profile:
+            return _permission_deny("THALIRIS_EXECUTION_CONSTRAINT: luna-only permits only the ordinary semantic role profiles.")
     target_binding = roles.get_codex_binding(role)
     if nested and target_binding is not None and expected_agent_type == target_binding.exceptional_native_profile:
         return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exceptional profiles are Controller-only.")
@@ -2189,23 +2207,35 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
             return False
         path = _lifecycle_path(root, task_id)
         state = _load_lifecycle(path, task_id)
-        if task_authority.check(root) is None and active_controller_owner(root, task_id) != session_id_hash:
+        authority = task_authority.check(root)
+        if authority is None and active_controller_owner(root, task_id) != session_id_hash:
             return False
         state["sequence"] = int(state.get("sequence", 0)) + 1
         child_hash = _identity_hash(agent_id)
         children = state["children"]
         pending = state["pending_authorized_spawn"]
+        constrained_model_status = None
+        observed_model = payload.get("model")
+        if authority is not None and authority["contract"].get("execution_constraint") == "luna-only":
+            binding = roles.get_codex_binding(role)
+            expected_model = roles.agent_profiles("luna-only")[binding.profile_filename][0]
+            constrained_model_status = (
+                "MISSING" if not isinstance(observed_model, str) or not observed_model
+                else "MATCH" if observed_model == expected_model
+                else "MISMATCH"
+            )
         authorized = (
             isinstance(pending, dict)
             and pending.get("role") == role
             and pending.get("expected_agent_type") == native_agent_type
             and pending.get("session_id_hash") == session_id_hash
             and _pending_parent_live(state, pending)
+            and constrained_model_status in {None, "MATCH"}
         )
         prior = next((item for item in children if item.get("agent_id_hash") == child_hash), None)
         bound = authorized and prior is None
         if prior is None:
-            children.append({
+            child_record = {
                 "agent_id_hash": child_hash,
                 "agent_type": native_agent_type,
                 "session_id_hash": session_id_hash,
@@ -2224,7 +2254,15 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "native_terminal_status": None,
                 "task_name_hash": pending.get("task_name_hash") if bound else None,
                 **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")},
-            })
+            }
+            if constrained_model_status is not None:
+                # SubagentStart is a Host observation. A failed check leaves
+                # the child unbound, so its first PreToolUse is denied by the
+                # existing exact-child guard and the spawn reservation stays
+                # pending for Controller recovery.
+                child_record["execution_constraint_model_status"] = constrained_model_status
+                child_record["execution_constraint_model"] = observed_model if isinstance(observed_model, str) else None
+            children.append(child_record)
             if bound:
                 state["pending_authorized_spawn"] = None
         else:

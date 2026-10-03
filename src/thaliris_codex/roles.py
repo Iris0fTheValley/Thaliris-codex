@@ -689,13 +689,23 @@ def native_profile_names() -> frozenset[str]:
     return frozenset(native_agent_roles())
 
 
-def agent_profiles() -> dict[str, tuple[str, str | None, str]]:
+EXECUTION_CONSTRAINTS = ("luna-only",)
+
+
+def agent_profiles(execution_constraint: str | None = None) -> dict[str, tuple[str, str | None, str]]:
+    if execution_constraint is not None and execution_constraint not in EXECUTION_CONSTRAINTS:
+        raise ValueError("UNSUPPORTED_EXECUTION_CONSTRAINT")
     values = {
         binding.profile_filename: (binding.model, binding.reasoning_effort, role)
         for role in role_choices()
         for binding in (get_codex_binding(role),)
         if binding is not None and binding.generated_profile and binding.profile_filename is not None
     }
+    if execution_constraint == "luna-only":
+        # Change execution only: semantic identity, instructions and privileges
+        # continue to come from the same registration. Exceptional profiles
+        # retain their meaning and are forbidden by this task constraint.
+        values = {name: ("gpt-6-luna", "xhigh", role) for name, (_, _, role) in values.items()}
     for binding in iter_codex_bindings():
         if binding.generated_profile and binding.astra_medium_native_profile:
             values[f"{binding.astra_medium_native_profile}.toml"] = ("gpt-6-astra", "medium", binding.role_id)
@@ -743,7 +753,7 @@ def render_registry_document() -> bytes:
         "",
         "This file is generated from `thaliris_codex.roles.ROLE_REGISTRY`; design and routing guidance remains hand-maintained in `thaliris-role-packs.md`.",
         "",
-        "| Role | Model | Reasoning | Native profile | Repo writes | Delegation | Controller-state mutation | Install metadata |",
+        "| Role | Default model | Default reasoning | Native profile | Repo writes | Delegation | Controller-state mutation | Install metadata |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for role in role_choices():

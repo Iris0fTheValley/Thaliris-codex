@@ -3,7 +3,7 @@
 
 This file is generated from `thaliris_codex.roles.ROLE_REGISTRY`; design and routing guidance remains hand-maintained in `thaliris-role-packs.md`.
 
-| Role | Default model | Default reasoning | Native profile | Repo writes | Delegation | Controller-state mutation | Install metadata |
+| Role | Model | Reasoning | Native profile | Repo writes | Delegation | Controller-state mutation | Install metadata |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `controller` | `(host/user)` | `(host/task)` | `(root)` | NO | registered native roles | YES | `(not generated)` |
 | `investigator` | `gpt-6-luna` | `xhigh` | `thaliris-investigator` | YES | NO | NO | `thaliris-investigator.toml` |
