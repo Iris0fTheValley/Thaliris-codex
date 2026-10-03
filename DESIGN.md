@@ -1,0 +1,221 @@
+# Thaliris Architecture
+
+## Principle
+
+**Models own semantics. The mechanical layer executes model decisions.**
+
+Core is not a semantic decision engine. It does not decide relevance,
+importance, correctness, role applicability, task completion, or whether changed
+evidence invalidates a conclusion.
+
+Core provides durable records, identities, revisions and compare-and-swap,
+atomic writes and rollback, provenance, objective freshness observations,
+Artifact addressing, task-surface observations, and explicit retrieval.
+
+The Codex adapter also preserves explicitly selected human task intent in an
+external governance anchor. Root identity and human prompt authorship remain
+UNKNOWN; explicit task selection is a semantic Controller decision, not a
+UserPromptSubmit inference. Continuation survives session/daemon interruption.
+Known children, readonly and fenced actors cannot alter authority. Explicit
+Controller-direct and single-agent modes override the default role split;
+absent an explicit override, existing routing remains. See
+[Persistent task authority](docs/thaliris-task-authority.md) for the contract,
+recovery, security baseline and shared-OS limitations.
+
+## Production information flow
+
+```text
+Controller
+    │
+    │ explicit task + selected information
+    ▼
+Investigator / Curator / Reasoning Specialist / Implementer / Focused Implementer / Reviewer
+    │
+    ├── private working set
+    ├── optional detailed Artifact
+    │
+    └── distilled result
+            │
+            ▼
+        Controller
+            │
+            └── decides the next handoff
+```
+
+The only adjacent mechanisms are the Task Ledger, Artifact Store, Explicit
+Retrieval, and Native Lifecycle.
+
+There is no production path from task state through a Core-generated role
+projection into a role session. There is no hidden model auditor that corrects or
+blocks the Controller.
+
+## Responsibility boundaries
+
+### Controller
+
+For every task, whether ACTIVE or degraded, the Controller selects the minimum
+necessary fresh roles. Roles are capabilities, not mandatory workflow stages.
+A straightforward, bounded, low-risk task with confirmed facts may go from the
+Controller directly to a fresh Implementer and then finish. The Implementer may
+perform bounded local reading, implementation, and deterministic verification.
+Decision-changing investigation belongs to Investigator; Reviewer, Curator,
+and Reasoning Specialist are selected only when they add real value, and
+Reviewer is not a default gate.
+
+Implementer and Focused Implementer own implementation decisions and focused
+working sets. They and Reviewer may delegate broad mechanical investigation
+to Investigator/Scanner, at maximum managed depth two with one active Scanner.
+Scanner results belong to the requesting parent; architecture decisions stay
+with the Executor/Controller. Reasoning Specialist reframes ill-defined
+problems. Verifier is read-only compatibility, not a recommended stage.
+
+The Controller writes each native handoff, chooses the information in that
+handoff, interprets results and observations, accepts or rejects conclusions,
+and decides when the task is complete.
+
+An INVALID_STATE task state degrades the mechanical guard to a strict
+blacklist: it denies direct, recognized Controller-owned Thaliris task and
+lifecycle mutations and obvious writes to `.context/state.json` or lifecycle
+state. Unknown tools, coordination, diagnostics, and reads remain transparent.
+This does not prove managed enforcement. Damaged managed state does not
+transfer Investigator or Implementer duties to Root. If those roles are
+unavailable, Root may diagnose the managed failure, read the evidence needed
+for that diagnosis, coordinate, and report; it does not take over substantial
+repository investigation, implementation, or testing.
+
+Routing, categorizing, and status labels in task records are model-authored.
+Core does not attach behavior to them.
+
+### Role sessions
+
+Each role session receives task-specific information only from its authorized parent's explicit
+native spawn message. Repository reads, search results, test output, logs, and
+intermediate exploration stay in its private working set.
+
+The default return is a distilled result: conclusion, key findings,
+decision-changing unknowns, contradictions if any, verification performed, and
+optional Artifact references. These are prompt conventions, not Core schema
+authority.
+
+Exact parent agent/session/turn/role identity authorizes the unique nested
+reservation. The matching Start binds the Scanner's own identity. One live
+managed Codex CLI `0.155.0-alpha.9.2` probe verified that reservation, Start,
+and bound Scanner PreToolUse acceptance at depth two; the Scanner result
+returned and the Focused parent continued. See the [durable probe evidence](docs/codex-nested-scanner-live-20260925.md).
+This scoped probe does not establish raw Host wire-byte equality, behavior on
+other Host builds or Desktop scenarios, or native child `Completed`/`task-close`
+completion; those remain UNKNOWN. Missing or conflicting identity still fails
+closed. The flat lifecycle ledger remains bounded, not an arbitrary tree.
+Task-close selects the last Controller-direct handoff and rejects pending or
+active descendants. Stable role and historical producer IDs do not change.
+
+Curator is an optional ordinary role session. Reviewer classifications are ordinary
+model output. Neither role activates a Core workflow state machine.
+
+### Core
+
+The task ledger stores bounded records with identity, model-authored kind and
+status labels, text, producer, revision, source references, and optional
+supersession references. Core validates schema and reference integrity only.
+
+It does not implement semantic transitions such as resolve, reopen,
+adjudicate, revalidation, correction routing, snapshot coverage, or epistemic
+promotion.
+
+### Codex adapter
+
+The adapter handles fresh native spawn isolation, authorized serial native Codex child
+lifecycle, handoff identity/hash binding, SubagentStart/Stop identity,
+missing-stop reconciliation, Reviewer developer instructions plus an
+obvious-write guard, and explicit blocking wait normalization. The current
+stable Host does not provide an independent role-level read-only sandbox.
+
+`SubagentStart` is lifecycle-only. It never constructs a context packet and never
+returns task-specific `additionalContext`.
+
+## Mechanical objects
+
+### Handoff
+
+The native spawn message carries the content. The adapter records only bounded
+metadata such as handoff ID, task ID/revision, role, producer, payload hash, and
+creation time. This proves which explicit handoff was bound to a native Codex child without
+creating a second knowledge system.
+
+### Artifact
+
+An Artifact is external memory addressed by ID and repo-relative path. Its
+record stores producer, task/revision identity, content hash, creation time,
+source references, and optional supersession.
+
+Core never reads an Artifact body for automatic propagation and never changes
+workflow from its contents. The Controller explicitly retrieves any body and
+selects any content placed in a later handoff.
+
+Freshness is an objective observation: `FRESH`, `PARTIAL`, `RECORDED`,
+`CHANGED`, `MISSING`, or `UNKNOWN`. It never mutates a task record or model
+conclusion.
+
+### Memory and milestones
+
+Memory is explicit storage and retrieval. The model maintains the directory
+tree and its canonical `.agent-memory/INDEX.md` and `.milestones/INDEX.md`
+maps; Core imposes no taxonomy and does not recursively scan the filesystem to
+derive another catalog. `document-get`
+returns only 1–8 Controller-selected paths under one total response bound.
+Status is a bounded record label. Legacy metadata is preserved as opaque
+compatibility data, not propagation permissions or semantic gates.
+
+SessionStart points Root only to the two root INDEX paths; it does not inject
+their bodies. Before a managed task, the Controller explicitly reads that
+navigation. The maps may point directly to deep leaves so normal retrieval
+needs one explicit call; they do not select relevant content. ACTIVE Root
+uses an explicit runtime-command allow-set, bounded `task-status`, and
+single-object `task-get`; `init`, `uninstall`, `rollback`, another `task-start`,
+and full `task-show` are blocked.
+
+Milestones are ordinary long-lived documents. Core does not inject them into
+role context or treat them as semantic authority.
+
+`task-promote` stores exactly the Controller-selected record at the explicit
+`.agent-memory/**.md` path chosen by the Controller, with identity and source
+references. It does not classify by document metadata or decide whether
+evidence makes that record legitimate. Models may create, edit, move, split,
+merge, or delete durable documents through normal repository changes; INDEX
+validation reports broken references without choosing a replacement.
+
+### Verification and task surface
+
+Verification records command/tool identity, outcome, candidate identity,
+observed files, timestamp, and result hash. These are observations. Core does
+not decide whether testing is sufficient and does not use verification as a
+semantic task-close gate.
+
+Task start records Git HEAD and dirty-surface identities. Later reads expose
+before, after, and delta. Core does not attribute ownership or block close based
+on that delta.
+
+## Retained guarantees
+
+- Git-native persistence
+- task, native Codex child, handoff, and Artifact identity
+- revision/CAS
+- lock, atomic write, backup, and safe rollback
+- Artifact content hash, provenance, history, and supersession references
+- `fork_turns="none"` and fresh Investigator, Curator, Reasoning Specialist, Implementer, and Reviewer lifecycles
+- authorized serial spawn
+- SubagentStart/Stop identity binding
+- bounded missing-stop reconciliation
+- explicit native blocking wait, only with a pending dependency
+- explicit `catalog` and exact-path `document-get` retrieval and Artifact addressing
+- Reviewer developer instruction and obvious-write guard
+- mechanical candidate and task-surface identity
+- adapter/hook/lifecycle diagnostics
+
+## Benchmark boundary
+
+`benchmarks/abcd/` may implement formal collectors, scoring, and offline
+evaluation. Production `thaliris` does not import or provide D11 authority
+registries, formal capture authority, or benchmark receipt issuers. Benchmark
+requirements observe production behavior; they do not define production
+architecture.

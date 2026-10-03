@@ -1,0 +1,144 @@
+{
+  "archive_kind": "historical source and patch evidence",
+  "active_runtime": false,
+  "source_commit": "2bbc7b405a61e82bbf0436290e213d1aaf0ada89",
+  "commit_series": [
+    {
+      "commit": "d7469edbae3ce01338c8924795a0bab97fcd219e",
+      "parents": [
+        "a82723bb03fdf41e0a9ca4a04903c99747a2017d"
+      ],
+      "author_name": "Iris0fTheValley",
+      "authored_at": "2026-09-26T12:20:33+08:00",
+      "subject": "Fix Thaliris admission attestation"
+    },
+    {
+      "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+      "parents": [
+        "d7469edbae3ce01338c8924795a0bab97fcd219e"
+      ],
+      "author_name": "Iris0fTheValley",
+      "authored_at": "2026-09-26T13:48:06+08:00",
+      "subject": "Deliver PostToolUse admission proof"
+    },
+    {
+      "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+      "parents": [
+        "fd4fba36b6794871ac048d89c09352a3e015d460"
+      ],
+      "author_name": "Iris0fTheValley",
+      "authored_at": "2026-09-26T18:27:28+08:00",
+      "subject": "Migrate b218783 generated profiles"
+    },
+    {
+      "commit": "2bbc7b405a61e82bbf0436290e213d1aaf0ada89",
+      "parents": [
+        "40fd5f2bcb928f8f9443b01389168f6a1b8e3054"
+      ],
+      "author_name": "Iris0fTheValley",
+      "authored_at": "2026-09-26T22:43:08+08:00",
+      "subject": "Record profile byte observations and wait payload evidence"
+    }
+  ],
+  "patches": [
+    {
+      "path": "patches/0001-Fix-Thaliris-admission-attestation.patch",
+      "sha256": "1ceacaf9a8b766fbef2cbdf2f8e1310565afcc74f9ba5884648cfc56ed2b7bff",
+      "bytes": 101968
+    },
+    {
+      "path": "patches/0002-Deliver-PostToolUse-admission-proof.patch",
+      "sha256": "cde9b2ef2e928d63050bb16e82dbc84808e467f4d8348744344e58f56caadc9e",
+      "bytes": 37672
+    },
+    {
+      "path": "patches/0003-Migrate-b218783-generated-profiles.patch",
+      "sha256": "879e7a9f8352151419eeb02bd9c610c726b408b06ae25f4d2d972298403e4827",
+      "bytes": 5090
+    },
+    {
+      "path": "patches/0004-Record-profile-byte-observations-and-wait-payload-ev.patch",
+      "sha256": "838d69f23e3f93e841e17c338dbc2e7c4a5cd29749baf667ffb69ef907d99e18",
+      "bytes": 26754
+    }
+  ],
+  "source_snapshot": [
+    {
+      "source_path": "src/thaliris/codex_adapter.py",
+      "snapshot_path": "source-snapshot/src/thaliris/codex_adapter.py",
+      "git_blob": "be06460e14139b0e1b356de4419f9d0ca7045e4b",
+      "sha256": "5b0dd72ff102f4dc9ddc53a0a6e5bc4b1819e376c402d9c820f035a60118ce22",
+      "bytes": 114629
+    },
+    {
+      "source_path": "src/thaliris/lifecycle.py",
+      "snapshot_path": "source-snapshot/src/thaliris/lifecycle.py",
+      "git_blob": "4d01a0513f0806bb9eae755bc08205191b34ac9a",
+      "sha256": "c074f0e263e014b9ab5a0b498887b260e6ef284026e2a46ce5c423f4b1bd537b",
+      "bytes": 125813
+    },
+    {
+      "source_path": "src/thaliris/roles.py",
+      "snapshot_path": "source-snapshot/src/thaliris/roles.py",
+      "git_blob": "2e092e2e9293c6b51897a83e8b5de9d8326b2225",
+      "sha256": "5f352a737cb3c1702758dc8c8385ca8fdc3a27ac05752d955090f4011b737373",
+      "bytes": 33571
+    },
+    {
+      "source_path": "tests/test_single_handoff.py",
+      "snapshot_path": "source-snapshot/tests/test_single_handoff.py",
+      "git_blob": "a6ab9ee14825b638e7c8ad715e89d177a3242c82",
+      "sha256": "9a6d2c7f35b381955a12c7b7c4ae386321e0b2f2128d88945f170098a4161667",
+      "bytes": 116732
+    },
+    {
+      "source_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+      "snapshot_path": "source-snapshot/.codex/agents/thaliris-focused-implementer-astra-medium.toml",
+      "git_blob": "197889999d829d301fd47b9eb48b3f64e0326680",
+      "sha256": "91e423f5640a2936216e24e2c1c1d3de5f0609c6133f399f1bcdffa202bfc369",
+      "bytes": 4230
+    },
+    {
+      "source_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+      "snapshot_path": "source-snapshot/.codex/agents/thaliris-focused-implementer-xhigh.toml",
+      "git_blob": "148b6a0a1a7e8bea1caad42f7a5a6b25cb0658a4",
+      "sha256": "8640467871d3c841dbad4d84df88d6d5c560bb7958eb8427fdaf7a0bd3c0f64e",
+      "bytes": 4222
+    },
+    {
+      "source_path": ".codex/agents/thaliris-focused-implementer.toml",
+      "snapshot_path": "source-snapshot/.codex/agents/thaliris-focused-implementer.toml",
+      "git_blob": "2d9dba9e18f6e0c7d3a37d629f60247573ece05d",
+      "sha256": "d4e8399c78f22ccf0a41b63a1b9cb5878b41e5a9e57be66494948739545c1335",
+      "bytes": 4213
+    },
+    {
+      "source_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+      "snapshot_path": "source-snapshot/.codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+      "git_blob": "662580116f54d1fa23422f71638496b505cf67da",
+      "sha256": "b18c9d7439d8f26c8c858e5ab91214d74c2433636ee42aa64ab6c72d1070845a",
+      "bytes": 1885
+    },
+    {
+      "source_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+      "snapshot_path": "source-snapshot/.codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+      "git_blob": "3343610386068358ffffb54bc409f5e9b22161da",
+      "sha256": "edfde7a10c6a6b095db0e3f78d1412c1e3f21594e24121931eff12bd877c80be",
+      "bytes": 1877
+    },
+    {
+      "source_path": ".codex/agents/thaliris-verifier.toml",
+      "snapshot_path": "source-snapshot/.codex/agents/thaliris-verifier.toml",
+      "git_blob": "cac377fe4267626ab44a1f5bbc98494104837fda",
+      "sha256": "5f422419b0b83d25e967ec0b0f2f50f7b56abd5b322595ffb1bfb0ba001884eb",
+      "bytes": 2897
+    }
+  ],
+  "legacy_generated_profile_hashes": {
+    "thaliris-focused-implementer-astra-medium.toml": "e22136925d2bcaed111c687c47a8de1464014427a6c8bbed7e1021076bd20d8a",
+    "thaliris-focused-implementer-xhigh.toml": "1f4311da03a5ee0185253156c3510ed3c2855f0a8091a4699a80b1ebe7b9ca9a",
+    "thaliris-focused-implementer.toml": "a929ec5bbbb748a880a95fea40aec4de05b225269e70473937c9deee3411608a",
+    "thaliris-reviewer.toml": "4b1593d4269bccd7e86da5fabaa129f9da431302e072469e60f273abb36a05a0"
+  },
+  "scope_note": "Profile hashes above are historical generated-ownership identities. The archived lifecycle and adapter sources separately snapshot the then-current known profile filenames and bytes at SessionStart."
+}

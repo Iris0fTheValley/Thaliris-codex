@@ -1,0 +1,3954 @@
+"""Codex hook adapter for mechanical lifecycle, delivery, and telemetry."""
+from __future__ import annotations
+
+import hashlib
+import base64
+import json
+import os
+import ntpath
+from pathlib import Path
+import re
+import secrets
+import shlex
+import shutil
+import subprocess
+import time
+import uuid
+from typing import Any
+
+from thaliris import core
+
+from . import roles, runtime_identity, host_preflight, task_authority
+
+HOOK_COMMAND_PREFIX = "thaliris audit-hook"
+HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop")
+CODEX_ADAPTER_PROTOCOL_VERSION = 9
+# This literal travels in installed command bytes. An old Host registration
+# invoking a newer executable cannot manufacture the current hook ABI.
+MANAGED_HOOK_ABI = "thaliris-hook-abi-10"
+HOST_HOOK_SCRIPT_NAME = "thaliris-hook.cmd"
+HOST_RUN_SCRIPT_NAME = "thaliris-run.cmd"
+HOST_PREFLIGHT_SCRIPT_NAME = host_preflight.NAME
+PROJECT_ACTIVATION_MARKER = ".codex\\thaliris.json"
+# Private adapter lifecycle state. This is deliberately separate from Core
+# state/schema and records only bounded native child provenance.
+LIFECYCLE_STATE_VERSION = 12
+MANAGED_HOOKS_DESCRIPTION = "Thaliris managed lifecycle hooks"
+MAX_RAW_RECORDS = 64
+THALIRIS_EXECUTABLE_ENV = "THALIRIS_EXECUTABLE"
+THALIRIS_EXECUTABLE_SHA256_ENV = "THALIRIS_EXECUTABLE_SHA256"
+THALIRIS_RUNTIME_SHA256_ENV = "THALIRIS_RUNTIME_SHA256"
+# Older pin names remain readable only as a configuration compatibility aid.
+CONTEXT_EXECUTABLE_ENV = "THALIRIS_CONTEXT_EXECUTABLE"
+CONTEXT_EXECUTABLE_SHA256_ENV = "THALIRIS_CONTEXT_EXECUTABLE_SHA256"
+_COLLABORATION_TOOL_NAMES = (
+    "spawn_agent",
+    "Agent",
+    "followup_task",
+    "send_input",
+    "send_message",
+    "list_agents",
+    "wait_agent",
+    "interrupt_agent",
+)
+_COLLABORATION_TOOL_PATTERN = "(?:" + "|".join(re.escape(name) for name in _COLLABORATION_TOOL_NAMES) + ")"
+# Keep legacy spellings observable for diagnostics, but do not confuse them
+# with the only current Codex stable shell hook surface.  In particular, an
+# ``exec`` payload from another runtime must never reach Core's trusted ingress.
+_OBSERVED_EXECUTION_TOOL_NAMES = ("Bash", "Shell", "exec", "exec_command", "command_execution", "functions.exec_command")
+_TRUSTED_CODEX_SHELL_TOOL_NAMES = ("Bash",)
+_CONTROLLER_EXECUTION_TOOL_NAMES = _OBSERVED_EXECUTION_TOOL_NAMES
+_CONTROLLER_EXECUTION_TOOL_PATTERN = "(?:" + "|".join(re.escape(name) for name in _OBSERVED_EXECUTION_TOOL_NAMES) + ")"
+
+def _native_agent_roles() -> dict[str, str]:
+    """Return exact generated native identities from the role registry."""
+    return roles.native_agent_roles()
+
+
+def _native_role_names() -> str:
+    """Return registry-derived names for mechanical denial diagnostics."""
+    names = [
+        spec.id.replace("-", " ").title()
+        for role in roles.role_choices()
+        for spec in (roles.get_role(role),)
+        for binding in (roles.get_codex_binding(role),)
+        if spec is not None and binding is not None and binding.native_profile is not None
+    ]
+    if len(names) <= 1:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + ", and " + names[-1]
+
+
+# Compatibility alias for existing adapter callers. Runtime checks use the
+# accessor so registry additions do not require lifecycle edits.
+_NATIVE_AGENT_ROLES = _native_agent_roles()
+_CONTROLLER_MUTATION_TOOL_NAMES = ("apply_patch", "file_change", "functions.apply_patch", "functions.file_change")
+_CONTROLLER_MUTATION_TOOL_PATTERN = "(?:" + "|".join(re.escape(name) for name in _CONTROLLER_MUTATION_TOOL_NAMES) + ")"
+_CHILD_CONTROL_MUTATION_ACTIONS = frozenset({
+    "write", "edit", "update", "replace", "patch", "append", "create", "delete", "remove",
+    "move", "rename", "copy",
+})
+# Codex 0.146 Multi-Agent V2 exposes both dotted names and flattened
+# `collaboration<tool>` names to hooks. Keep execution surfaces explicit too:
+# a PostToolUse callback is the only possible completion observation.
+POST_TOOL_MATCHER = rf"^(?:{_COLLABORATION_TOOL_PATTERN}|(?:[A-Za-z0-9_]+\.)+{_COLLABORATION_TOOL_PATTERN}|collaboration{_COLLABORATION_TOOL_PATTERN}|{_CONTROLLER_EXECUTION_TOOL_PATTERN})$"
+# Codex 0.154 routes local function tools through this hook surface. Managed
+# policy therefore starts from a transparent NO_TASK state and an explicit
+# ACTIVE allow-set instead of attempting to enumerate dangerous tool names.
+PRE_TOOL_MATCHER = "*"
+_DELEGATION_TOOL_NAMES = frozenset({"spawn_agent", "Agent", "followup_task", "send_input", "send_message"})
+_FRESH_CHILD_REUSE_TOOL_NAMES = frozenset({"followup_task", "send_input", "send_message"})
+_ROOT_MANAGED_TOOL_NAMES = frozenset({"spawn_agent", "wait_agent", "list_agents", "interrupt_agent"})
+_CONTROLLER_BOUNDARY_REASON = "THALIRIS_CONTROLLER_BOUNDARY: delegate investigation to a fresh Investigator session and edits to a fresh Implementer session; the Controller may run only bounded control-plane or acceptance checks."
+_OBVIOUS_WRITE = re.compile(
+    r"(?i)(?:apply_patch|git\s+(?:apply|commit|reset|checkout|restore|rebase)|(?:set|add|clear|out|remove|move|copy|rename|new)-content|(?:set|add|remove|move|copy|rename|new)-item|\b(?:ni|mkdir)\b|(?<![<>])>{1,2}(?![&]))"
+)
+_COMMAND_SEPARATOR = re.compile(r"(?:\r?\n|&&|\|\||\||&|;)")
+_CONTEXT_OPERATIONS = frozenset({
+    "task-recover-authority",
+    "init", "codex-bootstrap", "codex-install", "codex-uninstall", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
+    "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
+    "task-status", "task-get", "artifact-get", "catalog", "document-get",
+    "task-artifact", "task-close", "task-promote", "recover-pending-spawn", "rollback", "version",
+})
+_ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
+    "task-recover-authority",
+    "codex-bootstrap", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
+    "catalog", "document-get", "task-artifact", "task-close", "task-promote",
+    "recover-pending-spawn", "task-abandon", "version",
+})
+_CHILD_CONTEXT_READS = frozenset({
+    "task-show", "task-status", "stale",
+    "memory-status", "milestone-check", "task-get", "artifact-get", "catalog",
+    "document-get",
+})
+_CHILD_CONTEXT_MUTATIONS = frozenset({
+    "task-recover-authority",
+    "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
+    "recover-pending-spawn", "rollback", "init", "uninstall", "codex-uninstall",
+})
+_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.context[\\/](?:state\.json|audit[\\/](?:lifecycle|external-recovery|abandoned)(?:[\\/][^\s\"']+)?))")
+_DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
+_START_ATTESTATION_TTL_NS = 120 * 1_000_000_000
+
+# Role filenames visible on disk are configuration observations only.  The
+# current Codex hook payload has no native role-catalog observation, so the
+# catalog status remains UNKNOWN unless a future Host contract supplies one.
+HOST_ROLE_CATALOG_OBSERVED = "HOST_ROLE_CATALOG_OBSERVED"
+HOST_ROLE_CATALOG_UNKNOWN = "HOST_ROLE_CATALOG_UNKNOWN"
+NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE = "NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE"
+_PROFILE_FILES_PRESENT_AT_SESSION_START = "profile_files_present_at_session_start"
+_HOST_ROLE_CATALOG_STATUS = "host_role_catalog_status"
+def hook_spec() -> dict[str, Any]:
+    """Return the exact managed hooks fragment; callers merge it conservatively."""
+    hooks: dict[str, list[dict[str, Any]]] = {}
+    prefix = _hook_command_prefix()
+    for event in HOOK_EVENTS:
+        handler: dict[str, Any] = {"type": "command", "command": f"{prefix} {event} --managed-hook-abi {MANAGED_HOOK_ABI}", "timeout": 60}
+        entry: dict[str, Any] = {"hooks": [handler]}
+        if event == "PostToolUse":
+            # Codex treats a matcher made only of word characters and `|` as
+            # an exact-name set.  Regex anchors and escaping deliberately opt
+            # into regex semantics for the MultiAgentV2 namespaced tools.
+            entry["matcher"] = POST_TOOL_MATCHER
+        elif event == "PreToolUse":
+            entry["matcher"] = PRE_TOOL_MATCHER
+        hooks[event] = [entry]
+    return {"hooks": hooks}
+
+
+def managed_hook_spec_hash() -> str:
+    """Fingerprint the logical managed fragment, not a local executable path."""
+    logical = hook_spec()
+    hooks = logical.get("hooks")
+    if isinstance(hooks, dict):
+        for event, entries in hooks.items():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                    continue
+                for handler in entry["hooks"]:
+                    if isinstance(handler, dict) and handler.get("type") == "command":
+                        handler["command"] = f"{HOOK_COMMAND_PREFIX} {event} --managed-hook-abi {MANAGED_HOOK_ABI}"
+    encoded = json.dumps(logical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _managed_handler(event: str) -> dict[str, Any]:
+    return {"type": "command", "command": f"{_hook_command_prefix()} {event} --managed-hook-abi {MANAGED_HOOK_ABI}", "timeout": 60}
+
+
+def _v041_runtime_validator_encoded() -> str:
+    """Return the platform preflight used by every installed runtime entrypoint."""
+    validator = r'''
+$ErrorActionPreference = 'Stop'
+function FileHash($path) {
+  $stream = [IO.File]::OpenRead($path)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+  finally { $stream.Dispose(); $sha.Dispose() }
+}
+try {
+  $manifestPath = $env:THALIRIS_INSTALL_MANIFEST
+  $expectedIdentity = $env:THALIRIS_RUNTIME_SHA256
+  $exe = $env:THALIRIS_EXECUTABLE
+  if ($expectedIdentity -cnotmatch '^[0-9a-f]{64}$') { throw 'identity' }
+  if ((FileHash $manifestPath) -cne $expectedIdentity) { throw 'manifest hash' }
+  $m = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($m.format -cne 'thaliris-installed-runtime-v1' -or $m.executable -cne $exe) { throw 'manifest shape' }
+  if ($m.executable_sha256 -cnotmatch '^[0-9a-f]{64}$' -or $m.package_dir -isnot [string] -or $m.venv_dir -isnot [string]) { throw 'manifest fields' }
+  if ((FileHash $exe) -cne $m.executable_sha256) { throw 'launcher hash' }
+  foreach ($path in @($exe, $m.package_dir, $m.venv_dir)) {
+    $item = Get-Item -LiteralPath $path
+    while ($null -ne $item) {
+      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'linked runtime path' }
+      $item = $item.Parent
+    }
+  }
+  $venv = (Get-Item -LiteralPath $m.venv_dir).FullName
+  if (-not (Test-Path -LiteralPath $venv -PathType Container)) { throw 'venv directory' }
+  if (-not $exe.StartsWith($venv + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'launcher outside venv' }
+  if (-not $m.package_dir.StartsWith($venv + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'package outside venv' }
+  $expected = @{}
+  foreach ($entry in $m.files.PSObject.Properties) {
+    $name = $entry.Name
+    if ($name -match '(^|/)\.\.?(/|$)|\\|^/|:' -or $entry.Value -cnotmatch '^[0-9a-f]{64}$') { throw 'file entry' }
+    $expected[$name] = $entry.Value
+  }
+  if (-not $expected.ContainsKey('pyvenv.cfg')) { throw 'venv files' }
+  $seen = @{}
+  foreach ($item in (Get-ChildItem -LiteralPath $venv -Recurse -Force)) {
+    $relative = $item.FullName.Substring($venv.Length).TrimStart('\').Replace('\','/')
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'linked runtime member' }
+    if ($item.PSIsContainer) { continue }
+    if (-not $expected.ContainsKey($relative)) { throw 'extra runtime file' }
+    if ((FileHash $item.FullName) -cne $expected[$relative]) { throw 'runtime hash' }
+    $seen[$relative] = $true
+  }
+  if ($seen.Count -ne $expected.Count) { throw 'missing runtime file' }
+  $config = Get-Content -LiteralPath (Join-Path $venv 'pyvenv.cfg') -Raw -Encoding UTF8
+  if ($config -notmatch '(?im)^\s*include-system-site-packages\s*=\s*false\s*$') { throw 'system site packages' }
+  foreach ($pth in (Get-ChildItem -LiteralPath $venv -Recurse -Force -Filter '*.pth' -File)) {
+    foreach ($line in (Get-Content -LiteralPath $pth.FullName -Encoding UTF8)) {
+      if ($line.Trim() -and -not $line.TrimStart().StartsWith('#')) { throw 'external .pth path or executable code' }
+    }
+  }
+  exit 0
+} catch { exit 1 }
+'''
+    return base64.b64encode(validator.encode("utf-16le")).decode("ascii")
+
+
+def _v041_host_hook_script_bytes() -> bytes:
+    """Render the Host trampoline with a pre-Python runtime file check."""
+    encoded = _v041_runtime_validator_encoded()
+    return (
+        "@echo off\r\n"
+        "setlocal DisableDelayedExpansion\r\n"
+        "set \"_thaliris_search_dir=%CD%\"\r\n"
+        ":thaliris_find_activation_marker\r\n"
+        f"if exist \"%_thaliris_search_dir%\\{PROJECT_ACTIVATION_MARKER}\" goto thaliris_dispatch\r\n"
+        "for %%I in (\"%_thaliris_search_dir%\\..\") do set \"_thaliris_parent=%%~fI\"\r\n"
+        "if /i \"%_thaliris_parent%\"==\"%_thaliris_search_dir%\" exit /b 0\r\n"
+        "set \"_thaliris_search_dir=%_thaliris_parent%\"\r\n"
+        "goto thaliris_find_activation_marker\r\n"
+        ":thaliris_dispatch\r\n"
+        f"set \"{THALIRIS_EXECUTABLE_ENV}=%~1\"\r\n"
+        f"set \"{THALIRIS_EXECUTABLE_SHA256_ENV}=%~2\"\r\n"
+        f"set \"{THALIRIS_RUNTIME_SHA256_ENV}=%~3\"\r\n"
+        f"set \"THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}\"\r\n"
+        f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {encoded} >nul 2>nul\r\n"
+        "if errorlevel 1 goto thaliris_identity_rejected\r\n"
+        "shift\r\n"
+        "shift\r\n"
+        "shift\r\n"
+        "set \"PYTHONPATH=\"\r\n"
+        "set \"PYTHONHOME=\"\r\n"
+        "set \"PYTHONNOUSERSITE=1\"\r\n"
+        "set \"PYTHONDONTWRITEBYTECODE=1\"\r\n"
+        f"\"%{THALIRIS_EXECUTABLE_ENV}%\" audit-hook %~1 --managed-hook-abi %~2\r\n"
+        "exit /b %ERRORLEVEL%\r\n"
+        ":thaliris_identity_rejected\r\n"
+        "if /i \"%~4\"==\"PreToolUse\" echo {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"THALIRIS_RUNTIME_IDENTITY_MISMATCH\"}}\r\n"
+        "if /i \"%~4\"==\"PreToolUse\" exit /b 0\r\n"
+        "exit /b 1\r\n"
+    ).encode("ascii")
+
+
+def _v041_host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
+    """Render the installed command used for bootstrap and managed CLI calls."""
+    if not re.fullmatch(r"[0-9a-f]{64}", runtime_sha256):
+        raise ValueError("invalid installed runtime identity")
+    if any(character in str(executable) for character in ('"', "%", "!", "`", "\r", "\n")):
+        raise ValueError("runtime path is unsafe for cmd")
+    encoded = _v041_runtime_validator_encoded()
+    return (
+        "@echo off\r\n"
+        "setlocal DisableDelayedExpansion\r\n"
+        f"set \"THALIRIS_EXECUTABLE={executable}\"\r\n"
+        f"set \"THALIRIS_RUNTIME_SHA256={runtime_sha256}\"\r\n"
+        f"set \"THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}\"\r\n"
+        "set \"THALIRIS_RUN_SCRIPT=%~f0\"\r\n"
+        f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {encoded} >nul 2>nul\r\n"
+        "if errorlevel 1 goto thaliris_identity_rejected\r\n"
+        "set \"PYTHONPATH=\"\r\n"
+        "set \"PYTHONHOME=\"\r\n"
+        "set \"PYTHONNOUSERSITE=1\"\r\n"
+        "set \"PYTHONDONTWRITEBYTECODE=1\"\r\n"
+        "\"%THALIRIS_EXECUTABLE%\" %*\r\n"
+        "exit /b %ERRORLEVEL%\r\n"
+        ":thaliris_identity_rejected\r\n"
+        "echo {\"ok\":false,\"status\":\"THALIRIS_RUNTIME_IDENTITY_MISMATCH\"}\r\n"
+        "exit /b 1\r\n"
+    ).encode("ascii")
+
+
+def host_hook_script_bytes() -> bytes:
+    """Render the Host trampoline with a pre-Python runtime file check."""
+    encoded = host_preflight.encoded_entry()
+    return (
+        "@echo off\r\n"
+        "setlocal DisableDelayedExpansion\r\n"
+        "set \"_thaliris_search_dir=%CD%\"\r\n"
+        ":thaliris_find_activation_marker\r\n"
+        f"if exist \"%_thaliris_search_dir%\\{PROJECT_ACTIVATION_MARKER}\" goto thaliris_dispatch\r\n"
+        "for %%I in (\"%_thaliris_search_dir%\\..\") do set \"_thaliris_parent=%%~fI\"\r\n"
+        "if /i \"%_thaliris_parent%\"==\"%_thaliris_search_dir%\" exit /b 0\r\n"
+        "set \"_thaliris_search_dir=%_thaliris_parent%\"\r\n"
+        "goto thaliris_find_activation_marker\r\n"
+        ":thaliris_dispatch\r\n"
+        'set "THALIRIS_HOOK_EVENT=%~4"\r\n'
+        f"set \"{THALIRIS_EXECUTABLE_ENV}=%~1\"\r\n"
+        f"set \"{THALIRIS_EXECUTABLE_SHA256_ENV}=%~2\"\r\n"
+        f"set \"{THALIRIS_RUNTIME_SHA256_ENV}=%~3\"\r\n"
+        f"set \"THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}\"\r\n"
+        f'set "THALIRIS_PREFLIGHT=%~dp0{HOST_PREFLIGHT_SCRIPT_NAME}"\r\n'
+        f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {encoded}\r\n"
+        "if errorlevel 1 goto thaliris_identity_rejected\r\n"
+        "shift\r\n"
+        "shift\r\n"
+        "shift\r\n"
+        "set \"PYTHONPATH=\"\r\n"
+        "set \"PYTHONHOME=\"\r\n"
+        "set \"PYTHONNOUSERSITE=1\"\r\n"
+        "set \"PYTHONDONTWRITEBYTECODE=1\"\r\n"
+        f"\"%{THALIRIS_EXECUTABLE_ENV}%\" audit-hook %~1 --managed-hook-abi %~2\r\n"
+        "exit /b %ERRORLEVEL%\r\n"
+        ":thaliris_identity_rejected\r\n"
+        "if /i \"%~4\"==\"PreToolUse\" exit /b 0\r\n"
+        "exit /b 1\r\n"
+    ).encode("ascii")
+
+
+def host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
+    """Render the installed command used for bootstrap and managed CLI calls."""
+    if not re.fullmatch(r"[0-9a-f]{64}", runtime_sha256):
+        raise ValueError("invalid installed runtime identity")
+    if any(character in str(executable) for character in ('"', "%", "!", "`", "\r", "\n")):
+        raise ValueError("runtime path is unsafe for cmd")
+    encoded = host_preflight.encoded_entry()
+    return (
+        "@echo off\r\n"
+        "setlocal DisableDelayedExpansion\r\n"
+        'set "THALIRIS_HOOK_EVENT="\r\n'
+        f"set \"THALIRIS_EXECUTABLE={executable}\"\r\n"
+        f"set \"THALIRIS_RUNTIME_SHA256={runtime_sha256}\"\r\n"
+        f"set \"THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}\"\r\n"
+        "set \"THALIRIS_RUN_SCRIPT=%~f0\"\r\n"
+        f'set "THALIRIS_PREFLIGHT=%~dp0{HOST_PREFLIGHT_SCRIPT_NAME}"\r\n'
+        f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {encoded}\r\n"
+        "if errorlevel 1 goto thaliris_identity_rejected\r\n"
+        "set \"PYTHONPATH=\"\r\n"
+        "set \"PYTHONHOME=\"\r\n"
+        "set \"PYTHONNOUSERSITE=1\"\r\n"
+        "set \"PYTHONDONTWRITEBYTECODE=1\"\r\n"
+        "\"%THALIRIS_EXECUTABLE%\" %*\r\n"
+        "exit /b %ERRORLEVEL%\r\n"
+        ":thaliris_identity_rejected\r\n"
+        "exit /b 1\r\n"
+    ).encode("ascii")
+
+
+def installed_run_script_identity(contents: bytes) -> tuple[Path, str] | None:
+    """Recognize an exact generated runner after its manifest was removed."""
+    try:
+        source = contents.decode("ascii")
+    except UnicodeError:
+        return None
+    executable = re.search(r'^set "THALIRIS_EXECUTABLE=([^"\r\n]+)"\r$', source, re.MULTILINE)
+    identity = re.search(r'^set "THALIRIS_RUNTIME_SHA256=([0-9a-f]{64})"\r$', source, re.MULTILINE)
+    if executable is None or identity is None:
+        return None
+    path = Path(executable.group(1))
+    if not path.is_absolute():
+        return None
+    try:
+        return (path, identity.group(1)) if contents in {
+            host_run_script_bytes(path, identity.group(1)),
+            _previous_host_run_script_bytes(path, identity.group(1)),
+            _v041_host_run_script_bytes(path, identity.group(1)),
+        } else None
+    except ValueError:
+        return None
+
+
+def _previous_host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
+    """Exact runner bytes installed before self-uninstall detection."""
+    return _v041_host_run_script_bytes(executable, runtime_sha256).replace(
+        b'set "THALIRIS_RUN_SCRIPT=%~f0"\r\n', b''
+    )
+
+
+def _legacy_host_hook_script_bytes() -> bytes:
+    """Exact previous trampoline bytes, retained only for safe migration/removal."""
+    return (
+        "@echo off\r\n"
+        "setlocal DisableDelayedExpansion\r\n"
+        f"if not exist \"{PROJECT_ACTIVATION_MARKER}\" exit /b 0\r\n"
+        f"set \"{THALIRIS_EXECUTABLE_ENV}=%~1\"\r\n"
+        f"set \"{THALIRIS_EXECUTABLE_SHA256_ENV}=%~2\"\r\n"
+        "shift\r\n"
+        "shift\r\n"
+        f"\"%{THALIRIS_EXECUTABLE_ENV}%\" audit-hook %~1 --managed-hook-abi %~2\r\n"
+        "exit /b %ERRORLEVEL%\r\n"
+    ).encode("ascii")
+
+
+def _previous_host_hook_script_bytes() -> bytes:
+    """Exact executable-only trampoline installed before runtime manifests."""
+    return (
+        "@echo off\r\n"
+        "setlocal DisableDelayedExpansion\r\n"
+        "set \"_thaliris_search_dir=%CD%\"\r\n"
+        ":thaliris_find_activation_marker\r\n"
+        f"if exist \"%_thaliris_search_dir%\\{PROJECT_ACTIVATION_MARKER}\" goto thaliris_dispatch\r\n"
+        "for %%I in (\"%_thaliris_search_dir%\\..\") do set \"_thaliris_parent=%%~fI\"\r\n"
+        "if /i \"%_thaliris_parent%\"==\"%_thaliris_search_dir%\" exit /b 0\r\n"
+        "set \"_thaliris_search_dir=%_thaliris_parent%\"\r\n"
+        "goto thaliris_find_activation_marker\r\n"
+        ":thaliris_dispatch\r\n"
+        f"set \"{THALIRIS_EXECUTABLE_ENV}=%~1\"\r\n"
+        f"set \"{THALIRIS_EXECUTABLE_SHA256_ENV}=%~2\"\r\n"
+        "shift\r\n"
+        "shift\r\n"
+        f"\"%{THALIRIS_EXECUTABLE_ENV}%\" audit-hook %~1 --managed-hook-abi %~2\r\n"
+        "exit /b %ERRORLEVEL%\r\n"
+    ).encode("ascii")
+
+
+def host_hook_spec(
+    codex_home: Path,
+    executable: Path,
+    executable_sha256: str,
+    runtime_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Return Host-global registration that dispatches through the cheap marker trampoline."""
+    script = codex_home / HOST_HOOK_SCRIPT_NAME
+    hooks: dict[str, list[dict[str, Any]]] = {}
+    for event in HOOK_EVENTS:
+        command = _pinned_host_command(script, executable, executable_sha256, runtime_sha256, event)
+        entry: dict[str, Any] = {
+            "hooks": [{"type": "command", "command": command, "timeout": 60}]
+        }
+        if event == "PostToolUse":
+            entry["matcher"] = POST_TOOL_MATCHER
+        elif event == "PreToolUse":
+            entry["matcher"] = PRE_TOOL_MATCHER
+        hooks[event] = [entry]
+    return {"hooks": hooks}
+
+
+def _v041_pinned_host_command(script: Path, executable: Path, executable_sha256: str,
+                         runtime_sha256: str | None, event: str, abi: str = MANAGED_HOOK_ABI) -> str:
+    """The Host owns this inline check; modified trampoline bytes cannot skip it."""
+    payload = {
+        "script": str(script), "executable": str(executable), "sha": executable_sha256,
+        "runtime": runtime_sha256, "event": event, "abi": abi,
+    }
+    data = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    script_sha = hashlib.sha256(_v041_host_hook_script_bytes()).hexdigest()
+    source = (
+        "$ErrorActionPreference='Stop';"
+        f"$p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{data}'))|ConvertFrom-Json);"
+        f"$expected='{script_sha}';"
+        "try {"
+        "$stream=[IO.File]::OpenRead($p.script); $sha=[Security.Cryptography.SHA256]::Create();"
+        "try { $actual=([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() } finally { $stream.Dispose(); $sha.Dispose() };"
+        "if ($actual -cne $expected) { throw 'script drift' };"
+        "& $p.script $p.executable $p.sha $p.runtime $p.event $p.abi; exit $LASTEXITCODE"
+        "} catch {"
+        "if ($p.event -ceq 'PreToolUse') { [Console]::Out.WriteLine('{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"THALIRIS_RUNTIME_IDENTITY_MISMATCH\"}}'); exit 0 };"
+        "exit 1 }"
+    )
+    return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + base64.b64encode(source.encode("utf-16le")).decode("ascii")
+
+
+def _pinned_host_source(script: Path, executable: Path, executable_sha256: str,
+                        runtime_sha256: str | None, event: str) -> str:
+    """Build the generated inline Host check; modified trampoline bytes cannot skip it."""
+    payload = {
+        "script": str(script), "executable": str(executable), "sha": executable_sha256,
+        "runtime": runtime_sha256, "event": event, "abi": MANAGED_HOOK_ABI,
+    }
+    data = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    script_sha = hashlib.sha256(host_hook_script_bytes()).hexdigest()
+    source = (
+        "$ErrorActionPreference='Stop';"
+        f"$p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{data}'))|ConvertFrom-Json);"
+        f"$expected='{script_sha}';"
+        "try {"
+        "$stream=[IO.File]::OpenRead($p.script); $sha=[Security.Cryptography.SHA256]::Create();"
+        "try { $actual=([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() } finally { $stream.Dispose(); $sha.Dispose() };"
+        "if ($actual -cne $expected) { throw 'script drift' };"
+        "& $p.script $p.executable $p.sha $p.runtime $p.event $p.abi; exit $LASTEXITCODE"
+        "} catch {"
+        "$env:THALIRIS_HOOK_EVENT=$p.event;$env:THALIRIS_EXECUTABLE=$p.executable;"
+        + "\n" + host_preflight.degraded_source()
+        + "\nDegraded ('hook trampoline changed; expected='+$expected+' actual='+$actual);exit 0}"
+
+    )
+    return source
+
+
+def _legacy_pinned_host_command(script: Path, executable: Path, executable_sha256: str,
+                                runtime_sha256: str | None, event: str) -> str:
+    """Render the previously registered packed -Command form for exact legacy recognition."""
+    source = _pinned_host_source(script, executable, executable_sha256, runtime_sha256, event)
+    return 'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal(source) + '"'
+
+
+def _pinned_host_command(script: Path, executable: Path, executable_sha256: str,
+                         runtime_sha256: str | None, event: str) -> str:
+    """Keep the packed loader variable-free for nested shells and the Windows line limit."""
+    source = host_preflight.packed_literal_without_variables(
+        _pinned_host_source(script, executable, executable_sha256, runtime_sha256, event)
+    )
+    return 'powershell.exe -NoProfile -NonInteractive -Command "' + source + '"'
+
+
+def _pinned_host_payload(command: str) -> dict[str, Any] | None:
+    prefix = "powershell.exe -NoProfile -NonInteractive -EncodedCommand "
+    packed_prefix = 'powershell.exe -NoProfile -NonInteractive -Command "'
+    if not command.startswith((prefix, packed_prefix)):
+        return None
+    try:
+        if command.startswith(packed_prefix):
+            if not command.endswith('"'):
+                return None
+            source = host_preflight.unpack_literal(command[len(packed_prefix):-1])
+        else:
+            source = base64.b64decode(command[len(prefix):], validate=True).decode("utf-16le")
+            source = host_preflight.unpack_literal(source)
+        marker = "$p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
+        if not source.startswith("$ErrorActionPreference='Stop';" + marker):
+            return None
+        data = source.split(marker, 1)[1].split("'", 1)[0]
+        payload = json.loads(base64.b64decode(data, validate=True))
+        if not isinstance(payload, dict) or set(payload) != {"script", "executable", "sha", "runtime", "event", "abi"}:
+            return None
+        if command not in {
+            _pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"]),
+            _legacy_pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"]),
+            _v041_pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"], payload["abi"]),
+        }:
+            return None
+        return payload
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _looks_host_trampoline(command: str) -> bool:
+    return (HOST_HOOK_SCRIPT_NAME.lower() in command.lower()
+            or command.startswith(("powershell.exe -NoProfile -NonInteractive -EncodedCommand ",
+                                   'powershell.exe -NoProfile -NonInteractive -Command "')))
+
+
+def _host_hook_command_is_managed(
+    value: object,
+    event: str,
+    codex_home: Path,
+    *,
+    require_current_pin: bool = False,
+) -> bool:
+    """Recognize only complete direct legacy or generated trampoline handlers."""
+    if event not in HOOK_EVENTS:
+        return False
+    if _owned_managed_handler(value, event):
+        return True
+    if not isinstance(value, dict) or set(value) != {"type", "command", "timeout"}:
+        return False
+    if value.get("type") != "command" or value.get("timeout") != 60:
+        return False
+    command = value.get("command")
+    if not isinstance(command, str):
+        return False
+    pinned = _pinned_host_payload(command)
+    if pinned is not None:
+        try:
+            script = Path(pinned["script"])
+            executable = Path(pinned["executable"])
+            if (pinned["event"] != event or pinned["abi"] != MANAGED_HOOK_ABI
+                    or script != codex_home / HOST_HOOK_SCRIPT_NAME or not executable.is_absolute()
+                    or not re.fullmatch(r"[0-9a-f]{64}", pinned["sha"])
+                    or not isinstance(pinned["runtime"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", pinned["runtime"])):
+                return False
+            if not require_current_pin:
+                return True
+            return (
+                script.is_file() and not script.is_symlink()
+                and hashlib.sha256(script.read_bytes()).hexdigest() == hashlib.sha256(host_hook_script_bytes()).hexdigest()
+                and (codex_home / HOST_PREFLIGHT_SCRIPT_NAME).is_file()
+                and not (codex_home / HOST_PREFLIGHT_SCRIPT_NAME).is_symlink()
+                and (codex_home / HOST_PREFLIGHT_SCRIPT_NAME).read_bytes() == host_preflight.script_bytes()
+                and executable.is_file() and not executable.is_symlink()
+                and hashlib.sha256(executable.read_bytes()).hexdigest() == pinned["sha"]
+                and runtime_identity.validate_manifest(
+                    (codex_home / runtime_identity.MANIFEST_NAME).read_bytes(), executable, pinned["runtime"]
+                ) is not None
+            )
+        except (OSError, RuntimeError, ValueError):
+            return False
+    script_token_pattern = rf'(?P<script_token>"[^"]+"|[^\s]+)'
+    executable_token_pattern = rf'(?P<executable_token>"[^"]+"|[^\s]+)'
+    match = re.fullmatch(
+        rf"(?i)cmd\.exe /d /c call {script_token_pattern} {executable_token_pattern} (?P<sha>[0-9a-f]{{64}})(?: (?P<runtime>[0-9a-f]{{64}}))? {re.escape(event)} (?P<abi>thaliris-hook-abi-[0-9]+)",
+        command,
+    )
+    if match is None:
+        return False
+    script_token, executable_token = match.group("script_token"), match.group("executable_token")
+    script_path = script_token[1:-1] if script_token.startswith('"') else script_token
+    executable_path = executable_token[1:-1] if executable_token.startswith('"') else executable_token
+    try:
+        script = Path(script_path)
+        executable = Path(executable_path)
+        if not script.is_absolute() or script.resolve(strict=True) != (codex_home / HOST_HOOK_SCRIPT_NAME).resolve(strict=True):
+            return False
+        if script.is_symlink() or script.read_bytes() not in {
+            host_hook_script_bytes(), _v041_host_hook_script_bytes(), _previous_host_hook_script_bytes(), _legacy_host_hook_script_bytes()
+        }:
+            return False
+        if not executable.is_absolute() or executable.is_symlink():
+            return False
+        if not require_current_pin:
+            # The exact generated command remains Thaliris-owned after its
+            # executable is upgraded in place. This lets codex-install replace
+            # only that stale registration with the new byte pin.
+            return True
+        return (
+            executable.is_file()
+            and hashlib.sha256(executable.read_bytes()).hexdigest() == match.group("sha").lower()
+            and match.group("runtime") is not None
+            and runtime_identity.validate_manifest(
+                (codex_home / runtime_identity.MANIFEST_NAME).read_bytes(), executable,
+                match.group("runtime").lower(),
+            ) is not None
+            and match.group("abi") == MANAGED_HOOK_ABI
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def merge_host_hooks(
+    data: dict[str, Any],
+    codex_home: Path,
+    executable: Path,
+    executable_sha256: str,
+    runtime_sha256: str | None = None,
+) -> tuple[dict[str, Any], bool, list[str]]:
+    """Merge the exact stable trampoline registrations without replacing user hooks."""
+    merged = json.loads(json.dumps(data))
+    hooks = merged.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("Host hooks.json hooks must be an object")
+    wanted = host_hook_spec(codex_home, executable, executable_sha256, runtime_sha256)["hooks"]
+    changed = False
+    manual: list[str] = []
+    for event, wanted_entries in wanted.items():
+        entries = hooks.setdefault(event, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"Host hooks.json hooks.{event} must be an array")
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for handler in entry["hooks"]:
+                if not isinstance(handler, dict) or handler.get("type") != "command":
+                    continue
+                command = handler.get("command")
+                if isinstance(command, str) and _looks_host_trampoline(command):
+                    if not _host_hook_command_is_managed(handler, event, codex_home):
+                        manual.append(f"hooks.{event}")
+        if manual:
+            continue
+        present = False
+        normalized: list[Any] = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                normalized.append(entry)
+                continue
+            managed = [item for item in entry["hooks"] if _host_hook_command_is_managed(item, event, codex_home)]
+            if not managed:
+                normalized.append(entry)
+                continue
+            user_handlers = [item for item in entry["hooks"] if not _host_hook_command_is_managed(item, event, codex_home)]
+            if entry == wanted_entries[0] and len(managed) == 1 and not user_handlers:
+                present = True
+                normalized.append(entry)
+                continue
+            if user_handlers:
+                copied = dict(entry)
+                copied["hooks"] = user_handlers
+                normalized.append(copied)
+            changed = True
+        if not present:
+            normalized.append(wanted_entries[0])
+            changed = True
+        hooks[event] = normalized
+    if manual:
+        return json.loads(json.dumps(data)), False, sorted(set(manual))
+    return merged, changed, []
+
+
+def remove_host_hooks(data: dict[str, Any], codex_home: Path) -> tuple[dict[str, Any], bool, list[str]]:
+    """Remove only exact generated Host trampoline and known direct legacy handlers."""
+    cleaned = json.loads(json.dumps(data))
+    hooks = cleaned.get("hooks")
+    if not isinstance(hooks, dict):
+        return cleaned, False, []
+    changed = False
+    manual: list[str] = []
+    for event in list(hooks):
+        entries = hooks[event]
+        if not isinstance(entries, list):
+            continue
+        kept: list[Any] = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                kept.append(entry)
+                continue
+            handlers = []
+            for handler in entry["hooks"]:
+                command = handler.get("command") if isinstance(handler, dict) else None
+                looks_trampoline = isinstance(command, str) and _looks_host_trampoline(command)
+                if looks_trampoline and not _host_hook_command_is_managed(handler, event, codex_home):
+                    manual.append(f"hooks.{event}")
+                    handlers.append(handler)
+                elif event in HOOK_EVENTS and _host_hook_command_is_managed(handler, event, codex_home):
+                    changed = True
+                else:
+                    handlers.append(handler)
+            if handlers:
+                copied = dict(entry)
+                copied["hooks"] = handlers
+                kept.append(copied)
+        if kept:
+            hooks[event] = kept
+        elif entries:
+            del hooks[event]
+    if manual:
+        return json.loads(json.dumps(data)), False, sorted(set(manual))
+    return cleaned, changed, []
+
+
+def _hook_command_prefix() -> str:
+    """Return the installed-hook command for the current trust boundary."""
+    pinned = _trusted_thaliris_executable()
+    # list2cmdline provides deterministic Windows-compatible quoting, including
+    # an executable path containing spaces.  The logical hook hash replaces this
+    # local rendering with HOOK_COMMAND_PREFIX before hashing.
+    return f"{subprocess.list2cmdline([str(pinned)])} audit-hook" if pinned is not None else HOOK_COMMAND_PREFIX
+
+
+def _digest_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _trusted_thaliris_executable() -> Path | None:
+    """Return a host-pinned executable only when its bytes match the pin.
+
+    A configured path by itself is not trust.  The canonical PATH-relative
+    ``thaliris`` invocation remains valid; an absolute/local executable requires
+    both an explicit path and an exact host-provided SHA-256 pin.
+    """
+    configured = os.environ.get(THALIRIS_EXECUTABLE_ENV) or os.environ.get(CONTEXT_EXECUTABLE_ENV)
+    expected = (os.environ.get(THALIRIS_EXECUTABLE_SHA256_ENV) or os.environ.get(CONTEXT_EXECUTABLE_SHA256_ENV, "")).lower()
+    if not configured or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        return None
+    path = Path(configured)
+    try:
+        if not path.is_absolute() or not path.is_file() or path.is_symlink():
+            return None
+        resolved = path.resolve(strict=True)
+        return resolved if _digest_file(resolved) == expected else None
+    except (OSError, RuntimeError):
+        return None
+
+
+def _trusted_installed_runner() -> Path | None:
+    """Recognize only the installed pre-Python runner observed by this Host hook."""
+    trusted = _trusted_thaliris_executable()
+    manifest_name = os.environ.get("THALIRIS_INSTALL_MANIFEST")
+    identity = os.environ.get(THALIRIS_RUNTIME_SHA256_ENV, "")
+    if trusted is None or not manifest_name or not re.fullmatch(r"[0-9a-f]{64}", identity):
+        return None
+    manifest = Path(manifest_name)
+    runner = manifest.parent / HOST_RUN_SCRIPT_NAME
+    try:
+        if manifest.is_symlink() or runner.is_symlink() or not manifest.is_file() or not runner.is_file():
+            return None
+        contents = manifest.read_bytes()
+        if runtime_identity.manifest_identity(contents) != identity:
+            return None
+        record = runtime_identity.validate_manifest_record(contents)
+        if Path(record["executable"]).resolve(strict=True) != trusted:
+            return None
+        if runner.read_bytes() != host_run_script_bytes(trusted, identity):
+            return None
+        return runner.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return None
+
+
+def managed_context_executable_pinned() -> bool:
+    """Whether managed control-plane trust has an explicit path+byte pin."""
+    return _trusted_thaliris_executable() is not None
+
+
+def managed_executable_health() -> dict[str, str]:
+    """Report diagnostic-process command resolution and a byte-pinned identity."""
+    pinned = _trusted_thaliris_executable()
+    if pinned is not None:
+        return {
+            "canonical_executable_available": "YES",
+            "canonical_executable_identity": "SHA256_PINNED",
+            "diagnostic_process_executable_resolution": "SHA256_PINNED",
+        }
+    available = shutil.which("thaliris") is not None
+    return {
+        "canonical_executable_available": "YES" if available else "NO",
+        "canonical_executable_identity": "PATH_UNPINNED" if available else "UNAVAILABLE",
+        "diagnostic_process_executable_resolution": "PATH_UNPINNED" if available else "UNAVAILABLE",
+    }
+
+
+def _context_arguments(command: str) -> str | None:
+    """Extract arguments only from direct or exactly installed trusted routes."""
+    command = command.lstrip()
+    # Codex's Windows shell tool submits native PowerShell invocations with
+    # its call operator (for example: & 'C:\\path\\thaliris.exe' ...).
+    # Accept only that leading operator; _context_call still rejects any
+    # subsequent command separator before trusting the direct invocation.
+    if command.startswith("&"):
+        if len(command) < 2 or not command[1].isspace():
+            return None
+        command = command[1:].lstrip()
+    match = re.match(r"^\s*(\"[^\"]+\"|'[^']+'|[^\s]+)(?:\s+(.*?))?\s*$", command)
+    if not match:
+        return None
+    token = match.group(1)
+    executable = token[1:-1] if len(token) >= 2 and token[0] == token[-1] and token[0] in {'\"', "'"} else token
+    lowered = executable.lower()
+    canonical = lowered in {"thaliris", "thaliris.exe", "thaliris.cmd"} and not any(char in executable for char in "\\/")
+    pinned = False
+    trusted = _trusted_thaliris_executable()
+    if trusted is not None:
+        try:
+            pinned = Path(executable).resolve(strict=True) == trusted
+        except (OSError, RuntimeError):
+            pinned = False
+    if not pinned:
+        runner = _trusted_installed_runner()
+        if runner is not None:
+            try:
+                pinned = Path(executable).resolve(strict=True) == runner
+            except (OSError, RuntimeError):
+                pinned = False
+    if not (canonical or pinned):
+        return None
+    return match.group(2) or ""
+
+
+def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
+    """Admit Host-only install operations through an exact installed route."""
+    command = _bash_command(payload)
+    if command is None or _context_call(payload)[0] not in {"codex-install", "codex-uninstall"}:
+        return False
+    trusted_executable = _trusted_thaliris_executable()
+    manifest_name = os.environ.get("THALIRIS_INSTALL_MANIFEST")
+    identity = os.environ.get(THALIRIS_RUNTIME_SHA256_ENV)
+    if trusted_executable is None or not manifest_name or not identity:
+        return False
+    try:
+        manifest = Path(manifest_name)
+        if manifest.is_symlink() or not manifest.is_file():
+            return False
+        runtime_identity.validate_manifest(manifest.read_bytes(), trusted_executable, identity)
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return False
+    command = command.lstrip()
+    if command.startswith("& "):
+        command = command[2:].lstrip()
+    match = re.match(r"^(\"[^\"]+\"|'[^']+'|[^\s]+)(?:\s|$)", command)
+    if match is None:
+        return False
+    token = match.group(1).strip("\"'")
+    try:
+        selected = Path(token).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    return selected in {path for path in (_trusted_installed_runner(), trusted_executable) if path is not None}
+
+
+def is_managed_handler(value: object, event: str) -> bool:
+    return value == _managed_handler(event)
+
+
+def _legacy_managed_handler(value: object, event: str) -> bool:
+    """Recognize only the exact legacy handler we generated, never wrappers."""
+    expected = {"type": "command", "command": f"context audit-hook {event}", "timeout": 60}
+    if value == expected:
+        return True
+    # Before executable pins were introduced, the generated canonical form
+    # used the PATH-relative command.  It remains mechanically identifiable
+    # by its complete generated shape and can therefore be upgraded safely.
+    if value == {"type": "command", "command": f"{HOOK_COMMAND_PREFIX} {event}", "timeout": 60}:
+        return True
+    if value == {
+        "type": "command",
+        "command": f"{HOOK_COMMAND_PREFIX} {event} --managed-hook-abi thaliris-hook-abi-9",
+        "timeout": 60,
+    }:
+        return True
+    # A prior generated hook used the then-valid, byte-pinned absolute
+    # executable.  Migrate only that exact no-wrapper command after proving the
+    # same current pin; do not make a path spelling into a trust decision.
+    if isinstance(value, dict) and set(value) == {"type", "command", "timeout"} and value.get("type") == "command" and value.get("timeout") == 60 and isinstance(value.get("command"), str):
+        arguments = _context_arguments(value["command"])
+        trusted = _trusted_thaliris_executable()
+        if arguments == f"audit-hook {event}" and trusted is not None:
+            token = _command_token(value["command"])
+            if token is not None:
+                try:
+                    if Path(token).resolve(strict=True) == trusted:
+                        return True
+                except (OSError, RuntimeError):
+                    pass
+    # Historical generated SubagentStart entries carried this no-injection
+    # marker. It is also recognized only as the exact generated shape.
+    return event == "SubagentStart" and value == {**expected, "additionalContextLimit": 0}
+
+
+def _owned_managed_handler(value: object, event: str) -> bool:
+    return is_managed_handler(value, event) or _legacy_managed_handler(value, event)
+
+
+def _command_token(command: str) -> str | None:
+    match = re.match(r"^\s*(\"[^\"]+\"|'[^']+'|[^\s]+)(?:\s+.*?)?\s*$", command)
+    if not match:
+        return None
+    token = match.group(1)
+    return token[1:-1] if len(token) >= 2 and token[0] == token[-1] and token[0] in {'\"', "'"} else token
+
+
+def _absolute_command_token(command: str) -> str | None:
+    token = _command_token(command)
+    return token if token is not None and (Path(token).is_absolute() or ntpath.isabs(token)) else None
+
+
+def _wrapped_audit_hook_signature(command: str, event: str) -> bool:
+    """Recognize, but never interpret, common shell wrappers around old hooks."""
+    wrapper = re.match(
+        r"(?is)^\s*(?:cmd(?:\.exe)?(?:\s+/[a-z]+)*\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?\b.*?\s-(?:command|c)\b)",
+        command,
+    )
+    if wrapper is None:
+        return False
+    # This is deliberately a signature search, not shell parsing: it requires
+    # a recognizable Thaliris/context executable and the exact hook event.
+    # This recognizes an executable token, not an arbitrary wrapper body. In
+    # particular, quoted paths may contain spaces, but their basename must be
+    # one we historically generated.  It intentionally does not parse or run
+    # the wrapper.
+    basename = r"(?:context(?:\.exe)?|thaliris(?:\.exe)?)"
+    executable = rf"(?:\"[^\"]*[\\/]{basename}\"|'[^']*[\\/]{basename}'|{basename}(?=$|[\s\"'&])|[a-z]:[^\r\n\"']*[\\/]{basename})"
+    signature = rf"(?i)(?:^|[\s\"'&]){executable}\s+audit-hook\s+{re.escape(event)}(?=$|[\s\"'])"
+    return re.search(signature, command) is not None
+
+
+def _ambiguous_legacy_managed_handler(value: object, event: str) -> bool:
+    """Identify possible old generated commands that are unsafe to migrate."""
+    if is_managed_handler(value, event):
+        return False
+    if not isinstance(value, dict) or value.get("type") != "command" or not isinstance(value.get("command"), str):
+        return False
+    command = value["command"]
+    # A direct legacy command with a recognizable Thaliris basename and a
+    # non-exact shape is never removed automatically. Absolute candidates
+    # deliberately do not require a currently valid pin: that is precisely
+    # why they need human cleanup. Arbitrary executables are unrelated.
+    if re.match(rf"(?i)^\s*(?:context(?:\.exe)?|thaliris(?:\.exe)?)\s+audit-hook\s+{re.escape(event)}(?=$|\s)", command):
+        return not _legacy_managed_handler(value, event)
+    if _wrapped_audit_hook_signature(command, event):
+        return True
+    token = _absolute_command_token(command)
+    if token is None or ntpath.basename(token).lower() not in {"context", "context.exe", "thaliris", "thaliris.exe"}:
+        return False
+    tail = re.sub(r"^\s*(?:\"[^\"]+\"|'[^']+'|[^\s]+)\s*", "", command)
+    return tail.startswith(f"audit-hook {event}") and not _legacy_managed_handler(value, event)
+
+
+def legacy_managed_handler_cleanup_required(data: object) -> bool:
+    """Whether hooks contain an old-looking command that needs manual cleanup."""
+    if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
+        return False
+    for event, entries in data["hooks"].items():
+        if event not in HOOK_EVENTS or not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            if any(_ambiguous_legacy_managed_handler(handler, event) for handler in entry["hooks"]):
+                return True
+    return False
+
+
+def merge_hooks(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Append only missing managed handlers, preserving all user JSON values."""
+    merged = json.loads(json.dumps(data))
+    hooks = merged.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError(".codex/hooks.json hooks must be an object")
+    changed = False
+    for event, wanted_entries in hook_spec()["hooks"].items():
+        entries = hooks.setdefault(event, [])
+        if not isinstance(entries, list):
+            raise ValueError(f".codex/hooks.json hooks.{event} must be an array")
+        present = False
+        normalized_entries: list[Any] = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                normalized_entries.append(entry)
+                continue
+            managed = [item for item in entry["hooks"] if _owned_managed_handler(item, event)]
+            if not managed:
+                normalized_entries.append(entry)
+                continue
+            if entry == wanted_entries[0]:
+                present = True
+                normalized_entries.append(entry)
+                continue
+            # A matcher applies to every handler in an entry. Preserve user
+            # handlers unchanged, and isolate the canonical generated entry.
+            user_handlers = [item for item in entry["hooks"] if not _owned_managed_handler(item, event)]
+            if user_handlers:
+                copied = dict(entry)
+                copied["hooks"] = user_handlers
+                normalized_entries.append(copied)
+            changed = True
+        if not present:
+            normalized_entries.append(wanted_entries[0])
+            changed = True
+        hooks[event] = normalized_entries
+    return merged, changed
+
+
+def remove_hooks(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Remove only Thaliris command handlers, retaining surrounding user entries."""
+    cleaned = json.loads(json.dumps(data))
+    hooks = cleaned.get("hooks")
+    if not isinstance(hooks, dict):
+        return cleaned, False
+    changed = False
+    for event in list(hooks):
+        entries = hooks[event]
+        if not isinstance(entries, list):
+            continue
+        kept_entries: list[Any] = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                kept_entries.append(entry)
+                continue
+            handlers = [handler for handler in entry["hooks"] if not _owned_managed_handler(handler, event)]
+            if len(handlers) != len(entry["hooks"]):
+                changed = True
+            if handlers:
+                copied = dict(entry)
+                copied["hooks"] = handlers
+                kept_entries.append(copied)
+        if kept_entries:
+            hooks[event] = kept_entries
+        else:
+            del hooks[event]
+    return cleaned, changed
+
+
+def host_hooks_health(codex_home: Path) -> dict[str, str]:
+    """Report disk registration for the stable Host trampoline, never runtime load."""
+    path = codex_home / "hooks.json"
+    script = codex_home / HOST_HOOK_SCRIPT_NAME
+    if codex_home.is_symlink() or path.is_symlink() or script.is_symlink():
+        return {"hooks_configured": "UNKNOWN", "host_hook_manual_action_required": "YES"}
+    if not path.is_file() or not script.is_file():
+        return {"hooks_configured": "NO", "host_hook_manual_action_required": "NO"}
+    try:
+        if script.read_bytes() != host_hook_script_bytes():
+            return {"hooks_configured": "NO", "host_hook_manual_action_required": "YES"}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
+            return {"hooks_configured": "UNKNOWN", "host_hook_manual_action_required": "YES"}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {"hooks_configured": "UNKNOWN", "host_hook_manual_action_required": "YES"}
+    present = True
+    manual = False
+    for event in HOOK_EVENTS:
+        entries = data["hooks"].get(event)
+        if not isinstance(entries, list):
+            present = False
+            continue
+        count = sum(
+            1 for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("hooks"), list)
+            for handler in entry["hooks"]
+            if _host_hook_command_is_managed(
+                handler, event, codex_home, require_current_pin=True
+            )
+        )
+        present = present and count == 1
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for handler in entry["hooks"]:
+                command = handler.get("command") if isinstance(handler, dict) else None
+                if isinstance(command, str) and _looks_host_trampoline(command) and not _host_hook_command_is_managed(handler, event, codex_home):
+                    manual = True
+    return {
+        "hooks_configured": "YES" if present else "NO",
+        "host_hook_manual_action_required": "YES" if manual else "NO",
+    }
+
+
+def legacy_project_hook_registration_present(root: Path) -> str:
+    """Distinguish old project-scoped Thaliris registration from Host setup."""
+    path = root / ".codex" / "hooks.json"
+    if not path.exists():
+        return "NO"
+    if path.is_symlink():
+        return "UNKNOWN"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
+            return "UNKNOWN"
+    except (OSError, ValueError, json.JSONDecodeError):
+        return "UNKNOWN"
+    hooks = data.get("hooks", {})
+    for event in HOOK_EVENTS:
+        entries = hooks.get(event)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for handler in entry["hooks"]:
+                if _owned_managed_handler(handler, event) or _ambiguous_legacy_managed_handler(handler, event):
+                    return "YES"
+    return "NO"
+
+
+def hooks_health(root: Path) -> dict[str, str]:
+    """Report the effective user Host hook registration and local legacy residue."""
+    host = host_hooks_health(_host_home_path())
+    configured = host["hooks_configured"]
+    observed = _observed_health(root)
+    status = "UNAVAILABLE" if configured == "NO" else (
+        "HEALTHY" if configured == "YES" and observed["runtime_observed"] == "YES" else "UNKNOWN"
+    )
+    return {
+        "status": status,
+        "hooks_configured": configured,
+        "installed_hook_spec": "CURRENT" if configured == "YES" else ("UNAVAILABLE" if configured == "NO" else "UNKNOWN"),
+        "runtime_observed": observed["runtime_observed"],
+        "current_hook_hash_observed": observed["current_hook_hash_observed"],
+        "pretool_child_identity_corroborated": child_identity_corroboration(root),
+        "hook_trust_runtime_status": "UNKNOWN",
+        "legacy_managed_handler_cleanup": "MANUAL_CLEANUP_REQUIRED" if host["host_hook_manual_action_required"] == "YES" else "NO",
+        "legacy_project_hook_registration_present": legacy_project_hook_registration_present(root),
+        **managed_executable_health(),
+    }
+
+
+def _observed_health(root: Path) -> dict[str, str]:
+    base = root / ".context" / "audit"
+    observed = "UNKNOWN"
+    current_hash = "UNKNOWN"
+    if not base.is_dir():
+        return {"runtime_observed": observed, "current_hook_hash_observed": current_hash}
+    expected = managed_hook_spec_hash()
+    runtime_files = []
+    stale = False
+    for path in base.glob("*/runtime.json"):
+        try:
+            runtime = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(runtime, dict) and runtime.get("managed_hook_spec_hash") == expected and runtime.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION:
+            runtime_files.append(path)
+        else:
+            stale = True
+    if runtime_files:
+        observed = "YES"
+    current_hash = "YES" if runtime_files else ("STALE" if stale else "UNKNOWN")
+    return {"runtime_observed": observed, "current_hook_hash_observed": current_hash}
+
+
+def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
+    """Apply mechanical guard/lifecycle rules and record hash-only telemetry."""
+    try:
+        if event not in HOOK_EVENTS or not isinstance(payload, dict):
+            return ""
+        root = _hook_repository_root(root, payload)
+        anchor = task_authority.read(root)
+        if anchor is not None and (_session_id_hash(payload) in anchor["fenced_sessions"] or
+                _identity_hash(payload.get("agent_id")) in anchor["fenced_agents"]):
+            return _permission_deny("THALIRIS_ABANDONED_ACTOR") if event == "PreToolUse" else ""
+        if event == "PreToolUse":
+            try:
+                if _context_operation(payload) == "task-recover-authority":
+                    if _controller_actor_assurance(payload) == "CHILD":
+                        return _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
+                elif not (_controller_actor_assurance(payload) == "UNKNOWN" and _context_operation(payload) in {"task-status", "doctor"}):
+                    task_authority.check(root)
+            except (OSError, ValueError, KeyError, TypeError):
+                return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: preserve the external authority and task evidence; a Controller must resolve this conflict.")
+        if event == "PreToolUse" and _offline_administration_requested(payload):
+            return _permission_deny("THALIRIS_OFFLINE_ADMINISTRATION_REQUIRES_DISCONNECTED_INTEGRATION: automated actors cannot use offline administrative recovery while integration is present.")
+        if payload.get("agent_id") is not None and event in {"PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop"}:
+            try:
+                if _abandoned_child_fenced(root, payload):
+                    return _permission_deny("THALIRIS_ABANDONED_ROLE_SESSION: this native role session belongs to an abandoned managed task.") if event == "PreToolUse" else ""
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                if event == "PreToolUse":
+                    return _permission_deny("THALIRIS_ABANDONED_ROLE_SESSION_FENCE_UNAVAILABLE")
+        if event == "PreToolUse":
+            try:
+                if _session_fenced(root, _session_id_hash(payload)):
+                    return _permission_deny("THALIRIS_ABANDONED_SESSION: this native session belongs to an abandoned managed task.")
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                return _permission_deny("THALIRIS_ABANDONED_SESSION_FENCE_UNAVAILABLE")
+        if event == "SubagentStart":
+            return _subagent_start_output(root, payload)
+        if event == "SubagentStop":
+            _best_effort_record(_record_subagent_stop, root, payload)
+            return ""
+        if payload.get("agent_id") is not None or payload.get("agent_type") is not None:
+            if event == "PreToolUse":
+                return _child_pre_tool_output(root, payload)
+            _best_effort_record(_record_child_runtime_event, root, payload, event)
+            tool = payload.get("tool_name") or payload.get("tool")
+            if event == "PostToolUse" and isinstance(tool, str) and _bound_managed_child(root, payload):
+                _best_effort_record(_reconcile_lifecycle_post_tool, root, payload, _tool_basename(tool))
+            return ""
+        if event == "PreToolUse":
+            tool = payload.get("tool_name") or payload.get("tool")
+            if isinstance(tool, str) and _tool_basename(tool) == "spawn_agent":
+                decision = _pre_tool_output(payload, root, managed_hook_abi)
+                _best_effort_record(_record_runtime_event, root, payload, event, tool)
+                return decision
+            return _pre_tool_output(payload, root, managed_hook_abi)
+        if event == "SessionStart":
+            _record_session_start(root, payload)
+            return _session_start_output(root, payload)
+        if event == "UserPromptSubmit":
+            _best_effort_record(_record_prompt_telemetry, root, payload)
+            return ""
+        if event == "PostToolUse":
+            tool = payload.get("tool_name") or payload.get("tool")
+            if isinstance(tool, str) and _tool_basename(tool) in _COLLABORATION_TOOL_NAMES:
+                _best_effort_record(_record_runtime_event, root, payload, event, tool)
+                if _controller_actor_assurance(payload) == "CONTROLLER" or task_authority.check(root) is not None:
+                    _best_effort_record(_reconcile_lifecycle_post_tool, root, payload, _tool_basename(tool))
+                if _tool_basename(tool) in _DELEGATION_TOOL_NAMES:
+                    _best_effort_record(_record_delegation_telemetry, root, payload)
+            if isinstance(tool, str) and _tool_basename(tool) in _OBSERVED_EXECUTION_TOOL_NAMES:
+                _best_effort_record(_record_execution_observation, root, payload)
+                return _post_init_attestation(root, payload, managed_hook_abi)
+            return ""
+        # Stop has no production policy role. It neither invokes a model nor
+        # blocks or corrects the Controller.
+        return ""
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return _permission_deny("THALIRIS_TASK_AUTHORITY_UNAVAILABLE") if event == "PreToolUse" and task_authority.path(root).exists() else ""
+
+
+def _best_effort_record(function: Any, *args: Any, **kwargs: Any) -> None:
+    """Persist observation without coupling audit availability to policy."""
+    try:
+        function(*args, **kwargs)
+    except Exception:
+        pass
+
+
+def _hook_repository_root(root: Path, payload: dict[str, Any]) -> Path:
+    """Resolve the worktree named by the hook payload, not the shell cwd."""
+    candidate = payload.get("cwd")
+    cwd = Path(candidate) if isinstance(candidate, str) and candidate else root
+    if not cwd.is_absolute():
+        cwd = root / cwd
+    cwd = cwd.resolve(strict=False)
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return Path(proc.stdout.strip()).resolve()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return root.resolve()
+
+
+def _state_path(root: Path, payload: dict[str, Any], partition: str) -> Path:
+    session_dir = _session_dir(root, payload)
+    directory = hashlib.sha256(partition.encode("utf-8")).hexdigest()[:24]
+    return session_dir / directory / "capture.json"
+
+
+def _session_dir(root: Path, payload: dict[str, Any]) -> Path:
+    session = payload.get("session_id")
+    identity = session if isinstance(session, str) and session else "unknown-session"
+    directory = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    return root / ".context" / "audit" / directory
+
+
+def _host_home_path() -> Path:
+    configured = os.environ.get("CODEX_HOME")
+    return (Path(configured).expanduser() if configured else Path.home() / ".codex").absolute()
+
+
+def _host_role_profile_dir() -> Path:
+    """Return the effective user Host role directory.
+
+    Stable Thaliris role identities are installed under the user's Codex home,
+    while project-local ``.codex/agents`` is retained as a separate file
+    observation for compatibility.  This helper deliberately reports a path,
+    not a native Host catalog, because the current hook payload has no such
+    observation.
+    """
+    return _host_home_path() / "agents"
+
+
+def _profile_files_present_at_session_start(root: Path) -> dict[str, dict[str, object]]:
+    """Capture known Thaliris profile files in both relevant directories."""
+    project_dir = root / ".codex" / "agents"
+    host_dir = _host_role_profile_dir()
+    return {
+        "project": {
+            "directory": ".codex/agents",
+            "files": sorted(
+                name for name in roles.agent_profiles()
+                if (project_dir / name).is_file()
+            ),
+        },
+        "user_host": {
+            "directory": str(host_dir),
+            "files": sorted(
+                name for name in roles.agent_profiles()
+                if (host_dir / name).is_file()
+            ),
+        },
+    }
+
+
+def _record_session_start(root: Path, payload: dict[str, Any]) -> None:
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        if payload.get("source") in {"startup", "clear"}:
+            state.pop("expected_continuation_sha256", None)
+        _runtime_metadata(state, payload)
+        state.update({"version": 4, "session_start_observed": True, "root_classification": "UNKNOWN"})
+        if payload.get("source") == "startup":
+            state["session_start_at_ns"] = time.time_ns()
+            state["session_start_monotonic_ns"] = time.monotonic_ns()
+            # This is deliberately a file-presence snapshot.  Neither the
+            # project nor user Host role directory establishes what the Host
+            # loaded into its native role catalog.
+            state.pop("native_role_profile_names_at_start", None)
+            state[_PROFILE_FILES_PRESENT_AT_SESSION_START] = _profile_files_present_at_session_start(root)
+            # No current Codex SessionStart payload carries native role
+            # catalog evidence.  Keep the field explicit so a later Host
+            # contract can populate it without reinterpreting disk state.
+            state[_HOST_ROLE_CATALOG_STATUS] = HOST_ROLE_CATALOG_UNKNOWN
+        _write_capture(path, state)
+
+
+def _session_start_output(root: Path, payload: dict[str, Any]) -> str:
+    """Point the Controller at durable navigation without injecting its contents."""
+    if payload.get("source") not in {"startup", "resume", "clear", "compact"}:
+        return ""
+    context = (
+        "Durable navigation is available at:\n"
+        ".agent-memory/INDEX.md\n"
+        ".milestones/INDEX.md\n\n"
+        "Before starting managed work, explicitly read the root navigation; "
+        "if either map is missing, establish a minimal thin INDEX first."
+    )
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "SessionStart",
+        "additionalContext": context,
+    }}, ensure_ascii=False, separators=(",", ":"))
+
+
+def _record_prompt_telemetry(root: Path, payload: dict[str, Any]) -> None:
+    """Record only a root-prompt identity; prompt text never enters telemetry."""
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str):
+        return
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        _runtime_metadata(state, payload)
+        state.setdefault("events_observed", {})["UserPromptSubmit"] = True
+        _bounded_append(state, "root_prompt_hashes", hashlib.sha256(prompt.encode("utf-8")).hexdigest())
+        _write_capture(path, state)
+
+
+def _record_delegation_telemetry(root: Path, payload: dict[str, Any]) -> None:
+    """Record bounded delegation identity and hash metadata, never its text."""
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not isinstance(tool, str):
+        return
+    tool_input = _delegation_input(payload)
+    text = _delegation_text(tool_input)
+    item = {
+        "tool": _tool_basename(tool),
+        "role": _normalized_agent_role(tool_input, payload),
+        "payload_hash": hashlib.sha256(text.encode("utf-8")).hexdigest() if isinstance(text, str) else None,
+        "child_identity_hash": _child_identity_hash(tool, tool_input),
+        "dispatch_status": _dispatch_status(_post_tool_response(payload)),
+    }
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        _runtime_metadata(state, payload)
+        records = state.setdefault("delegation_telemetry", [])
+        if isinstance(records, list) and len(records) < MAX_RAW_RECORDS:
+            records.append(item)
+        _write_capture(path, state)
+
+
+def _runtime_metadata(state: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Attach only compatibility metadata, never prompts, output, or IDs."""
+    state["managed_hook_spec_hash"] = managed_hook_spec_hash()
+    state["adapter_protocol_version"] = CODEX_ADAPTER_PROTOCOL_VERSION
+    state["thaliris_version"] = getattr(__import__("thaliris"), "__version__", "UNKNOWN")
+    session = payload.get("session_id")
+    if isinstance(session, str) and session:
+        state["session_id_hash"] = _identity_hash(session)
+    state["observation_sequence"] = int(state.get("observation_sequence", 0)) + 1
+    state["observed_at_ns"] = time.time_ns()
+
+
+def _record_runtime_event(root: Path, payload: dict[str, Any], event: str, tool: str) -> None:
+    """Persist bounded evidence that a root hook event reached this adapter."""
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        _runtime_metadata(state, payload)
+        observed = state.setdefault("events_observed", {})
+        observed[event] = True
+        tools = state.setdefault("tools_observed", [])
+        normalized = _tool_basename(tool)
+        if normalized not in tools and len(tools) < 16:
+            tools.append(normalized)
+        raw_tools = state.setdefault("tool_names_observed", [])
+        if tool not in raw_tools and len(raw_tools) < 16:
+            raw_tools.append(tool)
+        if event == "PreToolUse":
+            tool_input = _delegation_input(payload)
+            state.pop("pre_dispatch_rewrite", None)
+            state["pre_dispatch_isolation"] = (
+                "EXPLICIT" if tool_input.get("fork_turns") == "none" else "NONCOMPLIANT"
+            )
+        if event == "PostToolUse":
+            metrics = state.setdefault("orchestration_metrics", {})
+            key = _tool_basename(tool)
+            if key in {"wait_agent", "list_agents", "spawn_agent"}:
+                counter = f"{key}_calls"
+                metrics[counter] = int(metrics.get(counter, 0)) + 1
+            response = _post_tool_response(payload)
+            if key == "wait_agent" and isinstance(response, dict) and response.get("timed_out") is True:
+                metrics["wait_timeouts"] = int(metrics.get("wait_timeouts", 0)) + 1
+        _write_capture(path, state)
+
+
+def _record_controller_guard_event(root: Path, payload: dict[str, Any], action: str, decision: str) -> None:
+    """Persist bounded, causal identity for one guarded tool operation.
+
+    The command itself is never retained.  A stable operation hash lets the
+    host collector bind PreToolUse, the deny decision, and the absence of a
+    side effect to the same call instead of combining unrelated observations.
+    """
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        _runtime_metadata(state, payload)
+        state.setdefault("events_observed", {})["PreToolUse"] = True
+        tool = payload.get("tool_name") or payload.get("tool")
+        normalized = _tool_basename(tool) if isinstance(tool, str) else "UNKNOWN"
+        tools = state.setdefault("tools_observed", [])
+        if normalized not in tools and len(tools) < 16:
+            tools.append(normalized)
+        raw_name = tool if isinstance(tool, str) else "UNKNOWN"
+        raw_tools = state.setdefault("tool_names_observed", [])
+        if raw_name not in raw_tools and len(raw_tools) < 16:
+            raw_tools.append(raw_name)
+        counters = state.setdefault("controller_guard", {"allowed": 0, "blocked": 0, "unknown": 0})
+        if decision in counters:
+            counters[decision] = int(counters[decision]) + 1
+        actions = state.setdefault("controller_actions_observed", [])
+        if action not in actions and len(actions) < 16:
+            actions.append(action)
+        call_id = payload.get("tool_call_id") or payload.get("call_id") or payload.get("id")
+        command = _bash_command(payload)
+        operation_id = hashlib.sha256(json.dumps({
+            "session_id": payload.get("session_id"),
+            "call_id": call_id,
+            "tool": raw_name,
+            "command": command,
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        operations = state.setdefault("controller_guard_operations", [])
+        if not any(isinstance(item, dict) and item.get("operation_id") == operation_id for item in operations) and len(operations) < 32:
+            operations.append({
+                "operation_id": operation_id,
+                "tool_call_id": str(call_id) if call_id is not None else None,
+                "tool": raw_name,
+                "command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest() if command else None,
+                "action": action,
+                "decision": decision,
+            })
+        _write_capture(path, state)
+
+
+def _record_child_runtime_event(root: Path, payload: dict[str, Any], event: str) -> None:
+    """Persist bounded child/tool identities, never payloads or semantic classes."""
+    if event != "PreToolUse":
+        return
+    agent_id = payload.get("agent_id")
+    if not isinstance(agent_id, str) or not agent_id:
+        return
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not isinstance(tool, str):
+        return
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        _runtime_metadata(state, payload)
+        _bounded_append(state, "pretool_child_agent_id_hashes", _identity_hash(agent_id))
+        tools = state.setdefault("child_tools_observed", [])
+        normalized = _tool_basename(tool)
+        if normalized not in tools and len(tools) < 16:
+            tools.append(normalized)
+        _write_capture(path, state)
+
+
+def _record_protocol_deviation(
+    root: Path,
+    payload: dict[str, Any],
+    *,
+    operation: str,
+    target: str,
+    blocked: bool,
+    notify_controller: bool = True,
+) -> None:
+    """Record one bounded mechanical protocol deviation for Controller notice."""
+    task_id = _active_task_id(root)
+    agent_id = payload.get("agent_id")
+    agent_type = payload.get("agent_type")
+    tool = payload.get("tool_name") or payload.get("tool")
+    if task_id is None or not isinstance(agent_id, str) or not agent_id or not isinstance(tool, str):
+        return
+    role = _native_agent_roles().get(str(agent_type), "unknown")
+    item = {
+        "agent_id": agent_id[:128],
+        "agent_type": agent_type[:128] if isinstance(agent_type, str) else "unknown",
+        "role": role,
+        "tool": tool[:128],
+        "operation": operation[:128],
+        "target": target[:256],
+        "blocked": blocked,
+        "observed_at_ns": time.time_ns(),
+        "notice_delivered": not notify_controller,
+    }
+    fingerprint = hashlib.sha256(json.dumps({
+        key: item[key] for key in ("agent_id", "agent_type", "tool", "operation", "target", "blocked")
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    item["fingerprint"] = fingerprint
+    with core._lock(root):
+        path = _lifecycle_path(root, task_id)
+        state = _load_lifecycle(path, task_id)
+        deviations = state.setdefault("protocol_deviations", [])
+        if not isinstance(deviations, list):
+            return
+        if len(deviations) >= 32:
+            deviations.pop(0)
+            state["protocol_deviation_overflow_count"] = int(state.get("protocol_deviation_overflow_count", 0)) + 1
+            state["protocol_deviation_overflow_notice_delivered"] = False
+        counters = state.setdefault("protocol_deviation_counts", {})
+        if isinstance(counters, dict):
+            category = f"{role}:{'blocked' if blocked else 'allowed_read'}"
+            counters[category] = int(counters.get(category, 0)) + 1
+        if notify_controller:
+            pending = state.setdefault("protocol_deviation_pending_counts", {})
+            if isinstance(pending, dict):
+                category = f"{role}:{'blocked' if blocked else 'extra_read'}"
+                pending[category] = int(pending.get(category, 0)) + 1
+            targets = state.setdefault("protocol_deviation_pending_targets", [])
+            if isinstance(targets, list):
+                if target in targets:
+                    targets.remove(target)
+                targets.append(target)
+                del targets[:-4]
+        deviations.append(item)
+        _runtime_metadata(state, payload)
+        _write_capture(path, state)
+
+
+def consume_protocol_deviation_notice(root: Path, task_id: str) -> str | None:
+    """Return one bounded aggregate notice and consume the whole pending batch."""
+    with core._lock(root):
+        path = _lifecycle_path(root, task_id)
+        if not path.is_file():
+            return None
+        state = _load_lifecycle(path, task_id)
+        deviations = state.get("protocol_deviations")
+        if not isinstance(deviations, list):
+            return None
+        pending = state.get("protocol_deviation_pending_counts")
+        if not isinstance(pending, dict) or not pending:
+            return None
+        counts = {str(key): int(value) for key, value in pending.items() if type(value) is int and value > 0}
+        targets = [str(value) for value in state.get("protocol_deviation_pending_targets", []) if isinstance(value, str)][-4:]
+        for item in deviations:
+            if isinstance(item, dict):
+                item["notice_delivered"] = True
+        state["protocol_deviation_pending_counts"] = {}
+        state["protocol_deviation_pending_targets"] = []
+        _write_capture(path, state)
+    reads = sorted((key.split(":", 1)[0], value) for key, value in counts.items() if key.endswith(":extra_read"))
+    blocked = sum(value for key, value in counts.items() if key.endswith(":blocked"))
+    parts = []
+    if reads:
+        parts.append("extra context reads " + ", ".join(f"{role}={count}" for role, count in reads))
+    if blocked:
+        parts.append(f"blocked control mutations={blocked}")
+    if targets:
+        parts.append("recent targets: " + ", ".join(f"`{target}`" for target in targets))
+    overflow = int(state.get("protocol_deviation_overflow_count", 0))
+    if overflow:
+        parts.append(f"diagnostic ring overflow={overflow}")
+    return "Protocol deviations (batched): " + "; ".join(parts) + "."
+
+
+def _lifecycle_path(root: Path, task_id: str) -> Path:
+    return root / ".context" / "audit" / "lifecycle" / f"{_task_key(task_id)}.json"
+
+
+def _load_lifecycle(path: Path, task_id: str) -> dict[str, Any]:
+    task_authority.check(path.parents[3])
+    if not path.is_file():
+        return {"version": LIFECYCLE_STATE_VERSION, "task_id_hash": _task_key(task_id), "children": [], "pending_authorized_spawn": None, "sequence": 0}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION or value.get("task_id_hash") != _task_key(task_id) or not isinstance(value.get("children"), list):
+        raise ValueError("invalid lifecycle runtime state")
+    owner = value.get("owner_session_id_hash")
+    if owner is not None and (not isinstance(owner, str) or re.fullmatch(r"[0-9a-f]{64}", owner) is None):
+        raise ValueError("invalid lifecycle Controller owner")
+    pending = value.get("pending_authorized_spawn")
+    if pending is not None and (
+        not isinstance(pending, dict)
+        or set(pending) not in (
+            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"},
+            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash"},
+        )
+        or pending.get("role") not in set(_native_agent_roles().values())
+        or pending.get("expected_agent_type") not in _native_agent_roles()
+        or not isinstance(pending.get("session_id_hash"), str)
+        or not isinstance(pending.get("authorized_sequence"), int)
+        or not isinstance(pending.get("handoff_id"), str)
+        or type(pending.get("task_revision")) is not int
+        or pending.get("producer") != "controller"
+        or not isinstance(pending.get("payload_hash"), str)
+        or type(pending.get("created_at_ns")) is not int
+        or ("spawn_turn_id_hash" in pending and pending["spawn_turn_id_hash"] is not None
+            and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
+        or not _valid_parent_metadata(pending)
+    ):
+        raise ValueError("invalid lifecycle authorized spawns")
+    return value
+
+
+def record_task_start_owner(root: Path, task_id: str, session_hash: str) -> None:
+    """Bind a newly attested managed task to its immutable Controller session."""
+    if re.fullmatch(r"[0-9a-f]{64}", session_hash) is None:
+        raise ValueError("managed task start requires a proven Controller session")
+    with core._lock(root):
+        state = core._load_state(root, active=True)
+        if state.get("task_id") != task_id:
+            raise ValueError("managed task changed before owner recording")
+        path = _lifecycle_path(root, task_id)
+        lifecycle_state = _load_lifecycle(path, task_id)
+        existing = lifecycle_state.get("owner_session_id_hash")
+        if existing is not None and existing != session_hash:
+            raise ValueError("managed task Controller owner changed")
+        lifecycle_state["owner_session_id_hash"] = session_hash
+        _write_capture(path, lifecycle_state)
+
+
+def active_controller_owner(root: Path, task_id: str) -> str | None:
+    """Return only an immutable or legacy depth-one Controller binding."""
+    ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
+    owner = ledger.get("owner_session_id_hash")
+    if owner is not None:
+        return owner
+    pending = ledger.get("pending_authorized_spawn")
+    if isinstance(pending, dict) and pending.get("depth") == 1 and pending.get("parent_role") == "controller":
+        return pending["session_id_hash"]
+    return None
+
+
+def _valid_parent_metadata(record: dict[str, Any]) -> bool:
+    if record.get("depth") == 1:
+        return record.get("parent_role") == "controller" and record.get("parent_agent_id_hash") is None and record.get("parent_turn_id_hash") is None and record.get("root_handoff_id") == record.get("handoff_id")
+    return (
+        record.get("depth") == 2
+        and record.get("parent_role") in {"implementer", "focused-implementer", "reviewer"}
+        and record.get("role") == "investigator"
+        and all(isinstance(record.get(key), str) and record[key] for key in ("parent_agent_id_hash", "parent_turn_id_hash", "root_handoff_id"))
+    )
+
+
+def _parent_binding_matches(state: dict[str, Any], record: dict[str, Any], *, require_live: bool) -> bool:
+    if not _valid_parent_metadata(record):
+        return False
+    if record["depth"] == 1:
+        return True
+    return any(isinstance(parent, dict)
+        and parent.get("managed") is True and parent.get("handoff_bound") is True
+        and parent.get("depth") == 1
+        and parent.get("agent_id_hash") == record["parent_agent_id_hash"]
+        and parent.get("role") == record["parent_role"]
+        and parent.get("turn_id_hash") == record["parent_turn_id_hash"]
+        and parent.get("session_id_hash") == record.get("session_id_hash")
+        and parent.get("handoff_id") == record["root_handoff_id"]
+        and (not require_live or parent.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"})
+        for parent in state["children"])
+
+
+def _pending_parent_live(state: dict[str, Any], record: dict[str, Any]) -> bool:
+    return _parent_binding_matches(state, record, require_live=True)
+
+
+def _spawn_parent_matches(root: Path, record: dict[str, Any], payload: dict[str, Any]) -> bool:
+    """Correlate returned native names to the exact reserving actor, never a path."""
+    if record.get("session_id_hash") != _session_id_hash(payload):
+        return False
+    if record.get("parent_agent_id_hash") != _identity_hash(payload.get("agent_id")):
+        return False
+    if record.get("depth") == 2 and (
+        record.get("parent_turn_id_hash") != _turn_id_hash(payload)
+        or record.get("parent_role") != _managed_spawn_role({"tool_input": payload})
+    ):
+        return False
+    expected = record.get("spawn_tool_use_id_hash")
+    if expected is not None:
+        return expected == _identity_hash(payload.get("tool_use_id"))
+    if _session_id_hash(payload) not in _read_abandoned_owner_hashes(root):
+        return True
+    # A result without a native call ID must match the exact reserving turn
+    # and handoff after an owner abort. Older reservations without a turn
+    # remain uncorrelatable in the reused session.
+    turn = record.get("spawn_turn_id_hash")
+    handoff = _delegation_text(_delegation_input(payload))
+    if turn is None or turn != _turn_id_hash(payload) or not isinstance(handoff, str):
+        return False
+    if record.get("payload_hash") != hashlib.sha256(handoff.encode("utf-8")).hexdigest():
+        return False
+    if record.get("expected_agent_type", record.get("agent_type")) != _native_spawn_agent_type(payload):
+        return False
+    return not _matches_abandoned_spawn(root, payload)
+
+
+def _bound_child_record(state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    agent_id = payload.get("agent_id")
+    native_type = _native_spawn_agent_type({"tool_input": payload})
+    session, turn = _session_id_hash(payload), _turn_id_hash(payload)
+    if not isinstance(agent_id, str) or not agent_id or native_type is None or session is None or turn is None:
+        return None
+    matches = [child for child in state["children"] if isinstance(child, dict)
+        and child.get("agent_id_hash") == _identity_hash(agent_id)
+        and child.get("agent_type") == native_type
+        and child.get("session_id_hash") == session
+        and child.get("turn_id_hash") == turn
+        and child.get("role") == _native_agent_roles()[native_type]
+        and child.get("managed") is True and child.get("handoff_bound") is True
+        and isinstance(child.get("handoff_id"), str)
+        and _parent_binding_matches(state, child, require_live=False)
+        and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _managed_spawn_role(payload: dict[str, Any]) -> str | None:
+    """Map only an explicitly supported native agent_type to a semantic role."""
+    native_agent_type = _native_spawn_agent_type(payload)
+    return _native_agent_roles().get(native_agent_type) if native_agent_type is not None else None
+
+
+def _native_spawn_agent_type(payload: dict[str, Any]) -> str | None:
+    """Accept one exact supported native profile, never a first-match alias."""
+    tool_input = _delegation_input(payload)
+    supplied = [tool_input[key] for key in ("agent_type", "agentType") if key in tool_input]
+    if not supplied or any(not isinstance(value, str) or value not in _native_agent_roles() for value in supplied):
+        return None
+    return supplied[0] if all(value == supplied[0] for value in supplied) else None
+
+
+def _bound_managed_child(root: Path, payload: dict[str, Any]) -> bool:
+    """Match a child PreToolUse call to one live, handoff-bound role session."""
+    task_id = _active_task_id(root)
+    if task_id is None:
+        return False
+    try:
+        with core._lock(root):
+            state = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
+            return _bound_child_record(state, payload) is not None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _child_binding_field_statuses(
+    state: dict[str, Any] | None,
+    payload: dict[str, Any],
+    matched_record: dict[str, Any] | None,
+) -> tuple[dict[str, str], dict[str, str | None]]:
+    """Describe a denied child identity using statuses and digests only."""
+    children = state.get("children") if isinstance(state, dict) else None
+    records = [child for child in children if isinstance(child, dict)] if isinstance(children, list) else None
+    agent_id = payload.get("agent_id")
+    native_type = _native_spawn_agent_type({"tool_input": payload})
+    role = _native_agent_roles().get(native_type) if native_type is not None else None
+    session_hash = _session_id_hash(payload)
+    turn_hash = _turn_id_hash(payload)
+    agent_hash = _identity_hash(agent_id)
+    identity_hashes = {
+        "agent_id": agent_hash,
+        "role": _identity_hash(native_type),
+        "session": session_hash,
+        "turn": turn_hash,
+    }
+
+    def status(value_hash: str | None, key: str, expected: object) -> str:
+        if value_hash is None:
+            raw = payload.get(key)
+            return "MISMATCH" if raw is not None and raw != "" else "MISSING"
+        if records is None:
+            return "UNKNOWN"
+        if not records:
+            return "MISSING"
+        return "MATCH" if any(child.get(expected) == value_hash for child in records) else "MISMATCH"
+
+    statuses = {
+        "agent_id": status(agent_hash, "agent_id", "agent_id_hash"),
+        "session": status(session_hash, "session_id", "session_id_hash"),
+        "turn": status(turn_hash, "turn_id", "turn_id_hash"),
+    }
+    if native_type is None:
+        supplied_type = payload.get("agent_type")
+        statuses["role"] = "MISMATCH" if supplied_type is not None and supplied_type != "" else "MISSING"
+    elif records is None:
+        statuses["role"] = "UNKNOWN"
+    elif not records:
+        statuses["role"] = "MISSING"
+    else:
+        statuses["role"] = "MATCH" if any(
+            child.get("agent_type") == native_type and child.get("role") == role
+            for child in records
+        ) else "MISMATCH"
+
+    if matched_record is not None:
+        statuses["lifecycle_binding"] = "MATCH"
+    elif records is None:
+        statuses["lifecycle_binding"] = "UNKNOWN"
+    elif not records or any(value == "MISSING" for value in statuses.values()):
+        statuses["lifecycle_binding"] = "MISSING"
+    else:
+        exact_identity = next((child for child in records if
+            child.get("agent_id_hash") == agent_hash
+            and child.get("agent_type") == native_type
+            and child.get("role") == role
+            and child.get("session_id_hash") == session_hash
+            and child.get("turn_id_hash") == turn_hash), None)
+        if exact_identity is None:
+            statuses["lifecycle_binding"] = "MISMATCH"
+        elif exact_identity.get("managed") is not True or exact_identity.get("handoff_bound") is not True:
+            statuses["lifecycle_binding"] = "MISSING"
+        else:
+            statuses["lifecycle_binding"] = "MISMATCH"
+    return statuses, identity_hashes
+
+
+def _bound_child_pretool_diagnostic(root: Path, payload: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    """Return the guard's exact binding result and hash-only failure details."""
+    try:
+        task_id = _active_task_id(root)
+        if task_id is None:
+            statuses, hashes = _child_binding_field_statuses(None, payload, None)
+            return False, {"field_status": statuses, "identity_hashes": hashes}
+        with core._lock(root):
+            state = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
+            record = _bound_child_record(state, payload)
+            statuses, hashes = _child_binding_field_statuses(state, payload, record)
+            return record is not None, {"field_status": statuses, "identity_hashes": hashes}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        statuses, hashes = _child_binding_field_statuses(None, payload, None)
+        statuses["lifecycle_binding"] = "UNKNOWN"
+        return False, {"field_status": statuses, "identity_hashes": hashes}
+
+
+def _record_bound_role_session_denial(root: Path, payload: dict[str, Any], diagnostic: dict[str, Any]) -> None:
+    """Record a bounded, hash-only diagnostic for one denied child PreToolUse."""
+    observed_at_ns = time.time_ns()
+    call_id = payload.get("tool_call_id") or payload.get("call_id") or payload.get("id")
+    call_id_hash = _identity_hash(call_id)
+    event_hash = hashlib.sha256(json.dumps({
+        "identity_hashes": diagnostic.get("identity_hashes"),
+        "call_id_hash": call_id_hash,
+        "observed_at_ns": observed_at_ns,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    statuses = diagnostic.get("field_status")
+    if not isinstance(statuses, dict):
+        return
+    item = {
+        "event_hash": event_hash,
+        "denial_code": "THALIRIS_BOUND_ROLE_SESSION_REQUIRED",
+        "identity_hashes": diagnostic.get("identity_hashes"),
+        "field_status": statuses,
+        "missing_fields": sorted(key for key, value in statuses.items() if value == "MISSING"),
+        "mismatch_fields": sorted(key for key, value in statuses.items() if value == "MISMATCH"),
+        "observed_at_ns": observed_at_ns,
+    }
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        _runtime_metadata(state, payload)
+        records = state.setdefault("bound_role_session_denials", [])
+        if isinstance(records, list) and len(records) < MAX_RAW_RECORDS:
+            records.append(item)
+        _write_capture(path, state)
+
+
+def _bound_child_parent_message(root: Path, payload: dict[str, Any]) -> bool:
+    """Permit only an exact bound child's unambiguous native parent target."""
+    target = _delegation_input(payload).get("target")
+    if not isinstance(target, str) or not target:
+        return False
+    task_id = _active_task_id(root)
+    if task_id is None:
+        return False
+    try:
+        with core._lock(root):
+            state = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
+            child = _bound_child_record(state, payload)
+            if child is None:
+                return False
+            if child["depth"] == 1:
+                return target == "/root"
+            if child["depth"] != 2:
+                return False
+            parents = [parent for parent in state["children"] if isinstance(parent, dict)
+                and parent.get("managed") is True and parent.get("handoff_bound") is True
+                and parent.get("depth") == 1
+                and parent.get("agent_id_hash") == child["parent_agent_id_hash"]
+                and parent.get("role") == child["parent_role"]
+                and parent.get("turn_id_hash") == child["parent_turn_id_hash"]
+                and parent.get("session_id_hash") == child["session_id_hash"]
+                and parent.get("handoff_id") == child["root_handoff_id"]]
+            if len(parents) != 1:
+                return False
+            target_hash = _identity_hash(target)
+            parent = parents[0]
+            if target_hash not in {parent.get("agent_id_hash"), parent.get("task_name_hash")}:
+                return False
+            return sum(
+                target_hash in {record.get("agent_id_hash"), record.get("task_name_hash")}
+                for record in state["children"]
+                if isinstance(record, dict) and record.get("managed") is True and record.get("handoff_bound") is True
+            ) == 1
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _session_id_hash(payload: dict[str, Any]) -> str | None:
+    value = payload.get("session_id")
+    return _identity_hash(value) if isinstance(value, str) and value else None
+
+
+def _turn_id_hash(payload: dict[str, Any]) -> str | None:
+    value = payload.get("turn_id")
+    return _identity_hash(value) if isinstance(value, str) and value else None
+
+
+def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id: str | None = None) -> str:
+    """Atomically reserve the one authorized native Codex role-session slot before allowing spawn."""
+    task_id = expected_task_id or _active_task_id(root)
+    if task_id is None:
+        return ""
+    expected_agent_type = _native_spawn_agent_type(payload)
+    role = _native_agent_roles().get(expected_agent_type) if expected_agent_type is not None else None
+    if role is None:
+        return _permission_deny("THALIRIS_MANAGED_AGENT_REQUIRED: managed tasks may spawn only a supported Thaliris agent profile.")
+    tool_input = _delegation_input(payload)
+    if tool_input.get("fork_turns") != "none":
+        return _permission_deny('THALIRIS_ISOLATION_REQUIRED: use fork_turns="none".')
+    nested = payload.get("agent_id") is not None or payload.get("agent_type") is not None
+    overrides = {key: tool_input[key] for key in ("model", "reasoning_effort", "thinking", "model_reasoning_effort") if tool_input.get(key) is not None}
+    if overrides:
+        return _permission_deny("THALIRIS_ROLE_MODEL_OVERRIDE: named native profiles have fixed model/effort; Controller selects an explicit exceptional xhigh profile instead.")
+    target_binding = roles.get_codex_binding(role)
+    if nested and target_binding is not None and expected_agent_type == target_binding.exceptional_native_profile:
+        return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exceptional profiles are Controller-only.")
+    session_id_hash = _session_id_hash(payload)
+    if session_id_hash is None:
+        return _permission_deny("THALIRIS_MANAGED_SESSION_REQUIRED: managed spawn authorization requires a current session identity.")
+    try:
+        with core._lock(root):
+            # Re-read while holding the same lock used by task mutations.
+            if _active_task_id(root) != task_id:
+                return _permission_deny("THALIRIS_MANAGED_SPAWN_UNAVAILABLE: the active task changed before authorization.")
+            if _session_fenced(root, session_id_hash):
+                return _permission_deny("THALIRIS_ABANDONED_SESSION: this native session belongs to an abandoned managed task.")
+            path = _lifecycle_path(root, task_id)
+            state = _load_lifecycle(path, task_id)
+            if not nested and task_authority.check(root) is None and active_controller_owner(root, task_id) != session_id_hash:
+                return _permission_deny("THALIRIS_ACTIVE_OWNER_REQUIRED: ACTIVE spawn requires the owning Hook session.")
+            parent = _bound_child_record(state, payload) if nested else None
+            if nested and (parent is None or parent.get("depth") != 1 or not roles.delegation_allowed(parent["role"], role)):
+                return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exact bound depth-one Executor/Reviewer parent and Investigator target required.")
+            if not nested and not roles.delegation_allowed("controller", role):
+                return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: unsupported Controller target.")
+            active = any(
+                isinstance(child, dict)
+                and child.get("managed") is True
+                and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}
+                and child is not parent
+                for child in state["children"]
+            )
+            if active or state["pending_authorized_spawn"] is not None:
+                fingerprint = _lifecycle_block_fingerprint(state)
+                stall = state.get("stall")
+                repeated = isinstance(stall, dict) and stall.get("fingerprint") == fingerprint
+                state["stall"] = {"fingerprint": fingerprint, "blocked_spawn_calls": int(stall.get("blocked_spawn_calls", 0)) + 1 if repeated else 1}
+                metrics = state.setdefault("metrics", {})
+                metrics["blocked_spawn_calls"] = int(metrics.get("blocked_spawn_calls", 0)) + 1
+                _runtime_metadata(state, payload)
+                _write_capture(path, state)
+                if repeated:
+                    return _permission_deny("ORCHESTRATION_STALLED: the managed native Codex session lifecycle has no new terminal information; stop recovery attempts until a native lifecycle event arrives.")
+                return _permission_deny("THALIRIS_SERIAL_ROLE_SESSION_REQUIRED: wait for the managed native Codex session reservation to complete before spawning another named-role session.")
+            state["sequence"] = int(state.get("sequence", 0)) + 1
+            task_state = core._load_state(root, active=True)
+            if task_state.get("task_id") != task_id:
+                return _permission_deny("THALIRIS_MANAGED_SPAWN_UNAVAILABLE: the active task changed before authorization.")
+            handoff_text = _delegation_text(_delegation_input(payload))
+            if not isinstance(handoff_text, str) or not handoff_text.strip():
+                return _permission_deny("THALIRIS_HANDOFF_REQUIRED: managed spawn requires an explicit Controller handoff message.")
+            payload_hash = hashlib.sha256(handoff_text.encode("utf-8")).hexdigest()
+            handoff_material = f"{task_id}\0{task_state['revision']}\0{session_id_hash}\0{state['sequence']}\0{payload_hash}"
+            handoff_id = f"handoff-{hashlib.sha256(handoff_material.encode('utf-8')).hexdigest()[:32]}"
+            state["pending_authorized_spawn"] = {
+                "role": role,
+                "expected_agent_type": expected_agent_type,
+                "session_id_hash": session_id_hash,
+                "authorized_sequence": state["sequence"],
+                "task_name_hash": None,
+                "handoff_id": handoff_id,
+                "task_revision": task_state["revision"],
+                "producer": "controller",
+                "payload_hash": payload_hash,
+                "created_at_ns": time.time_ns(),
+                "parent_agent_id_hash": parent["agent_id_hash"] if parent else None,
+                "parent_role": parent["role"] if parent else "controller",
+                "parent_turn_id_hash": parent["turn_id_hash"] if parent else None,
+                "depth": 2 if parent else 1,
+                "root_handoff_id": parent["handoff_id"] if parent else handoff_id,
+                "spawn_tool_use_id_hash": _identity_hash(payload.get("tool_use_id")) if isinstance(payload.get("tool_use_id"), str) else None,
+                "spawn_turn_id_hash": _turn_id_hash(payload),
+            }
+            state["pending_spawn_terminal_evidence"] = None
+            state["stall"] = None
+            _runtime_metadata(state, payload)
+            _write_capture(path, state)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return _permission_deny("THALIRIS_MANAGED_SPAWN_UNAVAILABLE: managed authorization could not be reserved.")
+    return ""
+
+
+def recover_pending_spawn(root: Path, handoff_id: str) -> dict[str, object]:
+    """Clear one exact unbound reservation after Controller-observed failure."""
+    task_id = _active_task_id(root)
+    if task_id is None:
+        raise ValueError("pending spawn recovery requires an ACTIVE task")
+    if not isinstance(handoff_id, str) or not re.fullmatch(r"handoff-[0-9a-f]{32}", handoff_id):
+        raise ValueError("invalid pending spawn handoff id")
+    with core._lock(root):
+        if _active_task_id(root) != task_id:
+            raise ValueError("pending spawn recovery task is no longer ACTIVE")
+        path = _lifecycle_path(root, task_id)
+        if not path.is_file():
+            raise ValueError("pending spawn recovery state is unavailable")
+        state = _load_lifecycle(path, task_id)
+        pending = state.get("pending_authorized_spawn")
+        bound_child = any(
+            isinstance(child, dict)
+            and child.get("managed") is True
+            and child.get("handoff_id") == handoff_id
+            for child in state.get("children", [])
+        )
+        if bound_child:
+            raise ValueError("pending spawn is already bound to an authorized native Codex role session")
+        if not isinstance(pending, dict) or pending.get("handoff_id") != handoff_id:
+            raise ValueError("pending spawn handoff id does not match")
+        evidence = state.get("pending_spawn_terminal_evidence")
+        if not isinstance(evidence, dict) or evidence.get("handoff_id") != handoff_id or evidence.get("status") not in {"interrupted", "errored", "shutdown", "spawn_failed"}:
+            raise ValueError("pending spawn recovery requires trusted terminal Host evidence")
+        recoveries = state.setdefault("spawn_recoveries", [])
+        if not isinstance(recoveries, list):
+            raise ValueError("invalid pending spawn recovery state")
+        if len(recoveries) < 16:
+            recoveries.append({"handoff_id": handoff_id, "observed_at_ns": time.time_ns()})
+        state["pending_authorized_spawn"] = None
+        state["pending_spawn_terminal_evidence"] = None
+        state["stall"] = None
+        metrics = state.setdefault("metrics", {})
+        metrics["spawn_recoveries"] = int(metrics.get("spawn_recoveries", 0)) + 1
+        _write_capture(path, state)
+    return {"ok": True, "task_id": task_id, "handoff_id": handoff_id, "recovered": True}
+
+
+def task_state_recovery_blocker(root: Path, task_id: str) -> str | None:
+    """Fail closed if the incompatible task still has lifecycle authority."""
+    relative = f".context/audit/lifecycle/{_task_key(task_id)}.json"
+    try:
+        path = core._safe_without_final_symlink(root, relative)
+    except ValueError:
+        return "lifecycle state path traverses a symlink or escapes the repository"
+    if not path.is_file():
+        if path.exists():
+            return "lifecycle state is not a regular file"
+        return None
+    try:
+        state = _load_lifecycle(path, task_id)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return "lifecycle state is unreadable or incompatible"
+    if state.get("pending_authorized_spawn") is not None:
+        return "an authorized spawn reservation is still pending"
+    children = state.get("children")
+    if not isinstance(children, list):
+        return "lifecycle child state is malformed"
+    if any(
+        not isinstance(child, dict)
+        or child.get("terminal_state") != "NATIVE_TERMINAL_RECONCILED"
+        for child in children
+    ):
+        return "one or more child lifecycles are not explicitly terminal"
+    return None
+
+
+def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
+    """Bind an authorized native child to its explicit Controller handoff."""
+    task_id = _active_task_id(root)
+    agent_id = payload.get("agent_id")
+    agent_type = payload.get("agent_type")
+    native_agent_type = _native_spawn_agent_type({"tool_input": {"agent_type": agent_type}})
+    role = _native_agent_roles().get(native_agent_type) if native_agent_type is not None else None
+    session_id_hash = _session_id_hash(payload)
+    turn_id_hash = _turn_id_hash(payload)
+    if task_id is None or not isinstance(agent_id, str) or not agent_id or role is None or session_id_hash is None or turn_id_hash is None:
+        return False
+    with core._lock(root):
+        if _active_task_id(root) != task_id or _session_fenced(root, session_id_hash):
+            return False
+        path = _lifecycle_path(root, task_id)
+        state = _load_lifecycle(path, task_id)
+        if task_authority.check(root) is None and active_controller_owner(root, task_id) != session_id_hash:
+            return False
+        state["sequence"] = int(state.get("sequence", 0)) + 1
+        child_hash = _identity_hash(agent_id)
+        children = state["children"]
+        pending = state["pending_authorized_spawn"]
+        authorized = (
+            isinstance(pending, dict)
+            and pending.get("role") == role
+            and pending.get("expected_agent_type") == native_agent_type
+            and pending.get("session_id_hash") == session_id_hash
+            and _pending_parent_live(state, pending)
+        )
+        prior = next((item for item in children if item.get("agent_id_hash") == child_hash), None)
+        bound = authorized and prior is None
+        if prior is None:
+            children.append({
+                "agent_id_hash": child_hash,
+                "agent_type": native_agent_type,
+                "session_id_hash": session_id_hash,
+                "turn_id_hash": turn_id_hash,
+                "role": role,
+                "managed": bound,
+                "handoff_bound": bound,
+                "handoff_id": pending.get("handoff_id") if bound else None,
+                "task_revision": pending.get("task_revision") if bound else None,
+                "producer": pending.get("producer") if bound else None,
+                "payload_hash": pending.get("payload_hash") if bound else None,
+                "handoff_created_at_ns": pending.get("created_at_ns") if bound else None,
+                "started": state["sequence"],
+                "stopped": None,
+                "terminal_state": "RUNNING",
+                "native_terminal_status": None,
+                "task_name_hash": pending.get("task_name_hash") if bound else None,
+                **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")},
+            })
+            if bound:
+                state["pending_authorized_spawn"] = None
+        else:
+            collisions = state.setdefault("identity_collisions", [])
+            if isinstance(collisions, list) and len(collisions) < 16:
+                collisions.append({
+                    "agent_id_hash": child_hash,
+                    "agent_type": native_agent_type,
+                    "pending_handoff_id": pending.get("handoff_id") if authorized else None,
+                    "observed_at_ns": time.time_ns(),
+                })
+        state["stall"] = None
+        _runtime_metadata(state, payload)
+        _write_capture(path, state)
+    # Keep only the old bounded identity-corroboration sample for diagnostics;
+    # completion authority remains exclusively in the task-local lifecycle file.
+    with core._lock(root):
+        runtime_path = _session_dir(root, payload) / "runtime.json"
+        runtime = _load_runtime(runtime_path)
+        _runtime_metadata(runtime, payload)
+        _bounded_append(runtime, "subagent_start_agent_id_hashes", _identity_hash(agent_id))
+        _bounded_append(runtime, "subagent_start_agent_types", agent_type[:80] if isinstance(agent_type, str) else None)
+        runtime.setdefault("events_observed", {})["SubagentStart"] = True
+        _write_capture(runtime_path, runtime)
+    return bound
+
+
+def _record_subagent_stop(root: Path, payload: dict[str, Any]) -> bool:
+    task_id = _active_task_id(root)
+    agent_id = payload.get("agent_id")
+    native_agent_type = _native_spawn_agent_type({"tool_input": {"agent_type": payload.get("agent_type")}})
+    session_id_hash = _session_id_hash(payload)
+    turn_id_hash = _turn_id_hash(payload)
+    if task_id is None or not isinstance(agent_id, str) or not agent_id or native_agent_type is None or session_id_hash is None or turn_id_hash is None:
+        return False
+    with core._lock(root):
+        if _active_task_id(root) != task_id or _session_fenced(root, session_id_hash):
+            return False
+        path = _lifecycle_path(root, task_id)
+        state = _load_lifecycle(path, task_id)
+        child_hash = _identity_hash(agent_id)
+        for child in state["children"]:
+            if (
+                child.get("agent_id_hash") == child_hash
+                and child.get("agent_type") == native_agent_type
+                and child.get("session_id_hash") == session_id_hash
+                and child.get("turn_id_hash") == turn_id_hash
+                and child.get("managed") is True
+                and child.get("terminal_state", "RUNNING") != "STOP_ATTESTED"
+            ):
+                state["sequence"] = int(state.get("sequence", 0)) + 1
+                child["stopped"] = state["sequence"]
+                child["terminal_state"] = "STOP_ATTESTED"
+                # SubagentStop attests this hook path only. It carries no
+                # AgentStatus result, so it must never manufacture completed
+                # or overwrite a trusted failed native terminal status.
+                if child.get("native_terminal_status") not in {"not_found", "interrupted", "errored", "shutdown"}:
+                    child["native_terminal_status"] = child.get("native_terminal_status") if child.get("native_terminal_status") == "completed" else None
+                state["stall"] = None
+                _runtime_metadata(state, payload)
+                _write_capture(path, state)
+                return True
+    return False
+
+
+def _lifecycle_block_fingerprint(state: dict[str, Any]) -> str:
+    """Hash only mechanical in-flight state for repeated-block detection."""
+    active = [
+        {
+            "agent_id_hash": child.get("agent_id_hash"),
+            "terminal_state": child.get("terminal_state", "RUNNING"),
+            "task_name_hash": child.get("task_name_hash"),
+        }
+        for child in state.get("children", [])
+        if isinstance(child, dict)
+        and child.get("managed") is True
+        and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}
+    ]
+    pending = state.get("pending_authorized_spawn")
+    return hashlib.sha256(json.dumps({"active": active, "pending": pending}, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _native_terminal_status(value: object) -> str | None:
+    """Parse only Codex V2's documented AgentStatus JSON representation."""
+    if isinstance(value, str) and value in {"pending_init", "running", "not_found", "interrupted", "shutdown"}:
+        return value
+    if isinstance(value, dict) and set(value) == {"completed"}:
+        return "completed"
+    if isinstance(value, dict) and set(value) == {"errored"} and isinstance(value.get("errored"), str):
+        return "errored"
+    return None
+
+
+def _child_for_native_name(children: list[object], name: str) -> dict[str, Any] | None:
+    name_hash = _identity_hash(name)
+    matches = [
+        child for child in children
+        if isinstance(child, dict)
+        and child.get("managed") is True
+        and (child.get("task_name_hash") == name_hash or child.get("agent_id_hash") == name_hash)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status: str) -> bool:
+    """Release only a proved terminal execution slot; never accept a result."""
+    if status == "not_found":
+        child["terminal_state"] = "ORPHANED"
+        child["native_terminal_status"] = status
+        return True
+    if status not in {"completed", "interrupted", "errored", "shutdown"}:
+        return False
+    if child.get("terminal_state") == "STOP_ATTESTED":
+        # Preserve the independent stop attestation, but retain the native
+        # result when it naturally arrives afterwards. A failure is sticky.
+        prior = child.get("native_terminal_status")
+        if prior in {"interrupted", "errored", "shutdown"} or prior == status:
+            return False
+        child["native_terminal_status"] = status
+        return True
+    state["sequence"] = int(state.get("sequence", 0)) + 1
+    child["stopped"] = state["sequence"]
+    child["terminal_state"] = "NATIVE_TERMINAL_RECONCILED"
+    child["native_terminal_status"] = status
+    state["stall"] = None
+    return True
+
+
+def _record_pending_terminal(state: dict[str, Any], name: str, status: str, source: str) -> bool:
+    """Retain only exact name-bound native failure for an unbound reservation."""
+    pending = state.get("pending_authorized_spawn")
+    if (status not in {"interrupted", "errored", "shutdown"}
+            or not isinstance(pending, dict)
+            or pending.get("task_name_hash") != _identity_hash(name)
+            or not _pending_parent_live(state, pending)):
+        return False
+    state["pending_spawn_terminal_evidence"] = {
+        "handoff_id": pending["handoff_id"], "status": status,
+        "source": source, "task_name_hash": pending["task_name_hash"],
+        "observed_at_ns": time.time_ns(),
+    }
+    return True
+
+
+def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: str) -> None:
+    """Use naturally returned, identity-bound native statuses to repair liveness.
+
+    This intentionally does not query or schedule anything.  It consumes only
+    the current PostToolUse result, requires a canonical native name already
+    causally bound to the serial spawn, and keeps successful completion gated
+    on SubagentStop.
+    """
+    task_id = _active_task_id(root)
+    response = _post_tool_response(payload)
+    if task_id is None or not isinstance(response, dict):
+        return
+    with core._lock(root):
+        if _active_task_id(root) != task_id:
+            return
+        path = _lifecycle_path(root, task_id)
+        if not path.is_file():
+            return
+        state = _load_lifecycle(path, task_id)
+        session_hash = _session_id_hash(payload)
+        if _session_fenced(root, session_hash):
+            return
+        nested = payload.get("agent_id") is not None or payload.get("agent_type") is not None
+        if nested:
+            if _bound_child_record(state, payload) is None:
+                return
+        elif session_hash is None or (task_authority.check(root) is None and active_controller_owner(root, task_id) != session_hash):
+            return
+        changed = observed = False
+        if tool == "spawn_agent":
+            pending = state.get("pending_authorized_spawn")
+            if (isinstance(pending, dict) and pending.get("spawn_tool_use_id_hash") is not None
+                    and pending["spawn_tool_use_id_hash"] == _identity_hash(payload.get("tool_use_id"))
+                    and _spawn_parent_matches(root, pending, payload)
+                    and _dispatch_status(response) == "REJECTED"):
+                state["pending_spawn_terminal_evidence"] = {
+                    "handoff_id": pending["handoff_id"], "status": "spawn_failed",
+                    "source": "spawn_agent", "observed_at_ns": time.time_ns(),
+                }
+                changed = True
+            task_name = response.get("task_name")
+            if isinstance(task_name, str) and task_name:
+                name_hash = _identity_hash(task_name)
+                pending = state.get("pending_authorized_spawn")
+                if isinstance(pending, dict) and pending.get("task_name_hash") is None and _spawn_parent_matches(root, pending, payload):
+                    pending["task_name_hash"] = name_hash
+                    changed = True
+                else:
+                    candidates = [
+                        child for child in state["children"]
+                        if isinstance(child, dict)
+                        and child.get("managed") is True
+                        and child.get("task_name_hash") is None
+                        and child.get("terminal_state", "RUNNING") == "RUNNING"
+                        and _spawn_parent_matches(root, child, payload)
+                    ]
+                    if len(candidates) == 1:
+                        candidates[0]["task_name_hash"] = name_hash
+                        changed = True
+        elif tool == "interrupt_agent":
+            tool_input = _delegation_input(payload)
+            target = tool_input.get("target")
+            status = _native_terminal_status(response.get("previous_status"))
+            if isinstance(target, str) and status is not None:
+                child = _child_for_native_name(state["children"], target)
+                if child is not None:
+                    observed = True
+                    metrics = state.setdefault("metrics", {})
+                    metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
+                    changed = _record_native_terminal(state, child, status)
+                    if changed and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+                        metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
+                else:
+                    changed = _record_pending_terminal(state, target, status, "interrupt_agent") or changed
+        elif tool == "list_agents":
+            entries = response.get("agents")
+            if isinstance(entries, list):
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    name, status = entry.get("agent_name"), _native_terminal_status(entry.get("agent_status"))
+                    if not isinstance(name, str) or status is None:
+                        continue
+                    child = _child_for_native_name(state["children"], name)
+                    if child is None:
+                        changed = _record_pending_terminal(state, name, status, "list_agents") or changed
+                        continue
+                    observed = True
+                    metrics = state.setdefault("metrics", {})
+                    metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
+                    did_reconcile = _record_native_terminal(state, child, status)
+                    changed = changed or did_reconcile
+                    if did_reconcile and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+                        metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
+        if changed or observed:
+            _runtime_metadata(state, payload)
+            _write_capture(path, state)
+
+
+def _subagent_start_output(root: Path, payload: dict[str, Any]) -> str:
+    # SubagentStart is lifecycle-only. The native spawn message is the sole
+    # task-specific semantic input; returning additionalContext here would
+    # create a second router and duplicate the Controller's handoff.
+    _record_subagent_start(root, payload)
+    return ""
+
+
+def _bounded_append(state: dict[str, Any], key: str, value: str | None) -> None:
+    if not value:
+        return
+    values = state.setdefault(key, [])
+    if isinstance(values, list) and value not in values and len(values) < 16:
+        values.append(value)
+
+
+def child_identity_corroboration(root: Path) -> str:
+    """Return YES only for an in-record SubagentStart/PreTool identity match."""
+    expected = managed_hook_spec_hash()
+    for path in (root / ".context" / "audit").glob("*/runtime.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(state, dict) or state.get("managed_hook_spec_hash") != expected:
+            continue
+        starts = state.get("subagent_start_agent_id_hashes")
+        pretools = state.get("pretool_child_agent_id_hashes")
+        if isinstance(starts, list) and isinstance(pretools, list):
+            start_hashes = {item for item in starts if isinstance(item, str)}
+            pretool_hashes = {item for item in pretools if isinstance(item, str)}
+            if start_hashes & pretool_hashes:
+                return "YES"
+    return "UNKNOWN"
+
+
+def _bash_command(payload: dict[str, Any]) -> str | None:
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    command = tool_input.get("command") or tool_input.get("cmd")
+    return command if isinstance(command, str) and command.strip() else None
+
+
+def qualifying_child_completed(root: Path) -> bool:
+    """Require completion proof from the latest authorized managed handoff."""
+    task_id = _active_task_id(root)
+    if task_id is None:
+        return False
+    path = _lifecycle_path(root, task_id)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    managed = [
+        child for child in value.get("children", [])
+        if isinstance(child, dict) and child.get("managed") is True
+    ] if isinstance(value, dict) else []
+    latest = max((child for child in managed if child.get("depth") == 1 and child.get("parent_role") == "controller"), key=lambda child: int(child.get("started", -1)), default=None)
+    return (
+        isinstance(value, dict)
+        and value.get("version") == LIFECYCLE_STATE_VERSION
+        and value.get("task_id_hash") == _task_key(task_id)
+        and value.get("managed_hook_spec_hash") == managed_hook_spec_hash()
+        and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
+        and value.get("pending_authorized_spawn") is None
+        and not _managed_child_active(root)
+        and isinstance(latest, dict)
+        and latest.get("handoff_bound") is True
+        and isinstance(latest.get("handoff_id"), str)
+        and isinstance(latest.get("payload_hash"), str)
+        and latest.get("terminal_state") == "STOP_ATTESTED"
+        and latest.get("native_terminal_status") == "completed"
+        and isinstance(latest.get("started"), int)
+        and isinstance(latest.get("stopped"), int)
+    )
+
+
+def _managed_child_active(root: Path) -> bool:
+    task_id = _active_task_id(root)
+    if task_id is None:
+        return False
+    try:
+        value = json.loads(_lifecycle_path(root, task_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return isinstance(value, dict) and value.get("version") == LIFECYCLE_STATE_VERSION and value.get("managed_hook_spec_hash") == managed_hook_spec_hash() and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION and any(isinstance(child, dict) and child.get("managed") is True and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"} for child in value.get("children", []))
+
+
+def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None = None) -> bool:
+    """Report whether a managed reservation or live child can be waited on."""
+    task_id = _active_task_id(root)
+    if task_id is None:
+        return False
+    try:
+        value = json.loads(_lifecycle_path(root, task_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    def selected(record: object) -> bool:
+        if not isinstance(record, dict):
+            return False
+        if parent_payload is None:
+            return True
+        return (
+            record.get("depth") == 2
+            and record.get("parent_agent_id_hash") == _identity_hash(parent_payload.get("agent_id"))
+            and record.get("parent_turn_id_hash") == _turn_id_hash(parent_payload)
+            and record.get("parent_role") == _managed_spawn_role({"tool_input": parent_payload})
+            and record.get("session_id_hash") == _session_id_hash(parent_payload)
+        )
+    return (
+        isinstance(value, dict)
+        and value.get("version") == LIFECYCLE_STATE_VERSION
+        and value.get("managed_hook_spec_hash") == managed_hook_spec_hash()
+        and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
+        and (
+            selected(value.get("pending_authorized_spawn"))
+            or any(
+                selected(child)
+                and child.get("managed") is True
+                and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}
+                for child in value.get("children", [])
+            )
+        )
+    )
+
+
+def _reject_non_json_constant(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+def _post_tool_response(payload: dict[str, Any]) -> object:
+    """Read the native PostToolUse result across 0.146 payload variants."""
+    tool = payload.get("tool_name") or payload.get("tool")
+    is_collaboration_tool = isinstance(tool, str) and _tool_basename(tool) in _COLLABORATION_TOOL_NAMES
+    for key in ("tool_response", "tool_result", "result", "output"):
+        if key in payload:
+            response = payload[key]
+            if isinstance(response, str) and is_collaboration_tool:
+                try:
+                    decoded = json.loads(response, parse_constant=_reject_non_json_constant)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return response
+                return decoded if isinstance(decoded, dict) else response
+            return response
+    return None
+
+
+def _record_execution_observation(root: Path, payload: dict[str, Any]) -> None:
+    """Keep a privacy-preserving native payload-shape sample for doctor/probes."""
+    tool = payload.get("tool_name") or payload.get("tool")
+    response_field = next((key for key in ("tool_response", "tool_result", "result", "output") if key in payload), None)
+    response = payload.get(response_field) if response_field is not None else None
+    item: dict[str, Any] = {
+        "tool": _tool_basename(tool) if isinstance(tool, str) else "UNKNOWN",
+        "response_field": response_field,
+        "response_type": type(response).__name__,
+        "outcome": _codex_bash_outcome(response) if isinstance(tool, str) and _tool_basename(tool) == "Bash" else _execution_outcome(response),
+    }
+    if isinstance(response, dict):
+        item["response_keys"] = sorted(str(key) for key in response)[:16]
+        nested = response.get("result")
+        if isinstance(nested, dict):
+            item["nested_result_keys"] = sorted(str(key) for key in nested)[:16]
+    with core._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        _runtime_metadata(state, payload)
+        observed = state.setdefault("execution_observations", [])
+        if isinstance(observed, list) and len(observed) < 8:
+            observed.append(item)
+        _write_capture(path, state)
+
+
+def _post_tool_succeeded(response: object) -> bool:
+    """Treat a completed PostToolUse spawn as success unless it says failure."""
+    if isinstance(response, dict):
+        if any(response.get(key) is True or response.get(key) not in (None, False, "") for key in ("isError", "failed", "error")):
+            return False
+        status = response.get("status")
+        if isinstance(status, str) and status.strip().lower() in {"error", "failed", "failure", "rejected"}:
+            return False
+        nested = response.get("result")
+        if isinstance(nested, dict):
+            return _post_tool_succeeded(nested)
+        return True
+    if isinstance(response, str) and response.strip().lower() in {"error", "failed", "rejected"}:
+        return False
+    return True
+
+
+def _execution_outcome(response: object) -> str:
+    """Parse an explicit terminal-result contract for a future supported runtime.
+
+    Codex stable 0.153.4 does not publish this contract for Bash.  Callers on
+    that surface must use _codex_bash_outcome(), which intentionally remains
+    UNKNOWN even when a synthetic payload happens to contain these fields.
+    """
+    if not isinstance(response, dict):
+        return "UNKNOWN"
+    if any(response.get(key) is True or response.get(key) not in (None, False, "") for key in ("isError", "failed", "error")):
+        return "FAILED"
+    for key in ("exit_code", "exitCode", "returncode", "return_code"):
+        value = response.get(key)
+        if type(value) is int:
+            return "PASSED" if value == 0 else "FAILED"
+    nested = response.get("result")
+    return _execution_outcome(nested) if isinstance(nested, dict) else "UNKNOWN"
+
+
+def _codex_bash_outcome(response: object) -> str:
+    """Current Codex stable has no version-pinned Bash terminal-status fact."""
+    del response
+    return "UNKNOWN"
+
+
+def _context_call(payload: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """Recognize a direct context call and its explicit bounded retrieval targets."""
+    command = _bash_command(payload)
+    if command is None:
+        return None, []
+    separator_check = command.lstrip()
+    if separator_check.startswith("&") and len(separator_check) > 1 and separator_check[1].isspace():
+        separator_check = separator_check[1:].lstrip()
+    segments = _split_command_separators(separator_check)
+    if segments is None or len(segments) != 1:
+        return None, []
+    arguments = _context_arguments(command)
+    if arguments is None:
+        return None, []
+    try:
+        tokens = shlex.split(arguments, posix=False)
+    except ValueError:
+        return None, []
+    # argparse handles help before required-argument validation and exits
+    # without invoking the selected command. Keep help probes out of the
+    # Controller operation classifier so `task-abandon --help` is never
+    # treated as a state mutation.
+    if any(token.strip("\"'") in {"-h", "--help"} for token in tokens):
+        return None, []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index].strip("\"'")
+        if token == "--pretty":
+            index += 1
+            continue
+        if token == "--root" and index + 1 < len(tokens):
+            index += 2
+            continue
+        if token not in _CONTEXT_OPERATIONS:
+            return None, []
+        operands = [value.strip("\"'")[:256] for value in tokens[index + 1:] if value and not value.startswith("--")]
+        if token == "document-get":
+            return token, operands[:8]
+        if token in {"task-get", "artifact-get", "catalog", "recover-pending-spawn"}:
+            return token, operands[:1]
+        return token, []
+    return None, []
+
+
+def _context_help_status(payload: dict[str, Any]) -> tuple[bool, bool]:
+    """Return whether direct Thaliris help was requested and its syntax is unsafe."""
+    command = _bash_command(payload)
+    if command is None:
+        return False, False
+    arguments = _context_arguments(command)
+    if arguments is None:
+        return False, False
+    try:
+        tokens = shlex.split(arguments, posix=False)
+    except ValueError:
+        return False, False
+    requested = any(token.strip("\"'") in {"-h", "--help"} for token in tokens)
+    if not requested:
+        return False, False
+    separator_check = command.lstrip()
+    if separator_check.startswith("&") and len(separator_check) > 1 and separator_check[1].isspace():
+        separator_check = separator_check[1:].lstrip()
+    segments = _split_command_separators(separator_check)
+    return True, segments is None or len(segments) != 1
+
+
+def _context_help_requested(payload: dict[str, Any]) -> bool:
+    """Return whether safe direct Thaliris help was requested."""
+    requested, unsafe = _context_help_status(payload)
+    return requested and not unsafe
+
+
+def _split_command_separators(command: str) -> list[str] | None:
+    """Split shell separators outside simple quotes; reject ambiguous syntax.
+
+    The direct-command recognizer only needs ordinary single- and
+    double-quoted argument values. Separators inside those values are data.
+    PowerShell expressions, redirections, shell expansion, and quote-escape
+    forms that differ across Bash and PowerShell are rejected so they cannot
+    hide shell side effects.
+    """
+    segments: list[str] = []
+    quote: str | None = None
+    start = 0
+    index = 0
+    while index < len(command):
+        char = command[index]
+        next_char = command[index + 1] if index + 1 < len(command) else ""
+        if quote is None:
+            if char in {"'", '"'}:
+                quote = char
+                index += 1
+                continue
+            if char == "`" or (char == "$" and next_char == "("):
+                return None
+            if char in {"<", ">"}:
+                # Redirection runs before argparse, so even a help request
+                # must not bypass managed-state admission when it contains
+                # an unquoted shell redirection operator.
+                return None
+            if char in {"(", ")"} or (char == "@" and next_char in {"(", "{"}):
+                # PowerShell can evaluate @(...)/@{...}, and parenthesized
+                # expressions can execute before native argument dispatch.
+                return None
+            if char == "\\" and next_char in {"'", '"', "&", "|", ";", "<", ">", "\r", "\n"}:
+                return None
+            separator = _COMMAND_SEPARATOR.match(command, index)
+            if separator is not None:
+                segments.append(command[start:index].strip())
+                index = separator.end()
+                start = index
+                continue
+        elif quote == '"':
+            if char == "`" or (char == "$" and next_char == "("):
+                return None
+            if char == "\\" and next_char == '"':
+                return None
+            if char == '"':
+                quote = None
+        elif char == "'":
+            # Doubled single quotes are data in PowerShell and adjacent
+            # quoted literals in Bash; either way the semicolon stays quoted.
+            if next_char == "'":
+                index += 2
+                continue
+            quote = None
+        index += 1
+    if quote is not None:
+        return None
+    segments.append(command[start:].strip())
+    return segments
+
+
+def _context_operation(payload: dict[str, Any]) -> str | None:
+    return _context_call(payload)[0]
+
+
+def _direct_context_option(payload: dict[str, Any], names: set[str], *, digest_only: bool = True) -> str | None:
+    """Read a scalar option from the already recognized direct CLI invocation."""
+    command = _bash_command(payload)
+    if command is None or _context_call(payload)[0] is None:
+        return None
+    arguments = _context_arguments(command)
+    if arguments is None:
+        return None
+    try:
+        tokens = shlex.split(arguments, posix=False)
+    except ValueError:
+        return None
+    values: list[str] = []
+    for index, token in enumerate(tokens):
+        option = token.strip("\"'")
+        if option in names:
+            if index + 1 >= len(tokens):
+                return None
+            values.append(tokens[index + 1].strip("\"'"))
+        else:
+            for name in names:
+                if option.startswith(name + "="):
+                    values.append(option[len(name) + 1:])
+    return values[0] if len(values) == 1 and values[0] and (not digest_only or re.fullmatch(r"[0-9a-f]{64}", values[0])) else None
+
+
+def _compound_invalid_state_mutation(payload: dict[str, Any]) -> bool:
+    """Find disallowed direct mutations in a separator-delimited command.
+
+    This is only a deny check for INVALID_STATE. It does not authorize a
+    compound command or interpret a shell wrapper as a Thaliris invocation.
+    """
+    command = _bash_command(payload)
+    if command is None:
+        return False
+    segments = _split_command_separators(command)
+    if segments is None:
+        # If the shell syntax is ambiguous, keep the former raw scan as a
+        # conservative deny-only fallback. It never authorizes a command.
+        if _COMMAND_SEPARATOR.search(command) is None:
+            return False
+        segments = _COMMAND_SEPARATOR.split(command)
+    if len(segments) <= 1:
+        return False
+    for segment in segments:
+        operation, _ = _context_call({"tool_input": {"command": segment}})
+        if operation in _CHILD_CONTEXT_MUTATIONS:
+            return True
+    return False
+
+
+def _visible_durable_paths(payload: dict[str, Any]) -> list[str]:
+    """Best-effort observation of obvious durable paths, not a security boundary."""
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict) or _obvious_write_attempt(payload):
+        return []
+    materials: list[str] = []
+    command = _bash_command(payload)
+    if isinstance(command, str):
+        materials.append(command)
+    serialized = json.dumps(tool_input, ensure_ascii=False, sort_keys=True)
+    if serialized not in materials:
+        materials.append(serialized)
+    targets: list[str] = []
+    for material in materials:
+        for match in _DURABLE_PATH_TARGET.finditer(material):
+            target = match.group(1).replace("\\", "/").rstrip(".,:)]}")[:256]
+            if target not in targets:
+                targets.append(target)
+            if len(targets) == 8:
+                return targets
+    return targets
+
+
+def _control_state_target(payload: dict[str, Any]) -> str | None:
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    material = json.dumps(tool_input, ensure_ascii=False, sort_keys=True)
+    match = _CONTROL_STATE_TARGET.search(material)
+    return match.group(0).replace("\\", "/") if match is not None else None
+
+
+def _obvious_write_attempt(payload: dict[str, Any]) -> bool:
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not isinstance(tool, str):
+        return False
+    if _tool_basename(tool) in _CONTROLLER_MUTATION_TOOL_NAMES:
+        return True
+    command = _bash_command(payload)
+    return isinstance(command, str) and _OBVIOUS_WRITE.search(command) is not None
+
+
+def _obvious_mutation_tool(tool: str) -> bool:
+    return bool(_CHILD_CONTROL_MUTATION_ACTIONS.intersection(re.split(r"[^A-Za-z0-9]+", _tool_basename(tool).casefold())))
+
+
+def _updated_command_output(payload: dict[str, Any], argument: str) -> str:
+    original = payload.get("tool_input")
+    if not isinstance(original, dict):
+        return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    key = next((name for name in ("cmd", "command") if isinstance(original.get(name), str)), None)
+    if key is None:
+        return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    updated = dict(original)
+    updated[key] = f"{original[key]} {argument}"
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "updatedInput": updated,
+    }}, ensure_ascii=False, separators=(",", ":"))
+
+
+def _recovery_task_id(root: Path, diagnostic: dict[str, Any]) -> str | None:
+    """Read the task identity from the exact state bytes being recovered."""
+    state_sha256 = diagnostic.get("state_sha256")
+    if not isinstance(state_sha256, str):
+        return None
+    try:
+        path = core._safe_without_final_symlink(root, core._STATE_NAME)
+        if not path.is_file() or path.stat().st_size > 512 * 1024:
+            return None
+        raw_bytes = path.read_bytes()
+        if hashlib.sha256(raw_bytes).hexdigest() != state_sha256:
+            return None
+        state = json.loads(raw_bytes.decode("utf-8"))
+    except (OSError, ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    task_id = state.get("task_id") if isinstance(state, dict) else None
+    return task_id if isinstance(task_id, str) else None
+
+
+def _recovery_command_admitted(root: Path, payload: dict[str, Any], diagnostic: dict[str, Any] | None) -> bool:
+    """Require the hook to confirm the exact observed state before recovery."""
+    if not isinstance(diagnostic, dict) or diagnostic.get("recoverable") is not True:
+        return False
+    task_id = _recovery_task_id(root, diagnostic)
+    if task_id is None or task_state_recovery_blocker(root, task_id) is not None:
+        return False
+    command = _bash_command(payload)
+    if command is None:
+        return False
+    arguments = _context_arguments(command)
+    if arguments is None:
+        return False
+    try:
+        tokens = [token.strip("\"'") for token in shlex.split(arguments, posix=False)]
+    except ValueError:
+        return False
+    expected_values: list[str] = []
+    abandon_active = False
+    for index, token in enumerate(tokens):
+        if token == "--expected-sha256" and index + 1 < len(tokens):
+            expected_values.append(tokens[index + 1])
+        elif token.startswith("--expected-sha256="):
+            expected_values.append(token.split("=", 1)[1])
+        elif token == "--abandon-active":
+            abandon_active = True
+    observed = diagnostic.get("state_sha256")
+    if len(expected_values) != 1 or expected_values[0] != observed:
+        return False
+    return diagnostic.get("abandon_active_confirmation_required") is not True or abandon_active
+
+
+def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
+    """Allow reads with telemetry; block only mechanical protocol mutations."""
+    _best_effort_record(_record_child_runtime_event, root, payload, "PreToolUse")
+    if managed_task_state(root)[0] == "ACTIVE":
+        bound, diagnostic = _bound_child_pretool_diagnostic(root, payload)
+        if not bound:
+            _best_effort_record(_record_bound_role_session_denial, root, payload, diagnostic)
+            return _permission_deny(
+                "THALIRIS_BOUND_ROLE_SESSION_REQUIRED: ACTIVE child execution requires a currently authorized, handoff-bound exact Thaliris role session."
+            )
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not isinstance(tool, str):
+        return ""
+    normalized = _tool_basename(tool)
+    native_agent_type = _native_spawn_agent_type({"tool_input": payload})
+    role = _native_agent_roles().get(native_agent_type, "unknown")
+    binding = roles.get_codex_binding(role)
+    role_names = _native_role_names()
+    if normalized in _DELEGATION_TOOL_NAMES:
+        if normalized == "send_message" and managed_task_state(root)[0] == "ACTIVE" and _bound_child_parent_message(root, payload):
+            return ""
+        if normalized != "spawn_agent" or binding is None or not binding.allowed_delegation_targets:
+            return _permission_deny(f"THALIRIS_ROLE_SESSION_DELEGATION: a managed {role_names} session may only use its explicit allowed fresh delegation targets.")
+        if managed_task_state(root)[0] == "ACTIVE":
+            return _reserve_managed_spawn(root, payload)
+        target = _managed_spawn_role(payload)
+        if target not in binding.allowed_delegation_targets:
+            return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: only Investigator delegation is permitted.")
+    operation, context_targets = _context_call(payload)
+    if operation in _CHILD_CONTEXT_MUTATIONS:
+        target = f"thaliris {operation}"
+        _best_effort_record(_record_protocol_deviation, root, payload, operation=operation, target=target, blocked=True)
+        return _permission_deny(f"THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION: a {role_names} session may not modify Controller-owned control state.")
+    if operation in _CHILD_CONTEXT_READS:
+        for target in context_targets or [f"thaliris {operation}"]:
+            _best_effort_record(
+                _record_protocol_deviation,
+                root,
+                payload,
+                operation=operation,
+                target=target,
+                blocked=False,
+                notify_controller=role in roles.notice_roles(),
+            )
+        if operation == "task-status":
+            return _updated_command_output(payload, "--suppress-protocol-notice")
+        return ""
+    target = _control_state_target(payload)
+    if target is not None:
+        mutation = _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
+        _best_effort_record(
+            _record_protocol_deviation,
+            root,
+            payload,
+            operation="control-state-write" if mutation else "control-state-read",
+            target=target,
+            blocked=mutation,
+            notify_controller=mutation or role in roles.notice_roles(),
+        )
+        if mutation:
+            return _permission_deny(f"THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION: a {role_names} session may not modify Controller-owned control state.")
+    for durable_target in _visible_durable_paths(payload):
+        _best_effort_record(
+            _record_protocol_deviation,
+            root,
+            payload,
+            operation="durable-path-read",
+            target=durable_target,
+            blocked=False,
+            notify_controller=role in roles.notice_roles(),
+        )
+    if binding is not None and not binding.repo_write_allowed and _obvious_write_attempt(payload):
+        _best_effort_record(
+            _record_protocol_deviation,
+            root,
+            payload,
+            operation=f"{role}-write-attempt",
+            target=normalized,
+            blocked=True,
+        )
+        code = binding.write_denial_code or "THALIRIS_ROLE_SESSION_WRITE_BLOCKED"
+        reason = binding.write_denial_reason or "this role may not write repository files."
+        return _permission_deny(f"{code}: {reason}")
+    return ""
+
+
+def _load_runtime(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {"version": 4}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("version") != 4:
+        raise ValueError("unsupported audit runtime state")
+    return value
+
+
+def _identity_hash(value: object) -> str | None:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest() if isinstance(value, str) and value else None
+
+
+def managed_task_state(root: Path) -> tuple[str, str | None]:
+    """Distinguish absent/inactive state from an unreadable mechanical ledger."""
+    path = root / ".context" / "state.json"
+    if not path.is_file():
+        return "NO_TASK", None
+    try:
+        value = core._load_state(root)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return "INVALID_STATE", None
+    if value.get("status") != "ACTIVE":
+        return "NO_TASK", None
+    task_id = value.get("task_id")
+    return ("ACTIVE", task_id) if isinstance(task_id, str) else ("INVALID_STATE", None)
+
+
+def _active_task_id(root: Path) -> str | None:
+    status, task_id = managed_task_state(root)
+    return task_id if status == "ACTIVE" else None
+
+
+def _task_key(task_id: str | None) -> str:
+    return hashlib.sha256((task_id or "unknown-task").encode("utf-8")).hexdigest()[:24]
+
+
+def _start_attestation_path(root: Path, nonce: str) -> Path:
+    digest = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+    return root / ".context" / "audit" / "task-start-attestations" / f"{digest}.json"
+
+
+def _direct_init_call(root: Path, payload: dict[str, Any]) -> bool:
+    """Recognize only a direct init targeting this worktree."""
+    command = _bash_command(payload)
+    if command is None:
+        return False
+    separator_check = command.lstrip()
+    if separator_check.startswith("&") and len(separator_check) > 1 and separator_check[1].isspace():
+        separator_check = separator_check[1:].lstrip()
+    segments = _split_command_separators(separator_check)
+    if segments is None or len(segments) != 1:
+        return False
+    arguments = _context_arguments(command)
+    if arguments is None:
+        return False
+    try:
+        tokens = [token.strip("\"'") for token in shlex.split(arguments, posix=False)]
+    except ValueError:
+        return False
+    if tokens[:1] == ["--root"]:
+        if len(tokens) < 3 or not tokens[1]:
+            return False
+        cwd = payload.get("cwd")
+        base = Path(cwd) if isinstance(cwd, str) and cwd else root
+        target = Path(tokens[1])
+        if not target.is_absolute():
+            target = base / target
+        if target.resolve(strict=False) != root.resolve(strict=False):
+            return False
+        tokens = tokens[2:]
+    return (
+        tokens == ["init"]
+        or len(tokens) == 3
+        and tokens[0] == "init"
+        and tokens[1] == "--accept-managed-instruction-sha256"
+        and re.fullmatch(r"[0-9a-f]{64}", tokens[2]) is not None
+    )
+
+
+def _post_init_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None) -> str:
+    """Deliver one current-session proof from a successful direct init callback."""
+    if managed_hook_abi != MANAGED_HOOK_ABI or managed_task_state(root)[0] != "NO_TASK" or not _direct_init_call(root, payload):
+        return ""
+    response = _post_tool_response(payload)
+    if response is None or not _post_tool_succeeded(response) or _execution_outcome(response) == "FAILED":
+        return ""
+    from . import codex_adapter
+
+    if codex_adapter._project_definition_facts(root)["project_definition_present"] != "YES":
+        return ""
+    digest = codex_adapter._controller_bridge()["controller_bridge_sha256"]
+    return _issue_task_start_attestation(root, payload, managed_hook_abi, bridge_sha256=digest, event="PostToolUse")
+
+
+def new_role_profile_files(root: Path, session_hash: str) -> list[str] | None:
+    """Compare current disk role filenames with this session's disk snapshot.
+
+    The result is a file-presence observation.  It is never a native Host
+    role-catalog observation.
+    """
+    try:
+        runtime = json.loads((root / ".context" / "audit" / session_hash[:24] / "runtime.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(runtime, dict) or runtime.get("session_id_hash") != session_hash
+        or runtime.get("managed_hook_spec_hash") != managed_hook_spec_hash()
+        or runtime.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION
+        or type(runtime.get("session_start_monotonic_ns")) is not int
+    ):
+        return None
+    snapshot = runtime.get(_PROFILE_FILES_PRESENT_AT_SESSION_START)
+    if not isinstance(snapshot, dict):
+        return None
+    project = snapshot.get("project")
+    user_host = snapshot.get("user_host")
+    if not isinstance(project, dict) or not isinstance(user_host, dict):
+        return None
+    project_directory = project.get("directory")
+    project_files = project.get("files")
+    host_directory = user_host.get("directory")
+    host_files = user_host.get("files")
+    if (
+        project_directory != ".codex/agents"
+        or not isinstance(project_files, list)
+        or not all(isinstance(name, str) for name in project_files)
+        or not isinstance(host_directory, str)
+        or not host_directory
+        or not isinstance(host_files, list)
+        or not all(isinstance(name, str) for name in host_files)
+    ):
+        return None
+    start_project_names = set(project_files)
+    start_host_names = set(host_files)
+    current_project_dir = root / ".codex" / "agents"
+    current_host_dir = Path(host_directory)
+    added = [
+        f".codex/agents/{name}" for name in roles.agent_profiles()
+        if (current_project_dir / name).is_file() and name not in start_project_names
+    ]
+    added.extend(
+        str(current_host_dir / name) for name in roles.agent_profiles()
+        if (current_host_dir / name).is_file() and name not in start_host_names
+    )
+    return sorted(added)
+
+
+def role_catalog_session_status(root: Path, session_hash: str) -> str:
+    added = new_role_profile_files(root, session_hash)
+    if added is None:
+        return HOST_ROLE_CATALOG_UNKNOWN
+    if added:
+        return NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE
+    # The current hook payload has no authenticated native Host catalog
+    # observation.  In particular, a writable audit field cannot promote the
+    # file-presence result to OBSERVED.
+    return HOST_ROLE_CATALOG_UNKNOWN
+
+
+def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None = None, *, bridge_sha256: str | None = None, event: str = "PreToolUse") -> str:
+    explicit = _direct_context_option(payload, {"--authority-contract"}, digest_only=False)
+    contract_path = Path(explicit) if explicit else None
+    if contract_path is not None and not contract_path.is_absolute():
+        contract_path = Path(str(payload.get("cwd") or root)) / contract_path
+    if _controller_actor_assurance(payload) != "CONTROLLER" and not (explicit and _controller_actor_assurance(payload) == "UNKNOWN"):
+        return _permission_deny("THALIRIS_CONTROLLER_ACTOR_UNKNOWN") if event == "PreToolUse" else ""
+    session_hash = _session_id_hash(payload)
+    if session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI:
+        return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED") if event == "PreToolUse" else ""
+    if bridge_sha256 is None:
+        bridge_sha256 = _direct_context_option(payload, {"--bootstrap-receipt", "--controller-bridge-sha256"})
+        if bridge_sha256 is None:
+            return _permission_deny("THALIRIS_CONTROLLER_BRIDGE_REQUIRED: acknowledge the exact managed instruction SHA-256.")
+    nonce = secrets.token_urlsafe(24)
+    token = f"v1.{session_hash}.{nonce}"
+    now = time.time_ns()
+    record = {
+        "version": 1,
+        "nonce_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        "session_id_hash": session_hash,
+        "managed_hook_spec_hash": managed_hook_spec_hash(),
+        "adapter_protocol_version": CODEX_ADAPTER_PROTOCOL_VERSION,
+        "managed_hook_abi": MANAGED_HOOK_ABI,
+        "controller_bridge_sha256": bridge_sha256,
+        "created_at_ns": now,
+        "expires_at_ns": now + _START_ATTESTATION_TTL_NS,
+        "authority_contract_sha256": task_authority.digest(contract_path) if contract_path else None,
+        "authority_provenance": "CONTROLLER_ASSERTED_HUMAN_INSTRUCTION" if explicit else "LEGACY_SYNTHETIC_CONTROLLER",
+    }
+    with core._lock(root):
+        _write_capture(_start_attestation_path(root, token), record)
+    if event == "PostToolUse":
+        return json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": f"Current-session Thaliris admission proof: --hook-attestation {token}. Use the task_start_receipt returned by codex-bootstrap when calling task-start.",
+        }}, ensure_ascii=False, separators=(",", ":"))
+    return _updated_command_output(payload, f"--hook-attestation {token}")
+
+
+def _issue_task_abandon_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None = None) -> str:
+    if _controller_actor_assurance(payload) != "CONTROLLER" and not (_controller_actor_assurance(payload) == "UNKNOWN" and task_authority.check(root) is not None):
+        return _permission_deny("THALIRIS_CONTROLLER_ACTOR_UNKNOWN")
+    session_hash = _session_id_hash(payload)
+    if session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI:
+        return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    token = f"v1.{session_hash}.{secrets.token_urlsafe(24)}"
+    now = time.time_ns()
+    record = {
+        "version": 1,
+        "operation": "task-abandon",
+        "nonce_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        "session_id_hash": session_hash,
+        "managed_hook_spec_hash": managed_hook_spec_hash(),
+        "adapter_protocol_version": CODEX_ADAPTER_PROTOCOL_VERSION,
+        "managed_hook_abi": MANAGED_HOOK_ABI,
+        "created_at_ns": now,
+        "expires_at_ns": now + _START_ATTESTATION_TTL_NS,
+    }
+    with core._lock(root):
+        _write_capture(_start_attestation_path(root, token), record)
+    return _updated_command_output(payload, f"--hook-attestation {token}")
+
+
+def _issue_bootstrap_observation(root: Path, task_id: str, payload: dict[str, Any], managed_hook_abi: str | None = None) -> str:
+    """Bind one direct ACTIVE bootstrap call to this Hook session observation."""
+    session_hash = _session_id_hash(payload)
+    if session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI:
+        return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    token = f"v1.{session_hash}.{secrets.token_urlsafe(24)}"
+    now = time.time_ns()
+    record = {
+        "version": 1,
+        "operation": "codex-bootstrap",
+        "nonce_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        "session_id_hash": session_hash,
+        "task_id_hash": _task_key(task_id),
+        "managed_hook_spec_hash": managed_hook_spec_hash(),
+        "adapter_protocol_version": CODEX_ADAPTER_PROTOCOL_VERSION,
+        "managed_hook_abi": MANAGED_HOOK_ABI,
+        "created_at_ns": now,
+        "expires_at_ns": now + _START_ATTESTATION_TTL_NS,
+    }
+    with core._lock(root):
+        _write_capture(_start_attestation_path(root, token), record)
+    return _updated_command_output(payload, f"--hook-attestation {token}")
+
+
+def consume_bootstrap_observation(root: Path, task_id: str, token: str | None) -> str | None:
+    """Consume a single-use Hook proof; absence leaves session identity unknown."""
+    if token is None:
+        return None
+    error = ValueError("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    match = re.fullmatch(r"v1\.([0-9a-f]{64})\.([A-Za-z0-9_-]{16,128})", token)
+    if match is None:
+        raise error
+    path = _start_attestation_path(root, token)
+    with core._lock(root):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            raise error
+        valid = (
+            isinstance(record, dict)
+            and record.get("version") == 1
+            and record.get("operation") == "codex-bootstrap"
+            and record.get("nonce_sha256") == hashlib.sha256(token.encode("utf-8")).hexdigest()
+            and record.get("session_id_hash") == match.group(1)
+            and record.get("task_id_hash") == _task_key(task_id)
+            and record.get("managed_hook_spec_hash") == managed_hook_spec_hash()
+            and record.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
+            and record.get("managed_hook_abi") == MANAGED_HOOK_ABI
+            and type(record.get("created_at_ns")) is int
+            and type(record.get("expires_at_ns")) is int
+            and record["created_at_ns"] <= time.time_ns() <= record["expires_at_ns"]
+        )
+        if not valid:
+            raise error
+        try:
+            path.unlink()
+        except OSError:
+            raise error
+    return match.group(1)
+
+
+def consume_task_start_attestation(root: Path, token: str | None, controller_bridge_sha256: str | None = None, authority_contract_sha256: str | None = None) -> str:
+    """Consume one current-hook, current-session bearer attestation."""
+    if _controller_actor_assurance({}) != "CONTROLLER" and authority_contract_sha256 is None:
+        raise ValueError("THALIRIS_CONTROLLER_ACTOR_UNKNOWN")
+    error = ValueError("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    if not isinstance(token, str):
+        raise error
+    match = re.fullmatch(r"v1\.([0-9a-f]{64})\.([A-Za-z0-9_-]{16,128})", token)
+    if match is None:
+        raise error
+    path = _start_attestation_path(root, token)
+    with core._lock(root):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            raise error
+        valid = (
+            isinstance(record, dict)
+            and record.get("version") == 1
+            and record.get("operation") in (None, "task-start")
+            and record.get("nonce_sha256") == hashlib.sha256(token.encode("utf-8")).hexdigest()
+            and record.get("session_id_hash") == match.group(1)
+            and record.get("managed_hook_spec_hash") == managed_hook_spec_hash()
+            and record.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
+            and record.get("managed_hook_abi") == MANAGED_HOOK_ABI
+            and record.get("controller_bridge_sha256") == controller_bridge_sha256
+            and record.get("authority_contract_sha256") == authority_contract_sha256
+            and type(record.get("created_at_ns")) is int
+            and type(record.get("expires_at_ns")) is int
+            and record["created_at_ns"] <= time.time_ns() <= record["expires_at_ns"]
+        )
+        if not valid:
+            raise error
+        try:
+            path.unlink()
+        except OSError:
+            raise error
+    return match.group(1)
+
+
+def consume_task_abandon_attestation(root: Path, token: str | None) -> tuple[str, str]:
+    """Consume one hook-issued recovery proof and return session and proof hashes."""
+    if _controller_actor_assurance({}) != "CONTROLLER" and task_authority.check(root) is None:
+        raise ValueError("THALIRIS_CONTROLLER_ACTOR_UNKNOWN")
+    error = ValueError("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    match = re.fullmatch(r"v1\.([0-9a-f]{64})\.([A-Za-z0-9_-]{16,128})", token or "")
+    if match is None:
+        raise error
+    path = _start_attestation_path(root, token)
+    with core._lock(root):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            raise error
+        valid = (
+            isinstance(record, dict)
+            and record.get("version") == 1
+            and record.get("operation") == "task-abandon"
+            and record.get("nonce_sha256") == hashlib.sha256(token.encode("utf-8")).hexdigest()
+            and record.get("session_id_hash") == match.group(1)
+            and record.get("managed_hook_spec_hash") == managed_hook_spec_hash()
+            and record.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
+            and record.get("managed_hook_abi") == MANAGED_HOOK_ABI
+            and type(record.get("created_at_ns")) is int
+            and type(record.get("expires_at_ns")) is int
+            and record["created_at_ns"] <= time.time_ns() <= record["expires_at_ns"]
+        )
+        if not valid:
+            raise error
+        try:
+            path.unlink()
+        except OSError:
+            raise error
+    return match.group(1), hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _write_capture(path: Path, state: dict[str, Any]) -> None:
+    if path.parent.name == "lifecycle" and path.parent.parent.name == "audit":
+        task_authority.check(path.parents[3])
+    core._atomic_write(path, (json.dumps(state, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+    task_authority.capture(path, state)
+
+
+def _normalized_agent_role(tool_input: dict[str, Any], payload: dict[str, Any]) -> str:
+    value = next(
+        (tool_input.get(key) for key in ("agent_type", "agentType", "role", "agent_role") if tool_input.get(key) is not None),
+        next((payload.get(key) for key in ("agent_type", "agentType", "role", "agent_role") if payload.get(key) is not None), None),
+    )
+    if not isinstance(value, str) or not value.strip():
+        return "unknown"
+    normalized = "-".join(value.strip().lower().replace("_", "-").split())
+    aliases = roles.role_aliases()
+    return aliases.get(normalized, normalized[:64])
+
+
+def _child_identity_hash(tool: str, tool_input: dict[str, Any]) -> str | None:
+    if _tool_basename(tool) not in {"followup_task", "send_input", "send_message"}:
+        return None
+    for key in ("task_id", "child_id", "target", "task_name", "agent_id", "id"):
+        value = tool_input.get(key)
+        if isinstance(value, (str, int)) and str(value):
+            return _identity_hash(f"{key}:{value}")
+    return None
+
+
+def _tool_basename(tool: str) -> str:
+    """Normalize dotted and 0.146 V2 flattened collaboration tool names."""
+    dotted = tool.rsplit(".", 1)[-1]
+    if dotted != tool:
+        return dotted
+    if tool.startswith("collaboration"):
+        return tool[len("collaboration") :]
+    return tool
+
+
+def _delegation_input(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read the native tool input without retaining unrelated payload fields.
+
+    V2 uses ``tool_input``.  Older V1 ``send_input`` events can expose only
+    an ``input`` object (or, in minimal payloads, the message fields directly).
+    The fallback is deliberately narrow and only supplies fields needed for
+    text, role normalization, and a hashed child identity.
+    """
+    value = payload.get("tool_input")
+    if isinstance(value, dict) and value:
+        return value
+    value = payload.get("input")
+    if isinstance(value, dict):
+        return value
+    if isinstance(payload.get("tool_input"), dict):
+        return payload["tool_input"]
+    return {key: payload[key] for key in ("message", "input", "text", "agent_type", "agentType", "role", "agent_role", "task_id", "child_id", "target", "task_name", "agent_id", "id", "fork_turns", "isolation_reason", "fork_turns_reason", "model", "reasoning_effort", "thinking", "model_reasoning_effort") if key in payload}
+
+
+def _delegation_text(tool_input: dict[str, Any]) -> object:
+    for key in ("message", "input", "text"):
+        value = tool_input.get(key)
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def _isolation_classification(tool: str, tool_input: dict[str, Any], _role: str) -> dict[str, str] | None:
+    """Classify every completed native root spawn, independent of agent_type."""
+    if _tool_basename(tool) != "spawn_agent":
+        return None
+    fork = tool_input.get("fork_turns")
+    if fork == "none":
+        return {"required": "YES", "fork_turns": "NONE", "status": "PASS"}
+    if fork is None:
+        return {"required": "YES", "fork_turns": "MISSING", "status": "FAIL"}
+    if fork == "all":
+        return {"required": "YES", "fork_turns": "ALL", "status": "FAIL"}
+    if isinstance(fork, str) and fork in {"1", "2"}:
+        return {"required": "YES", "fork_turns": "SMALL", "status": "FAIL"}
+    return {"required": "YES", "fork_turns": "OTHER", "status": "FAIL"}
+
+
+def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_hook_abi: str | None = None) -> str:
+    """Enforce the small ACTIVE Root tool boundary before native dispatch."""
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not isinstance(tool, str):
+        return ""
+    root = _hook_repository_root(root or Path.cwd(), payload)
+    normalized = _tool_basename(tool)
+    # Plain direct argparse help is read-only. Check its shell syntax before
+    # managed-state admission so expressions or redirections cannot use the
+    # help exemption to run before native invocation.
+    if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES:
+        help_requested, unsafe_help_syntax = _context_help_status(payload)
+        if help_requested:
+            if unsafe_help_syntax:
+                return _permission_deny(
+                    "THALIRIS_UNSAFE_HELP_SYNTAX: direct Thaliris help cannot include shell expressions, redirections, or compound commands."
+                )
+            return ""
+    if _offline_administration_requested(payload):
+        return _permission_deny("THALIRIS_OFFLINE_ADMINISTRATION_REQUIRES_DISCONNECTED_INTEGRATION: automated actors have no offline recovery grant while managed hooks are present.")
+    state_status, _task_id = managed_task_state(root)
+    operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
+    if operation == "task-recover-authority":
+        return "" if _controller_actor_assurance(payload) == "UNKNOWN" else _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
+
+    anchor = task_authority.check(root)
+    explicit_start = operation == "task-start" and _direct_context_option(payload, {"--authority-contract"}, digest_only=False) is not None
+    target = _control_state_target(payload)
+    if (anchor is not None or _controller_actor_assurance(payload) == "CONTROLLER") and target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)):
+        return _permission_deny("THALIRIS_CONTROL_STATE_DIRECT_WRITE: use explicit checked Thaliris operations.")
+    if _controller_actor_assurance(payload) != "CONTROLLER" and anchor is None and not explicit_start:
+        # Codex 0.159.2 Review delegates share the owner's session_id and omit
+        # agent fields. Session matches and field absence are not Root proof.
+        # Keep ordinary work available; withhold only dangerous control grants.
+        target = _control_state_target(payload)
+        if (operation in _CHILD_CONTEXT_MUTATIONS or _compound_invalid_state_mutation(payload)
+                or state_status == "ACTIVE" and normalized in _DELEGATION_TOOL_NAMES or normalized == "interrupt_agent"
+                or target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized))):
+            return _permission_deny("THALIRIS_CONTROLLER_ACTOR_UNKNOWN: this Host cannot distinguish every Controller from delegated actors; managed control authority is unavailable.")
+        if operation == "codex-bootstrap" and state_status == "ACTIVE":
+            return _issue_bootstrap_observation(root, _task_id, payload, managed_hook_abi)
+        if normalized == "spawn_agent" and _native_spawn_agent_type(payload) in _native_agent_roles():
+            if _delegation_input(payload).get("fork_turns") != "none":
+                return _permission_deny("THALIRIS_ISOLATION_REQUIRED: named Thaliris work requires a fresh context even without managed admission.")
+            # Ordinary degraded delegation: no reservation, owner, or managed
+            # child binding is created from this ambiguous actor.
+        return ""
+
+    if state_status == "INVALID_STATE":
+        # Damaged managed state does not make unrelated native tools unsafe.
+        # Deny only direct Controller-owned mutations that are mechanically
+        # visible without interpreting an arbitrary command or tool name.
+        if operation == "init":
+            # Project bootstrap repairs only the definition and activation
+            # surface.  It never reads or changes the incompatible task
+            # ledger; init's CLI retains the exact managed-instruction
+            # confirmation check for user-owned instruction blocks.
+            _best_effort_record(_record_controller_guard_event, root, payload, "CONTEXT_init", "allowed")
+            return ""
+        schema_mismatch = core.task_state_schema_diagnostic(root) if operation == "task-recover-state" else None
+        if operation == "task-recover-state" and _recovery_command_admitted(root, payload, schema_mismatch):
+            return _issue_task_start_attestation(root, payload, managed_hook_abi)
+        target = _control_state_target(payload)
+        if operation in _CHILD_CONTEXT_MUTATIONS or _compound_invalid_state_mutation(payload) or (
+            target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized))
+        ):
+            _best_effort_record(_record_controller_guard_event, root, payload, "INVALID_STATE", "blocked")
+            return _permission_deny("THALIRIS_INVALID_STATE: managed control is unavailable until the task state is diagnosed or repaired.")
+        return ""
+
+    if state_status == "NO_TASK" and operation == "task-start":
+        return _issue_task_start_attestation(root, payload, managed_hook_abi)
+
+    if state_status == "ACTIVE":
+        if operation == "codex-bootstrap":
+            return _issue_bootstrap_observation(root, _task_id, payload, managed_hook_abi)
+        if operation in {"codex-install", "codex-uninstall"} and _trusted_host_maintenance_route(payload):
+            _best_effort_record(_record_controller_guard_event, root, payload, f"HOST_{operation}", "allowed")
+            return ""
+        if operation == "task-abandon":
+            return _issue_task_abandon_attestation(root, payload, managed_hook_abi)
+        try:
+            owner = active_controller_owner(root, _task_id)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            owner = None
+        if anchor is None and (owner is None or owner != _session_id_hash(payload)):
+            if normalized in {"list_agents", "wait_agent"} or operation in {
+                "doctor", "milestone-check", "memory-status", "task-status", "task-get",
+                "artifact-get", "catalog", "document-get", "version",
+            }:
+                return ""
+            return _permission_deny("THALIRIS_ACTIVE_OWNER_REQUIRED: ACTIVE control requires the owning Hook session; use direct codex-bootstrap for recovery evidence.")
+        if normalized in _FRESH_CHILD_REUSE_TOOL_NAMES or normalized == "Agent":
+            _best_effort_record(_record_controller_guard_event, root, payload, "CHILD_REUSE", "blocked")
+            return _permission_deny("THALIRIS_FRESH_ROLE_SESSION_REQUIRED: continue work with a new named-role spawn_agent(fork_turns=\"none\") handoff.")
+        if normalized == "spawn_agent":
+            if anchor is not None:
+                mode = anchor["contract"]["execution_mode"]
+                if mode == "single-agent":
+                    return _permission_deny("THALIRIS_SINGLE_AGENT_TASK: the human instruction selected no children.")
+                if mode == "controller-direct" and _managed_spawn_role(payload) in {"implementer", "focused-implementer"}:
+                    return _permission_deny("THALIRIS_CONTROLLER_DIRECT_TASK: implementation belongs to the Controller; only auxiliary roles apply.")
+            tool_input = _delegation_input(payload)
+            if tool_input.get("fork_turns") != "none":
+                return _permission_deny(f"THALIRIS_ISOLATION_REQUIRED: spawn a fresh {_native_role_names()} session explicitly with fork_turns=\"none\".")
+            return _reserve_managed_spawn(root, payload, _task_id)
+        if anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}:
+            if operation in {"task-start", "init", "rollback", "task-recover-state"}:
+                return _permission_deny("THALIRIS_TASK_AUTHORITY_REPLACEMENT_REQUIRES_CONTROLLER_DECISION")
+            return ""
+        if normalized in _ROOT_MANAGED_TOOL_NAMES:
+            _best_effort_record(_record_controller_guard_event, root, payload, normalized, "allowed")
+            return ""
+        if operation in _ACTIVE_ROOT_CONTEXT_OPERATIONS:
+            _best_effort_record(_record_controller_guard_event, root, payload, f"CONTEXT_{operation}", "allowed")
+            return ""
+        if operation == "task-show":
+            _best_effort_record(_record_controller_guard_event, root, payload, "CONTEXT_task-show", "blocked")
+            return _permission_deny("THALIRIS_BOUNDED_RETRIEVAL_REQUIRED: use task-status or task-get for ACTIVE Controller retrieval.")
+        _best_effort_record(_record_controller_guard_event, root, payload, "NON_CONTROL_TOOL", "blocked")
+        return _permission_deny(_CONTROLLER_BOUNDARY_REASON)
+
+    # NO_TASK is transparent: ordinary Codex workflows are not managed and
+    # therefore do not inherit Thaliris spawn isolation requirements.
+    return ""
+
+
+def _permission_deny(reason: str) -> str:
+    return json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }, ensure_ascii=False, separators=(",", ":"))
+
+
+def _controller_actor_assurance(payload: dict[str, Any]) -> str:
+    """Current Host source contract supplies no universal positive Root proof.
+
+    ThreadSpawn supplies agent_id/type positively. Built-in Review shares the
+    owner's session_id but omits those fields. No user input, inherited env,
+    PID, process ancestry, SessionSource string, or absent field repairs this.
+    """
+    return "CHILD" if payload.get("agent_id") is not None or payload.get("agent_type") is not None else "UNKNOWN"
+
+
+def _session_fence_path(root: Path) -> Path:
+    return core._safe_without_final_symlink(root, ".context/audit/abandoned/session-fence.json")
+
+
+def _read_session_fence(root: Path) -> set[str]:
+    path = _session_fence_path(root)
+    if not path.is_file():
+        return set()
+    value = json.loads(path.read_text(encoding="utf-8"))
+    hashes = value.get("session_id_hashes") if isinstance(value, dict) and value.get("version") == 1 else None
+    if not isinstance(hashes, list) or any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None for item in hashes):
+        raise ValueError("invalid abandoned session fence")
+    return set(hashes)
+
+
+def _session_fenced(root: Path, session_hash: str | None) -> bool:
+    return session_hash is not None and session_hash in _read_session_fence(root)
+
+
+def _abandoned_child_fence_path(root: Path) -> Path:
+    return core._safe_without_final_symlink(root, ".context/audit/abandoned-child-fence.json")
+
+
+def _read_abandoned_child_fence(root: Path) -> list[dict[str, str]]:
+    path = _abandoned_child_fence_path(root)
+    if not path.is_file():
+        return []
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("version") != 1 or not isinstance(value.get("children"), list):
+        raise ValueError("invalid abandoned child fence")
+    children = value["children"]
+    if any(not isinstance(child, dict) or set(child) != {"agent_id_hash", "session_id_hash", "turn_id_hash"}
+           or any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None for item in child.values())
+           for child in children):
+        raise ValueError("invalid abandoned child fence")
+    return children
+
+
+def _read_abandoned_owner_hashes(root: Path) -> set[str]:
+    path = _abandoned_child_fence_path(root)
+    if not path.is_file():
+        return set()
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("version") != 1:
+        raise ValueError("invalid abandoned owner fence")
+    owners = value.get("owner_session_id_hashes", [])
+    if not isinstance(owners, list) or any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None for item in owners):
+        raise ValueError("invalid abandoned owner fence")
+    return set(owners)
+
+
+def _read_abandoned_spawn_provenance(root: Path) -> tuple[set[str], list[dict[str, Any]]]:
+    """Read exact old reservations; absent legacy provenance remains unknown."""
+    path = _abandoned_child_fence_path(root)
+    if not path.is_file():
+        return set(), []
+    value = json.loads(path.read_text(encoding="utf-8"))
+    complete = value.get("owner_spawn_provenance_complete", [])
+    records = value.get("owner_spawn_provenance", [])
+    if not isinstance(complete, list) or not isinstance(records, list):
+        raise ValueError("invalid abandoned spawn provenance")
+    if any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None for item in complete):
+        raise ValueError("invalid abandoned spawn provenance")
+    required = {"session_id_hash", "turn_id_hash", "payload_hash", "agent_type", "parent_agent_id_hash"}
+    if any(not isinstance(item, dict) or set(item) != required or
+           not isinstance(item["session_id_hash"], str) or
+           re.fullmatch(r"[0-9a-f]{64}", item["session_id_hash"]) is None or
+           any(value is not None and (not isinstance(value, str) or not value)
+               for key, value in item.items() if key != "session_id_hash")
+           for item in records):
+        raise ValueError("invalid abandoned spawn provenance")
+    return set(complete), records
+
+
+def _matches_abandoned_spawn(root: Path, payload: dict[str, Any]) -> bool:
+    session = _session_id_hash(payload)
+    if session not in _read_abandoned_owner_hashes(root):
+        return False
+    complete, records = _read_abandoned_spawn_provenance(root)
+    if session not in complete:
+        return True
+    text = _delegation_text(_delegation_input(payload))
+    if not isinstance(text, str):
+        return True
+    current = {
+        "turn_id_hash": _turn_id_hash(payload),
+        "payload_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "agent_type": _native_spawn_agent_type(payload),
+        "parent_agent_id_hash": _identity_hash(payload.get("agent_id")),
+    }
+    return any(item["session_id_hash"] == session and
+               all(item[key] is None or item[key] == current[key] for key in current)
+               for item in records)
+
+
+def _read_abandoned_agent_hashes(root: Path) -> set[str]:
+    path = _abandoned_child_fence_path(root)
+    if not path.is_file():
+        return set()
+    value = json.loads(path.read_text(encoding="utf-8"))
+    agents = value.get("agent_id_hashes", []) if isinstance(value, dict) and value.get("version") == 1 else None
+    if not isinstance(agents, list) or any(not isinstance(item, str) or re.fullmatch(r"[0-9a-f]{64}", item) is None for item in agents):
+        raise ValueError("invalid abandoned agent fence")
+    return set(agents)
+
+
+def _offline_administration_requested(payload: dict[str, Any]) -> bool:
+    command = _bash_command(payload)
+    if command is None:
+        return False
+    # Recognize invocation, not a source read, patch, grep, or test mentioning
+    # the runner. Shared OS shell access is governance, not privilege isolation.
+    return re.search(
+        r'''(?ix)(?:^|[;&|])\s*&?\s*["']?(?:[^\s"';|&]*[\\/])?
+        (?:python[0-9.]*(?:\.exe)?|py(?:\.exe)?)["']?\s+
+        (?:-(?:I|B)\s+)*
+        (?:["']?[^\r\n]*thaliris_offline_recovery\.py\b|-m\s+thaliris\.offline_recovery\b)''', command
+    ) is not None or _context_operation(payload) == "task-recover-external"
+
+
+def _abandoned_child_fenced(root: Path, payload: dict[str, Any]) -> bool:
+    identity = {
+        "agent_id_hash": _identity_hash(payload.get("agent_id")),
+        "session_id_hash": _session_id_hash(payload),
+        "turn_id_hash": _turn_id_hash(payload),
+    }
+    return identity["agent_id_hash"] in _read_abandoned_agent_hashes(root) or (all(identity.values()) and identity in _read_abandoned_child_fence(root))
+
+
+def _dispatch_status(response: object) -> str:
+    rejected = {"error", "failed", "failure", "rejected"}
+    accepted = {"ok", "success", "completed"}
+    if isinstance(response, str):
+        return "REJECTED" if response.strip().lower() in rejected else "UNKNOWN"
+    if not isinstance(response, dict):
+        return "UNKNOWN"
+    status = response.get("status")
+    normalized = status.strip().lower() if isinstance(status, str) else None
+    explicit_failure = any(
+        response.get(key) is True or response.get(key) not in (None, False, "")
+        for key in ("isError", "failed", "error")
+    )
+    if explicit_failure or normalized in rejected:
+        return "REJECTED"
+    nested = response.get("result")
+    nested_status = _dispatch_status(nested) if isinstance(nested, (dict, str)) else "UNKNOWN"
+    if nested_status != "UNKNOWN":
+        return nested_status
+    if response.get("isError") is False or response.get("success") is True or normalized in accepted:
+        return "ACCEPTED"
+    return "UNKNOWN"
+
+
+def task_abandon(
+    root: Path, task_id: str, revision: int, state_sha256: str,
+    lifecycle_sha256: str, reason: str, recovery_session_hash: str,
+    attestation_sha256: str,
+) -> dict[str, object]:
+    """Archive exact ACTIVE evidence before releasing the current task slot."""
+    root = core._repo_root(root)
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 4096 or any(ord(c) < 32 and c not in "\n\t" for c in reason):
+        raise ValueError("task-abandon requires a bounded explicit reason")
+    if type(revision) is not int or revision < 1:
+        raise ValueError("invalid expected task revision")
+    for value in (state_sha256, recovery_session_hash, attestation_sha256):
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise ValueError("invalid recovery identity or SHA-256")
+    if lifecycle_sha256 != "ABSENT" and (not isinstance(lifecycle_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", lifecycle_sha256) is None):
+        raise ValueError("invalid lifecycle identity or SHA-256")
+    try:
+        uuid.UUID(task_id)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("invalid expected task id") from exc
+
+    with core._lock(root):
+        state_path = core._safe_without_final_symlink(root, ".context/state.json")
+        state_raw = state_path.read_bytes()
+        if len(state_raw) > 512 * 1024:
+            raise ValueError("task state exceeds 512 KiB")
+        state = core._validate_state(root, json.loads(state_raw.decode("utf-8")))
+        if state["status"] != "ACTIVE" or state["task_id"] != task_id or state["revision"] != revision:
+            raise ValueError("task-abandon task identity or revision changed")
+        if hashlib.sha256(state_raw).hexdigest() != state_sha256:
+            raise ValueError("task-abandon state bytes changed")
+
+        lifecycle_path = _lifecycle_path(root, task_id)
+        lifecycle_present = lifecycle_path.is_file()
+        if lifecycle_present != (lifecycle_sha256 != "ABSENT"):
+            raise ValueError("task-abandon lifecycle presence changed")
+        lifecycle_raw = lifecycle_path.read_bytes() if lifecycle_present else None
+        if lifecycle_raw is not None and hashlib.sha256(lifecycle_raw).hexdigest() != lifecycle_sha256:
+            raise ValueError("task-abandon lifecycle bytes changed")
+        lifecycle_state = _load_lifecycle(lifecycle_path, task_id) if lifecycle_present else {}
+        pending = lifecycle_state.get("pending_authorized_spawn")
+        owner_hash = lifecycle_state.get("owner_session_id_hash")
+        owner_provenance = "TASK_START" if owner_hash is not None else "UNKNOWN"
+        if owner_hash is None and isinstance(pending, dict) and pending.get("depth") == 1 and pending.get("parent_role") == "controller":
+            owner_hash = pending.get("session_id_hash")
+            owner_provenance = "DEPTH_ONE_PENDING_RESERVATION"
+        if owner_hash is not None and (not isinstance(owner_hash, str) or re.fullmatch(r"[0-9a-f]{64}", owner_hash) is None):
+            raise ValueError("invalid lifecycle Controller owner")
+        owner_abort = owner_hash == recovery_session_hash
+        # A reservation with no SubagentStart has no native child identity to
+        # fence. The owner must first recover it using trusted terminal proof.
+        if owner_abort and pending is not None:
+            raise ValueError("owner task-abandon requires recovery of the unbound pending spawn")
+
+        fence_sources: dict[str, list[str]] = {}
+        def add_fence(candidate: object, source: str) -> None:
+            if isinstance(candidate, str) and re.fullmatch(r"[0-9a-f]{64}", candidate):
+                fence_sources.setdefault(candidate, []).append(source)
+        add_fence(owner_hash, "owner:" + owner_provenance)
+        if isinstance(pending, dict):
+            add_fence(pending.get("session_id_hash"), "pending_authorized_spawn")
+        for index, child in enumerate(lifecycle_state.get("children", [])):
+            if isinstance(child, dict):
+                add_fence(child.get("session_id_hash"), f"children[{index}]")
+        add_fence(lifecycle_state.get("session_id_hash"), "top_level_telemetry")
+        if not owner_abort and recovery_session_hash in fence_sources:
+            raise ValueError("task-abandon recovery session has old task activity evidence")
+        child_fence = _read_abandoned_child_fence(root)
+        owner_fence = _read_abandoned_owner_hashes(root)
+        provenance_complete, spawn_provenance = _read_abandoned_spawn_provenance(root)
+        if owner_abort:
+            previously_fenced = recovery_session_hash in owner_fence
+            owner_fence.add(recovery_session_hash)
+            if not previously_fenced:
+                provenance_complete.add(recovery_session_hash)
+            for child in lifecycle_state.get("children", []):
+                if isinstance(child, dict) and child.get("managed") is True and child.get("session_id_hash") == recovery_session_hash:
+                    spawn_provenance.append({
+                        "session_id_hash": recovery_session_hash,
+                        "turn_id_hash": child.get("spawn_turn_id_hash"),
+                        "payload_hash": child.get("payload_hash"),
+                        "agent_type": child.get("agent_type"),
+                        "parent_agent_id_hash": child.get("parent_agent_id_hash"),
+                    })
+        old_child_count = 0
+        for child in lifecycle_state.get("children", []):
+            if not isinstance(child, dict) or child.get("managed") is not True:
+                continue
+            identity = {key: child.get(key) for key in ("agent_id_hash", "session_id_hash", "turn_id_hash")}
+            if any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None for value in identity.values()):
+                if owner_abort:
+                    raise ValueError("owner task-abandon cannot fence an old managed child identity")
+                continue
+            old_child_count += 1
+            if identity not in child_fence:
+                child_fence.append(identity)
+
+        archive = root / ".context" / "audit" / "abandoned" / f"{_task_key(task_id)}-{uuid.uuid4().hex}"
+        archive.mkdir(parents=True, exist_ok=False)
+        core._atomic_write(archive / "state.json", state_raw)
+        if lifecycle_raw is not None:
+            core._atomic_write(archive / "lifecycle.json", lifecycle_raw)
+        manifest = {
+            "version": 1,
+            "status": "ABANDONED",
+            "lifecycle_status": "RECOVERED_INCOMPLETE",
+            "task_id": task_id,
+            "revision": revision,
+            "state_sha256": state_sha256,
+            "lifecycle_sha256": lifecycle_sha256,
+            "lifecycle_presence": "PRESENT" if lifecycle_present else "ABSENT",
+            "reason": reason,
+            "old_controller_session_id_hash": owner_hash or "UNKNOWN",
+            "old_controller_owner_provenance": owner_provenance,
+            "fenced_old_session_provenance": fence_sources,
+            "recovery_mode": "OWNER_ABORT" if owner_abort else "FOREIGN_TAKEOVER",
+            "owner_session_retained": owner_abort,
+            "fenced_old_child_identities": old_child_count,
+            "recovery_session_id_hash": recovery_session_hash,
+            "recovery_attestation_sha256": attestation_sha256,
+            "managed_hook_spec_hash": managed_hook_spec_hash(),
+            "adapter_protocol_version": CODEX_ADAPTER_PROTOCOL_VERSION,
+            "recovered_at_ns": time.time_ns(),
+        }
+        core._atomic_write(archive / "manifest.json", (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8"))
+        if (archive / "state.json").read_bytes() != state_raw or (archive / "lifecycle.json").is_file() != lifecycle_present or (lifecycle_raw is not None and (archive / "lifecycle.json").read_bytes() != lifecycle_raw):
+            raise ValueError("task-abandon archive verification failed")
+        fence = _read_session_fence(root) | (set(fence_sources) - {recovery_session_hash} if owner_abort else set(fence_sources))
+        _write_capture(_session_fence_path(root), {"version": 1, "session_id_hashes": sorted(fence)})
+        if _read_session_fence(root) != fence:
+            raise ValueError("task-abandon session fence verification failed")
+        _write_capture(_abandoned_child_fence_path(root), {"version": 1, "children": child_fence, "agent_id_hashes": sorted(_read_abandoned_agent_hashes(root)), "owner_session_id_hashes": sorted(owner_fence), "owner_spawn_provenance_complete": sorted(provenance_complete), "owner_spawn_provenance": spawn_provenance})
+        if (_read_abandoned_child_fence(root) != child_fence or _read_abandoned_owner_hashes(root) != owner_fence
+                or _read_abandoned_spawn_provenance(root) != (provenance_complete, spawn_provenance)):
+            raise ValueError("task-abandon child fence verification failed")
+        state_path.unlink()
+        task_authority.checkpoint(root)
+    return {"ok": True, "status": "ABANDONED", "task_id": task_id, "revision": revision, "archive": str(archive.relative_to(root)).replace("\\", "/"), "lifecycle_status": "RECOVERED_INCOMPLETE"}

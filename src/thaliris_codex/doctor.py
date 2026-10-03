@@ -1,0 +1,276 @@
+"""Read-only adapter and Codex configuration diagnostics."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tomllib
+
+from thaliris.models import ContextConfig
+from thaliris.core import entries, milestone_check, _load_state
+from .codex_adapter import _effective_root_instruction_path, _managed_span
+from .lifecycle import CODEX_ADAPTER_PROTOCOL_VERSION, child_identity_corroboration, hooks_health, is_managed_handler, managed_hook_spec_hash
+
+UNKNOWN = "UNKNOWN"
+
+
+def _runtime_hook_evidence(root: Path) -> tuple[bool, bool, bool, bool]:
+    """Read only private runtime markers emitted by the hook adapter."""
+    pre = post = spawn = stale = False
+    expected = managed_hook_spec_hash()
+    for path in (root / ".context" / "audit").glob("*/runtime.json"):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        if value.get("managed_hook_spec_hash") != expected:
+            stale = True
+            continue
+        events = value.get("events_observed")
+        if isinstance(events, dict):
+            pre = pre or events.get("PreToolUse") is True
+            post = post or events.get("PostToolUse") is True
+        tools = value.get("tools_observed")
+        if isinstance(tools, list):
+            spawn = spawn or "spawn_agent" in tools
+    return pre, post, spawn, stale
+
+
+def _controller_boundary_evidence(root: Path) -> dict[str, str]:
+    """Report only observed root-guard events from private runtime markers."""
+    guard = blocked = child = False
+    expected = managed_hook_spec_hash()
+    for path in (root / ".context" / "audit").glob("*/runtime.json"):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        if value.get("managed_hook_spec_hash") != expected:
+            continue
+        counters = value.get("controller_guard")
+        if isinstance(counters, dict):
+            guard = True
+            try:
+                blocked = blocked or int(counters.get("blocked", 0) or 0) > 0
+            except (TypeError, ValueError):
+                pass
+    for path in (root / ".context" / "audit" / "lifecycle").glob("*.json"):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict) and value.get("managed_hook_spec_hash") == expected and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION:
+            child = child or any(isinstance(item, dict) and isinstance(item.get("started"), int) for item in value.get("children", []))
+    return {
+        "root_action_guard": "YES" if guard else UNKNOWN,
+        "blocked_root_action": "YES" if blocked else UNKNOWN,
+        "child_lifecycle_observed": "YES" if child else UNKNOWN,
+    }
+
+
+def _context_isolation(root: Path) -> dict[str, object]:
+    """Report policy wiring separately from native runtime attestation.
+
+    A repository hook proves that the policy is installed, not that the
+    currently running Codex build honors PreToolUse or updatedInput.  Those
+    runtime capabilities therefore remain UNKNOWN until a live native probe
+    records them.  Configuration is reported only under ``configured``;
+    ``observed`` never becomes YES merely because a hook file exists.
+    """
+    path = root / ".codex" / "hooks.json"
+    policy = pre = post = "NO"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        hooks = value.get("hooks") if isinstance(value, dict) else None
+        if isinstance(hooks, dict):
+            for event, target in (("PreToolUse", "pre"), ("PostToolUse", "post")):
+                entries = hooks.get(event)
+                if not isinstance(entries, list):
+                    continue
+                managed = any(
+                    isinstance(entry, dict)
+                    and isinstance(entry.get("hooks"), list)
+                    and any(is_managed_handler(item, event) for item in entry["hooks"])
+                    for entry in entries
+                )
+                if managed:
+                    if target == "pre":
+                        pre = "YES"
+                        policy = "YES"
+                    else:
+                        post = "YES"
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        policy = pre = post = UNKNOWN
+    pre_observed, post_observed, spawn_observed, stale = _runtime_hook_evidence(root)
+    return {
+        "configured": {
+            "policy_present": policy,
+            "pre_dispatch_hook": pre,
+            "post_dispatch_hook": post,
+            "managed_hook_spec_hash": managed_hook_spec_hash(),
+        },
+        "observed": {
+            "pre_dispatch_hook_supported": "YES" if pre_observed else UNKNOWN,
+            "spawn_payload_supported": "YES" if spawn_observed else UNKNOWN,
+            "input_rewrite_supported": UNKNOWN,
+            "pre_dispatch_enforcement": UNKNOWN,
+            "post_dispatch_observation": "YES" if post_observed else UNKNOWN,
+            "current_hook_hash_observed": "YES" if (pre_observed or post_observed) else ("STALE" if stale else UNKNOWN),
+            "pretool_child_identity_corroborated": child_identity_corroboration(root),
+            "hook_trust_runtime_status": UNKNOWN,
+        },
+    }
+
+
+def _codex_config() -> tuple[dict[str, object], bool]:
+    base = Path(os.environ["CODEX_HOME"]) if os.environ.get("CODEX_HOME") else Path.home() / ".codex"
+    path = base / "config.toml"
+    if not path.is_file(): return {}, False
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        return (data if isinstance(data, dict) else {}), True
+    except (OSError, tomllib.TOMLDecodeError): return {}, False
+
+
+def _project_trust(root: Path) -> str:
+    """Report configured project trust without confusing it with hook trust.
+
+    Codex keeps project trust and executable-hook trust as separate facts.  A
+    trusted project therefore never upgrades the hook/runtime observations in
+    this diagnostic.
+    """
+    config, available = _codex_config()
+    if not available:
+        return UNKNOWN
+    projects = config.get("projects") if isinstance(config, dict) else None
+    if not isinstance(projects, dict):
+        return UNKNOWN
+    wanted = str(root.resolve()).lower()
+    for path, value in projects.items():
+        if str(path).lower() != wanted:
+            continue
+        if isinstance(value, dict) and value.get("trust_level") == "trusted":
+            return "YES"
+        if isinstance(value, dict) and value.get("trust_level") == "untrusted":
+            return "NO"
+    return UNKNOWN
+
+
+def _host_capability(root: Path, *, hooks: dict[str, object], lifecycle: dict[str, object], events: set[str]) -> dict[str, object]:
+    """Expose static discovery and live observations as separate fields."""
+    configured = hooks.get("hooks_configured") == "YES"
+    runtime = hooks.get("runtime_observed") == "YES"
+    trust = hooks.get("hook_trust_runtime_status", UNKNOWN)
+    if trust not in {"YES", "NO", UNKNOWN}:
+        trust = UNKNOWN
+    return {
+        "project_config_discovered": "YES" if (root / ".codex" / "hooks.json").is_file() else "NO",
+        "project_trust": _project_trust(root),
+        "hook_definition_discovered": "YES" if configured else "NO",
+        "installed_hook_spec": hooks.get("installed_hook_spec", UNKNOWN),
+        "canonical_executable_available": hooks.get("canonical_executable_available", UNKNOWN),
+        "canonical_executable_identity": hooks.get("canonical_executable_identity", UNKNOWN),
+        "diagnostic_process_executable_resolution": hooks.get("diagnostic_process_executable_resolution", UNKNOWN),
+        # Runtime records attest hook activity, not the executable identity of
+        # the active Codex host.  The current record schema has no such
+        # evidence, so keep these observations distinct.
+        "active_codex_host_executable_observed": UNKNOWN,
+        "legacy_managed_handler_cleanup": hooks.get("legacy_managed_handler_cleanup", UNKNOWN),
+        "hook_hash_match": hooks.get("current_hook_hash_observed", UNKNOWN),
+        "hook_trust_status": trust,
+        "hook_runtime_observed": "YES" if runtime else UNKNOWN,
+        "controller_pretool_observed": "YES" if "PreToolUse" in events else UNKNOWN,
+        "controller_deny_observed": UNKNOWN,
+        "controller_side_effect_prevented": UNKNOWN,
+        "subagent_lifecycle_observed": "YES" if lifecycle.get("start") and lifecycle.get("stop") else UNKNOWN,
+        "reviewer_native_readonly_observed": UNKNOWN,
+        "trusted_runtime_isolation_observed": UNKNOWN,
+    }
+
+
+def _states(configured: str = UNKNOWN, enabled: str = UNKNOWN) -> dict[str, str]:
+    return {"configured": configured, "enabled": enabled}
+
+
+def _version(command: str) -> str:
+    executable = shutil.which(command)
+    if not executable: return UNKNOWN
+    try:
+        output = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=2, check=False).stdout.strip()
+        return output or UNKNOWN
+    except (OSError, subprocess.SubprocessError): return UNKNOWN
+
+
+def report(root: Path) -> dict[str, object]:
+    raw, codex_configured = _codex_config()
+    try:
+        ContextConfig.load(root); context_config = "YES"
+    except ValueError:
+        context_config = "NO"
+    model = raw.get("model", UNKNOWN) if isinstance(raw.get("model", UNKNOWN), str) else UNKNOWN
+    reasoning = raw.get("model_reasoning_effort", UNKNOWN) if isinstance(raw.get("model_reasoning_effort", UNKNOWN), str) else UNKNOWN
+    memory, milestones = (root / ".agent-memory").is_dir(), (root / ".milestones").is_dir()
+    memory_state = _states("YES" if memory else "NO", "YES" if memory else "NO")
+    milestone_state = _states("YES" if milestones else "NO", "YES" if milestones else "NO")
+    if memory:
+        try:
+            entries(root)
+            memory_state["structure"] = "YES"
+        except (OSError, ValueError):
+            memory_state["structure"] = "NO"
+    else:
+        memory_state["structure"] = "NO"
+    if milestones:
+        milestone_state["structure"] = "YES" if milestone_check(root)["ok"] else "NO"
+    else:
+        milestone_state["structure"] = "NO"
+    agents = _effective_root_instruction_path(root, raw)
+    if agents.is_file():
+        try:
+            agents_text = agents.read_text(encoding="utf-8")
+            span = _managed_span(agents_text, agents.name)
+            agents_state = "YES" if span is not None else "NO"
+        except ValueError:
+            agents_state = "NO"
+        except OSError:
+            agents_state = UNKNOWN
+    else:
+        agents_state = "NO"
+    task = {"present": "NO", "valid": UNKNOWN, "status": UNKNOWN, "revision": UNKNOWN}
+    if (root / ".context" / "state.json").is_file():
+        task["present"] = "YES"
+        try:
+            current = _load_state(root)
+            task.update({"valid": "YES", "status": current["status"], "revision": current["revision"]})
+        except ValueError:
+            task["valid"] = "NO"
+        except OSError:
+            pass
+    task_state_valid = task["valid"] if task["present"] == "YES" else "YES"
+    configured_budget = raw.get("project_doc_max_bytes") if isinstance(raw.get("project_doc_max_bytes"), int) else 32 * 1024
+    if agents_state == "YES":
+        try:
+            router_within_budget = "YES" if _managed_span(agents_text, agents.name)[1] <= configured_budget else "NO"
+        except (TypeError, ValueError):
+            router_within_budget = UNKNOWN
+    else:
+        router_within_budget = UNKNOWN
+    routing_ready = "YES" if all(value == "YES" for value in (context_config, agents_state, task_state_valid)) else "NO"
+    routing = {
+        "command_executed": "YES",
+        "configuration_valid": context_config,
+        "managed_agents_present": agents_state,
+        "managed_router_effective_file": agents.name,
+        "managed_router_within_configured_budget": router_within_budget,
+        "task_state_valid": task_state_valid,
+        "role_routing_ready": routing_ready,
+    }
+    lifecycle = hooks_health(root)
+    isolation = _context_isolation(root)
+    return {"ok": True, "codex": {"version": _version("codex"), "model_configured": model, "reasoning_configured": reasoning, "configured": "YES" if codex_configured else "NO"}, "subagents": {"status": UNKNOWN}, "lifecycle_hooks": lifecycle, "context_isolation": isolation, "controller_boundary": {"observed": _controller_boundary_evidence(root)}, "host_capability": _host_capability(root, hooks=lifecycle, lifecycle={"start": False, "stop": False}, events=set()), "context": {"config": context_config, "agents": agents_state, "memory": memory_state, "milestones": milestone_state, "task_state": task, "ready_for_routing": routing_ready, "routing": routing}, "fallbacks": {"rg": "YES" if shutil.which("rg") else "NO", "git": "YES" if shutil.which("git") else "NO"}}

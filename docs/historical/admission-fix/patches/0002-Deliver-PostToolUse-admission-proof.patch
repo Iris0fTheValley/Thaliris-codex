@@ -1,0 +1,574 @@
+From fd4fba36b6794871ac048d89c09352a3e015d460 Mon Sep 17 00:00:00 2001
+From: Iris0fTheValley <251708937+Iris0fTheValley@users.noreply.github.com>
+Date: Sat, 26 Sep 2026 13:48:06 +0800
+Subject: [PATCH 2/4] Deliver PostToolUse admission proof
+
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 9ec5a6ae2636918ab5d411482c982aff91327fac..ed9d37ab890f27c043976794514da543114c84a1 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -72,10 +72,13 @@ These fixed profiles retain the same stable role IDs; default profiles remain
+ on Luna or Sol. Per-spawn model/effort overrides are denied;
+ role sessions never select their own model or effort.
+ Choose the model per handoff and semantic slice difficulty. Deterministic
+-documentation, test, configuration, or reference cleanup and small defined
+-implementations default to standard Implementer on Luna, even within a large
+-project. Use Focused Implementer on Sol only when the current slice itself
+-requires complex lifecycle, ownership, compatibility, or multi-option reasoning.
++documentation, test, configuration, or reference cleanup and small, bounded
++modifications with a confirmed direction and no complex semantic uncertainty
++default to standard Implementer on Luna, including lifecycle or admission work
++and slices inside a large project. Do not select Focused Implementer from the
++parent task or topic. Use Focused Implementer on Sol only when the current
++slice itself requires high-difficulty reasoning about lifecycle, ownership,
++compatibility, or multiple plausible implementations.
+ Use Reasoning Specialist on Sol only when problem framing or slice decomposition
+ is unclear; it does not implement. Astra is an escalation for an already small,
+ unusually demanding slice or an evidenced Sol failure. Astra medium is the
+@@ -202,8 +205,10 @@ Controller notice per pending batch. Obvious attempts to mutate
+ Controller-owned task or lifecycle state are denied, recorded, and included in
+ that aggregate notice. Reviewer independence is a
+ developer-instruction plus obvious-write hook guard, not a claimed native
+-read-only sandbox. Starting managed mode requires a one-shot PreToolUse bearer
+-attestation issued by the loaded current-ABI hook. The token embeds a hash of
++read-only sandbox. Starting managed mode requires a one-shot bearer attestation
++issued by the loaded current-ABI hook. After a successful direct `init`, its
++PostToolUse callback supplies the proof in the same Host tool result; a later
++PreToolUse callback remains a fallback. The token embeds a hash of
+ the hook payload's session id, and the adapter checks that hash, bridge digest,
+ hook ABI, expiry, and one-time local record. This is an adapter-side hook-path
+ check inside the selected same-Windows-user local trust boundary; it does not
+@@ -260,7 +265,8 @@ JSON result.
+ Read the canonical managed text and SHA-256 returned by `init` or
+ `bootstrap-check`. Explicitly acknowledge that digest with
+ `--controller-bridge-sha256` when calling `task-start`; the loaded current-ABI
+-PreToolUse hook must issue the one-shot bearer described above. The adapter
++PostToolUse hook supplies the one-shot bearer after a successful direct `init`,
++with PreToolUse as a fallback. The adapter
+ checks the token's embedded session hash and local record, but this does not
+ authenticate Host provenance or prevent same-user local replay before the
+ record is consumed. This is Controller activation only: CLI output does not
+diff --git a/adapter/codex/README.md b/adapter/codex/README.md
+index 7c1bdf60a5de263a0e19adc1761225820cdd5126..9c9484faeafb681aee87e80bf94924806f4500d9 100644
+--- a/adapter/codex/README.md
++++ b/adapter/codex/README.md
+@@ -47,9 +47,13 @@ high-difficulty semantic closure is complete, Focused reports the deterministic
+ patch, test, format, documentation, and residual-reference tail to the
+ Controller. The Controller owns closure of the Focused slice and may authorize
+ a fresh standard Luna Implementer handoff for that deterministic tail. Model
+-choice follows the current slice difficulty, not the parent task. A Scanner
+-batches a few searches and reads, returns compact facts, and ends once the
+-handoff has enough evidence.
++choice follows the current slice difficulty, not the parent task. Small,
++bounded modifications with a confirmed direction and no complex semantic
++uncertainty, including lifecycle or admission work, use the standard Luna
++Implementer. Do not select Focused Implementer from the parent task or topic;
++use Focused Implementer on Sol only when the current slice itself requires
++high-difficulty reasoning. A Scanner batches a few searches and reads, returns
++compact facts, and ends once the handoff has enough evidence.
+ 
+ The ACTIVE root Controller uses only bounded control-plane commands and
+ explicit retrieval. Execution, mutation, and testing belong to fresh
+@@ -98,10 +102,11 @@ added after the startup snapshot fails closed with
+ `NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE`. Updating the content of an existing
+ filename does not imply a restart. Host registration files on disk do not prove
+ that a current session loaded them. `task-start`
+-then requires the exact Controller bridge SHA-256 and a one-shot
+-current-ABI `PreToolUse` bearer attestation. The token embeds a hash of the
+-hook payload's session id, and the adapter checks that hash, bridge digest, hook
+-ABI, expiry, and one-time local record. This is an adapter-side hook-path check
++then requires the exact Controller bridge SHA-256 and a one-shot current-ABI
++hook bearer attestation. A successful direct `init` supplies it through the
++same Host result's `PostToolUse` callback; `PreToolUse` remains a fallback. The
++token embeds a hash of the hook payload's session id, and the adapter checks
++that hash, bridge digest, hook ABI, expiry, and one-time local record. This is an adapter-side hook-path check
+ inside the selected same-Windows-user local trust boundary; it does not
+ authenticate Host provenance, and another local process under that user could
+ replay the bearer while it remains valid. A missing or mismatched bridge or
+diff --git a/docs/codex-admission-live-20260926.md b/docs/codex-admission-live-20260926.md
+index adb8d1652081bed50199bbb52bc8f300252ec95b..16b61e213676502bdb92da7697792857d33d8d9a 100644
+--- a/docs/codex-admission-live-20260926.md
++++ b/docs/codex-admission-live-20260926.md
+@@ -7,35 +7,45 @@ command body, or private machine path.
+ ## Environment
+ 
+ - Codex CLI: `0.155.0-alpha.9.2`
++- Candidate Thaliris version: `0.4.0`
+ - Managed hook ABI: `thaliris-hook-abi-10`
+-- Host hook configuration: 7 Thaliris hooks enabled and trusted in the saved
+-  Host configuration
+-- Target: a fresh disposable temporary Git repository
+-- Candidate source: loaded through process-local `PYTHONPATH`; no installed
+-  candidate package was substituted
+-- Evidence log path: `<redacted local temp path>/admission-evidence.jsonl`
+-- Evidence log SHA-256: `<redacted>`
++- Host hook configuration: `hooks/list` returned seven Thaliris handlers;
++  all seven were enabled and had `trustStatus: trusted` (read-only check)
++- Target: a fresh disposable Git repository
++- Candidate source: loaded through process-local `PYTHONPATH` inherited by the
++  pinned executable; no installed candidate package was substituted
++- Live session hash: `4089ce021430a393503b219496bfeb5ffa572217a00b5073c1eafdde379cd59a`
++- Init bridge SHA-256: `57c6f9d834242eaffc78f607825b606d8fa5922fc9d0fed55fdce787d1da1d9e`
++- Evidence path: `<redacted local temp path>/.context/audit/<session-hash>/runtime.json`
+ 
+ ## One-session sequence
+ 
+-One Host session made four distinct calls against the fresh repository:
++One Host `codex exec` session made exactly three relevant shell calls against
++the fresh repository, in this order:
+ 
+-1. `bootstrap-check` returned the canonical bridge data.
+-2. `init` created the project activation state.
+-3. A harmless `PreToolUse` call traversed the live hook and issued the
+-   admission bearer for that session payload.
+-4. `task-start` consumed the bearer with the bridge digest and returned
+-   `ACTIVE`.
++1. `bootstrap-check` returned `ok: true` and the canonical bridge data.
++2. `init` returned `ok: true` and created the project activation state. The
++   same successful init Host result delivered `PostToolUse` `additionalContext`
++   containing the one-shot admission proof.
++3. The first `task-start` passed that proof and the init bridge digest and
++   returned `status: ACTIVE` with no error.
+ 
+-A second consumption attempt was rejected, demonstrating one-shot local
+-   consumption. The report contains no bearer token or secret payload.
++No manual `audit-hook` call or harmless intermediary shell call was made. The
++bearer token is intentionally omitted from this report and from retained
++evidence.
++
++The runtime observation record contains two Bash PostToolUse observations
++after activation (init and task-start), with the expected candidate adapter
++protocol version and session hash.
+ 
+ ## Scope
+ 
+-The sequence demonstrates a real hook path and one-shot adapter state for this
+-CLI build, ABI, local user, and fresh repository. The bearer embeds a session
+-hash and is checked against a local record, bridge digest, ABI, and expiry. The
+-selected trust boundary includes local processes running as the same Windows
+-user, so another same-user process could replay the bearer while it remains
+-valid. This observation does not provide cryptographic Host provenance and
+-does not generalize to other Host builds, Desktop scenarios, or repositories.
++This demonstrates the direct-init PostToolUse admission path and one-shot
++adapter state for this CLI build, hook ABI, local user, candidate source
++import path, and fresh repository. The bearer embeds the current session hash
++and is checked against a local record, bridge digest, ABI, expiry, and one-time
++consumption. The selected trust boundary includes local processes running as
++the same Windows user, so another same-user process could replay the bearer
++while it remains valid. This observation does not provide cryptographic Host
++provenance and does not generalize to other Host builds, Desktop scenarios,
++or repositories.
+diff --git a/docs/thaliris-role-packs.md b/docs/thaliris-role-packs.md
+index 066022f0299705008375f7203372550d75b86312..d9fd575f0753cef767c79cf82e3b2d241ee0d9fc 100644
+--- a/docs/thaliris-role-packs.md
++++ b/docs/thaliris-role-packs.md
+@@ -109,10 +109,13 @@ Luna Implementer handoff for that deterministic tail.
+ 
+ The Controller chooses the model per handoff and semantic slice difficulty.
+ Deterministic documentation, test, configuration, or reference cleanup and
+-small defined implementations default to standard Implementer on Luna,
+-including slices inside a large project. Focused Implementer on Sol handles
+-only a current slice that requires complex lifecycle, ownership, compatibility,
+-or multi-option reasoning.
++small, bounded modifications with a confirmed direction and no complex
++semantic uncertainty default to standard Implementer on Luna, including
++lifecycle or admission work and slices inside a large project. Do not select
++Focused Implementer from the parent task or topic. Use Focused Implementer on
++Sol only when the current slice itself requires high-difficulty reasoning
++about lifecycle, ownership, compatibility, or multiple plausible
++implementations.
+ Reasoning Specialist on Sol is for unclear problem framing or slice decomposition
+ and does not implement. Astra is an escalation for an already small, unusually
+ demanding slice or an evidenced Sol failure; medium is the default escalation,
+diff --git a/docs/thaliris-routing-protocol.md b/docs/thaliris-routing-protocol.md
+index e375aee520be1a0421e3a5382d5d90160c1845e1..b1acda1e9195a2875423f50ed1f7b8c629d874f0 100644
+--- a/docs/thaliris-routing-protocol.md
++++ b/docs/thaliris-routing-protocol.md
+@@ -91,10 +91,13 @@ model/effort overrides are denied. Role sessions cannot choose their own
+ model/effort. Reasoning Specialist reframes ill-defined
+ problems; normal design and implementation belong to the Executors.
+ Choose the model per handoff and semantic slice difficulty. Deterministic
+-documentation, test, configuration, or reference cleanup and small defined
+-implementations default to standard Implementer on Luna, even within a large
+-project. Use Focused Implementer on Sol only when the current slice itself
+-requires complex lifecycle, ownership, compatibility, or multi-option reasoning.
++documentation, test, configuration, or reference cleanup and small, bounded
++modifications with a confirmed direction and no complex semantic uncertainty
++default to standard Implementer on Luna, including lifecycle or admission work
++and slices inside a large project. Do not select Focused Implementer from the
++parent task or topic. Use Focused Implementer on Sol only when the current
++slice itself requires high-difficulty reasoning about lifecycle, ownership,
++compatibility, or multiple plausible implementations.
+ Use Reasoning Specialist on Sol only when problem framing or slice decomposition
+ is unclear; it does not implement. Astra is an escalation for an already small,
+ unusually demanding slice or an evidenced Sol failure. Astra medium is the
+@@ -140,13 +143,14 @@ Text outside the span remains byte-for-byte intact, and damaged, duplicate, or
+ conflicting Thaliris markers require manual resolution. A newly saved global
+ instruction does not prove what the current session loaded.
+ 
+-The `task-start` bridge also requires a one-shot PreToolUse bearer attestation
+-from the loaded current-ABI hook. The token embeds a hash of the hook payload's
+-session id; the adapter checks that hash, bridge digest, hook ABI, expiry, and
+-one-time local record. This is an adapter-side hook-path check inside the
+-selected same-Windows-user local trust boundary. It does not authenticate Host
+-provenance, and another local process under that user could replay the bearer
+-while it remains valid.
++The `task-start` bridge also requires a one-shot bearer attestation from the
++loaded current-ABI hook. A successful direct `init` delivers the proof through
++its PostToolUse callback; PreToolUse remains a fallback. The token embeds a
++hash of the hook payload's session id; the adapter checks that hash, bridge
++digest, hook ABI, expiry, and one-time local record. This is an adapter-side
++hook-path check inside the selected same-Windows-user local trust boundary.
++It does not authenticate Host provenance, and another local process under that
++user could replay the bearer while it remains valid.
+ 
+ The scoped live sequence is recorded in the [admission proof probe report](codex-admission-live-20260926.md).
+ 
+diff --git a/src/thaliris/codex_adapter.py b/src/thaliris/codex_adapter.py
+index 8e2cb0c77eecbe35cef7cb1241cbafda015aa0ca..45b0e509dd491adfc2f55723036e4f1aab5a7cc2 100644
+--- a/src/thaliris/codex_adapter.py
++++ b/src/thaliris/codex_adapter.py
+@@ -551,10 +551,13 @@ These fixed profiles retain the same stable role IDs; default profiles remain
+ on Luna or Sol. Per-spawn model/effort overrides are denied;
+ role sessions never select their own model or effort.
+ Choose the model per handoff and semantic slice difficulty. Deterministic
+-documentation, test, configuration, or reference cleanup and small defined
+-implementations default to standard Implementer on Luna, even within a large
+-project. Use Focused Implementer on Sol only when the current slice itself
+-requires complex lifecycle, ownership, compatibility, or multi-option reasoning.
++documentation, test, configuration, or reference cleanup and small, bounded
++modifications with a confirmed direction and no complex semantic uncertainty
++default to standard Implementer on Luna, including lifecycle or admission work
++and slices inside a large project. Do not select Focused Implementer from the
++parent task or topic. Use Focused Implementer on Sol only when the current
++slice itself requires high-difficulty reasoning about lifecycle, ownership,
++compatibility, or multiple plausible implementations.
+ Use Reasoning Specialist on Sol only when problem framing or slice decomposition
+ is unclear; it does not implement. Astra is an escalation for an already small,
+ unusually demanding slice or an evidenced Sol failure. Astra medium is the
+@@ -681,8 +684,10 @@ Controller notice per pending batch. Obvious attempts to mutate
+ Controller-owned task or lifecycle state are denied, recorded, and included in
+ that aggregate notice. Reviewer independence is a
+ developer-instruction plus obvious-write hook guard, not a claimed native
+-read-only sandbox. Starting managed mode requires a one-shot PreToolUse bearer
+-attestation issued by the loaded current-ABI hook. The token embeds a hash of
++read-only sandbox. Starting managed mode requires a one-shot bearer attestation
++issued by the loaded current-ABI hook. After a successful direct `init`, its
++PostToolUse callback supplies the proof in the same Host tool result; a later
++PreToolUse callback remains a fallback. The token embeds a hash of
+ the hook payload's session id, and the adapter checks that hash, bridge digest,
+ hook ABI, expiry, and one-time local record. This is an adapter-side hook-path
+ check inside the selected same-Windows-user local trust boundary; it does not
+@@ -739,7 +744,8 @@ JSON result.
+ Read the canonical managed text and SHA-256 returned by `init` or
+ `bootstrap-check`. Explicitly acknowledge that digest with
+ `--controller-bridge-sha256` when calling `task-start`; the loaded current-ABI
+-PreToolUse hook must issue the one-shot bearer described above. The adapter
++PostToolUse hook supplies the one-shot bearer after a successful direct `init`,
++with PreToolUse as a fallback. The adapter
+ checks the token's embedded session hash and local record, but this does not
+ authenticate Host provenance or prevent same-user local replay before the
+ record is consumed. This is Controller activation only: CLI output does not
+@@ -881,10 +887,13 @@ Luna Implementer handoff for that deterministic tail.
+ 
+ The Controller chooses the model per handoff and semantic slice difficulty.
+ Deterministic documentation, test, configuration, or reference cleanup and
+-small defined implementations default to standard Implementer on Luna,
+-including slices inside a large project. Focused Implementer on Sol handles
+-only a current slice that requires complex lifecycle, ownership, compatibility,
+-or multi-option reasoning.
++small, bounded modifications with a confirmed direction and no complex
++semantic uncertainty default to standard Implementer on Luna, including
++lifecycle or admission work and slices inside a large project. Do not select
++Focused Implementer from the parent task or topic. Use Focused Implementer on
++Sol only when the current slice itself requires high-difficulty reasoning
++about lifecycle, ownership, compatibility, or multiple plausible
++implementations.
+ Reasoning Specialist on Sol is for unclear problem framing or slice decomposition
+ and does not implement. Astra is an escalation for an already small, unusually
+ demanding slice or an evidenced Sol failure; medium is the default escalation,
+@@ -1354,7 +1363,8 @@ Read the canonical managed instruction text and SHA-256 from `init` or
+ `bootstrap-check`, then acknowledge that digest with
+ `--controller-bridge-sha256` in `task-start`, normally from the same session.
+ That describes the intended workflow, not Host authentication. The loaded
+-current-ABI PreToolUse hook must issue a one-shot bearer attestation. The token
++current-ABI PostToolUse hook supplies a one-shot bearer after a successful
++direct `init`; PreToolUse remains a fallback. The token
+ embeds a hash of the hook payload's session id, and the adapter checks that
+ hash, bridge digest, hook ABI, expiry, and one-time local record. This is an
+ adapter-side hook-path check inside the selected same-Windows-user local trust
+@@ -1910,7 +1920,7 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
+ def audit_hook(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
+     bridge_sha256 = None
+     if (
+-        event == "PreToolUse" and managed_hook_abi == lifecycle.MANAGED_HOOK_ABI
++        event in {"PreToolUse", "PostToolUse"} and managed_hook_abi == lifecycle.MANAGED_HOOK_ABI
+         and isinstance(payload, dict) and payload.get("agent_id") is None
+         and payload.get("agent_type") is None
+         and payload.get("tool_name", payload.get("tool")) == "Bash"
+diff --git a/src/thaliris/lifecycle.py b/src/thaliris/lifecycle.py
+index 6e76525927afcae1b190975b682a45fabdc849ca..c9e4d98d8195f7f20b212364115c9e8d4ba3ed8d 100644
+--- a/src/thaliris/lifecycle.py
++++ b/src/thaliris/lifecycle.py
+@@ -817,6 +817,8 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
+                     _best_effort_record(_record_delegation_telemetry, root, payload)
+             if isinstance(tool, str) and _tool_basename(tool) in _OBSERVED_EXECUTION_TOOL_NAMES:
+                 _best_effort_record(_record_execution_observation, root, payload)
++            if isinstance(tool, str) and _tool_basename(tool) == "Bash":
++                return _post_init_attestation(root, payload, managed_hook_abi, controller_bridge_sha256)
+             return ""
+         # Stop has no production policy role. It neither invokes a model nor
+         # blocks or corrects the Controller.
+@@ -2179,6 +2181,48 @@ def _start_attestation_path(root: Path, session_hash: str) -> Path:
+     return root / ".context" / "audit" / "task-start-attestations" / f"{session_hash}.json"
+ 
+ 
++def _direct_init_call(root: Path, payload: dict[str, Any]) -> bool:
++    """Recognize only a direct init of this worktree in the Host's Bash input."""
++    command = _bash_command(payload)
++    if command is None:
++        return False
++    separator_check = command.lstrip()
++    if separator_check.startswith("&") and len(separator_check) > 1 and separator_check[1].isspace():
++        separator_check = separator_check[1:].lstrip()
++    if _COMMAND_SEPARATOR.search(separator_check):
++        return False
++    arguments = _context_arguments(command)
++    if arguments is None:
++        return False
++    try:
++        tokens = [token.strip("\"'") for token in shlex.split(arguments, posix=False)]
++    except ValueError:
++        return False
++    index = 0
++    if index < len(tokens) and tokens[index] == "--root":
++        if index + 1 >= len(tokens) or not tokens[index + 1]:
++            return False
++        target = Path(tokens[index + 1])
++        cwd = payload.get("cwd")
++        base = Path(cwd) if isinstance(cwd, str) and cwd else root
++        if not target.is_absolute():
++            target = base / target
++        if target.resolve(strict=False) != root.resolve(strict=False):
++            return False
++        index += 2
++    return tokens[index:] == ["init"]
++
++
++def _post_init_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None, controller_bridge_sha256: str | None) -> str:
++    """Deliver the admission proof in the successful init callback itself."""
++    if managed_task_state(root)[0] != "NO_TASK" or not _direct_init_call(root, payload):
++        return ""
++    response = _post_tool_response(payload)
++    if response is None or not _post_tool_succeeded(response) or _execution_outcome(response) == "FAILED":
++        return ""
++    return _issue_task_start_attestation(root, payload, managed_hook_abi, controller_bridge_sha256, event="PostToolUse")
++
++
+ def new_role_profile_files(root: Path, session_hash: str) -> list[str] | None:
+     """Compare current disk role filenames with this session's disk snapshot.
+ 
+@@ -2244,11 +2288,12 @@ def role_catalog_session_status(root: Path, session_hash: str) -> str:
+     return HOST_ROLE_CATALOG_UNKNOWN
+ 
+ 
+-def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None = None, controller_bridge_sha256: str | None = None) -> str:
++def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None = None, controller_bridge_sha256: str | None = None, *, event: str = "PreToolUse") -> str:
+     session_hash = _session_id_hash(payload)
+     marker = root / ".codex" / "thaliris.json"
+     if (
+-        session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI
++        event not in {"PreToolUse", "PostToolUse"}
++        or session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI
+         or not isinstance(controller_bridge_sha256, str)
+         or re.fullmatch(r"[0-9a-f]{64}", controller_bridge_sha256) is None
+         or marker.is_symlink() or not marker.is_file()
+@@ -2291,7 +2336,7 @@ def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_h
+             _write_capture(path, record)
+         token = record["token"]
+     return json.dumps({"hookSpecificOutput": {
+-        "hookEventName": "PreToolUse",
++        "hookEventName": event,
+         "additionalContext": f"Current-session Thaliris admission proof: --hook-attestation {token}. Pass it with the Controller bridge SHA-256 returned by init or bootstrap-check when calling task-start.",
+     }}, ensure_ascii=False, separators=(",", ":"))
+ 
+diff --git a/src/thaliris/roles.py b/src/thaliris/roles.py
+index 8a747fae09e06cd43f8879f30763b4e51c388719..2e092e2e9293c6b51897a83e8b5de9d8326b2225 100644
+--- a/src/thaliris/roles.py
++++ b/src/thaliris/roles.py
+@@ -142,7 +142,10 @@ _SHARED_INSTRUCTIONS = (
+     "alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is "
+     "unclear, the Controller first selects the standard Luna Investigator to establish facts "
+     "and coupling. Model choice follows the difficulty of the current semantic slice, not "
+-    "the parent task. "
++    "the parent task. Small, bounded modifications with a confirmed direction and no complex "
++    "semantic uncertainty, including lifecycle or admission work, use the standard Luna "
++    "Implementer. Do not select Focused Implementer from the parent task or topic; use Focused "
++    "Implementer on Sol only when the current slice itself requires high-difficulty reasoning. "
+ )
+ 
+ _EXECUTOR_INSTRUCTIONS = (
+diff --git a/tests/test_admission_proof.py b/tests/test_admission_proof.py
+index d037b6399810246dcdbad3d0a6be4625ef877831..f46dbd3fd7a4eff8111c75cdc2f5fb8fa08bbadc 100644
+--- a/tests/test_admission_proof.py
++++ b/tests/test_admission_proof.py
+@@ -11,6 +11,68 @@ import pytest
+ from thaliris import codex_adapter, lifecycle
+ 
+ 
++def test_direct_init_posttool_delivers_one_shot_proof_before_first_task_start(tmp_path: Path, monkeypatch) -> None:
++    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
++    payload = {
++        "session_id": "init-session",
++        "turn_id": "init-turn",
++        "cwd": str(tmp_path),
++        "tool_name": "Bash",
++        "tool_input": {"command": f'thaliris --root "{tmp_path}" init'},
++    }
++    codex_adapter.audit_hook(tmp_path, "SessionStart", {
++        "session_id": "init-session", "source": "startup", "cwd": str(tmp_path),
++    })
++    assert codex_adapter.audit_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI) == ""
++    result = codex_adapter.init(tmp_path)
++    digest = result["controller_bridge_sha256"]
++    post = {**payload, "tool_response": json.dumps(result)}
++    output = json.loads(codex_adapter.audit_hook(tmp_path, "PostToolUse", post, lifecycle.MANAGED_HOOK_ABI))
++    specific = output["hookSpecificOutput"]
++    assert specific["hookEventName"] == "PostToolUse"
++    assert "updatedInput" not in specific
++    assert "permissionDecision" not in specific
++    token = re.search(r"--hook-attestation (v2\.[0-9a-f]{64}\.[A-Za-z0-9_-]{16,128})", specific["additionalContext"]).group(1)
++
++    monkeypatch.setattr(lifecycle, "managed_executable_health", lambda: {"canonical_executable_available": "YES"})
++    monkeypatch.setattr(codex_adapter, "selected_continuation_mode", lambda _root: "BLOCKING_WAIT")
++    monkeypatch.setattr(codex_adapter, "native_child_completion_reenters_root", lambda: "UNSUPPORTED")
++    monkeypatch.setattr(codex_adapter, "host_explicit_blocking_wait", lambda: {"status": "PASS"})
++    started = codex_adapter.task_start(tmp_path, "goal", None, None, token, digest)
++    assert started["status"] == "ACTIVE"
++    with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
++        lifecycle.consume_task_start_attestation(tmp_path, token, digest)
++
++
++def test_posttool_init_proof_rejects_unbound_or_failed_callbacks(tmp_path: Path) -> None:
++    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
++    codex_adapter.init(tmp_path)
++    base = {
++        "session_id": "controller-session",
++        "turn_id": "turn",
++        "cwd": str(tmp_path),
++        "tool_name": "Bash",
++        "tool_input": {"command": f'thaliris --root "{tmp_path}" init'},
++        "tool_response": '{"ok":true}',
++    }
++    wrong_cases = [
++        {"session_id": ""},
++        {"agent_id": "child", "agent_type": "thaliris-implementer"},
++        {"tool_name": "functions.exec", "tool_input": {"code": "thaliris init"}},
++        {"tool_input": {"command": "Get-Date"}, "tool_response": "thaliris init"},
++        {"tool_input": {"command": "thaliris init; Get-Date"}},
++        {"tool_input": {"command": f'thaliris --root "{tmp_path.parent}" init'}},
++        {"tool_response": None},
++        {"tool_response": {"exit_code": 1, "output": '{"ok":false}'}},
++        {"tool_response": {"isError": True}},
++    ]
++    for changes in wrong_cases:
++        assert codex_adapter.audit_hook(tmp_path, "PostToolUse", {**base, **changes}, lifecycle.MANAGED_HOOK_ABI) == ""
++    assert codex_adapter.audit_hook(tmp_path, "PostToolUse", base, "thaliris-hook-abi-9") == ""
++    assert codex_adapter.audit_hook(tmp_path, "UserPromptSubmit", base, lifecycle.MANAGED_HOOK_ABI) == ""
++    assert lifecycle.handle_hook(tmp_path, "PostToolUse", base, lifecycle.MANAGED_HOOK_ABI, None) == ""
++
++
+ def test_same_session_activation_issues_command_independent_one_shot_proof(tmp_path: Path, monkeypatch) -> None:
+     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+     payload = {
+diff --git a/tests/test_mechanical_core.py b/tests/test_mechanical_core.py
+index 94926d447cb6d2a52cd3e81a939962cc8917beda..ff2cecdcf761928b3563ba9741e231189faf4098 100644
+--- a/tests/test_mechanical_core.py
++++ b/tests/test_mechanical_core.py
+@@ -207,7 +207,7 @@ def test_routing_guidance_permits_the_bounded_implementer_only_path() -> None:
+     assert "Curator and Reasoning Specialist are optional" in protocol
+     assert "For divisible work, the Controller chooses bounded semantic slices" in protocol
+     assert "not by token, file, or task-count thresholds" in normalized_protocol
+-    assert "Deterministic documentation, test, configuration, or reference cleanup and small defined implementations default to standard Implementer on Luna" in normalized_protocol
++    assert "Deterministic documentation, test, configuration, or reference cleanup and small, bounded modifications with a confirmed direction and no complex semantic uncertainty default to standard Implementer on Luna" in normalized_protocol
+     assert "already small, unusually demanding" in normalized_protocol
+     assert "Decision-changing investigation belongs to\nInvestigator" in protocol
+     assert "Bounded local reading\nneeded for implementation may stay inside either Executor" in protocol
+diff --git a/tests/test_roles.py b/tests/test_roles.py
+index 90ee5d863912ffcaa19778c951c2fbc9918d017d..cd345a2736929a75a2a56a66f2fab705224338a2 100644
+--- a/tests/test_roles.py
++++ b/tests/test_roles.py
+@@ -104,6 +104,11 @@ def test_profile_defaults_and_static_astra_selection_are_fixed() -> None:
+             assert "Work only within the assigned semantic slice" in value["developer_instructions"]
+             assert "return a decision-changing unknown instead of changing them" in value["developer_instructions"]
+             assert "its commit reference, and verification evidence" in value["developer_instructions"]
++            normalized = " ".join(value["developer_instructions"].lower().split())
++            assert "small, bounded modifications with a confirmed direction and no complex semantic uncertainty" in normalized
++            assert "including lifecycle or admission work" in normalized
++            assert "do not select focused implementer from the parent task or topic" in normalized
++            assert "current slice itself requires high-difficulty reasoning" in normalized
+     for role in ("focused-implementer", "reasoning-specialist"):
+         for effort, suffix in (("medium", "astra-medium"), ("xhigh", "xhigh")):
+             name = f"thaliris-{role}-{suffix}.toml"
+@@ -243,9 +248,9 @@ def test_child_communication_and_slice_routing_contract_is_shared() -> None:
+     )
+     routing = (
+         "per handoff and semantic slice difficulty",
+-        "Deterministic documentation, test, configuration, or reference cleanup and small defined implementations default",
++        "Deterministic documentation, test, configuration, or reference cleanup and small, bounded modifications with a confirmed direction and no complex semantic uncertainty default",
+         "current slice",
+-        "multi-option reasoning",
++        "multiple plausible implementations",
+         "batches a few searches and reads",
+         "high-difficulty semantic closure",
+         "deterministic patch, test, format, documentation, and residual-reference tail to the Controller",
+@@ -304,10 +309,21 @@ def test_focused_roles_keep_local_judgment_bounded_and_prefer_scanner_evidence()
+         instructions = roles.get_role(role).instructions.lower()
+         assert all(phrase in instructions for phrase in required), role
+ 
+-    rendered = codex_adapter.render_role_packs().lower()
++    rendered = " ".join(codex_adapter.render_role_packs().lower().split())
+     assert all(phrase in rendered for phrase in required)
+     assert "deterministic documentation, test, configuration, or reference cleanup" in rendered
+     assert "default to standard implementer on luna" in rendered
++    assert "small, bounded modifications with a confirmed direction and no complex semantic uncertainty" in rendered
++    assert "including lifecycle or admission work" in rendered
++    assert "do not select focused implementer from the parent task or topic" in rendered
++    assert "current slice itself requires high-difficulty reasoning" in rendered
++
++    for role in ("implementer", "focused-implementer"):
++        instructions = roles.get_role(role).instructions.lower()
++        assert "small, bounded modifications with a confirmed direction and no complex semantic uncertainty" in instructions
++        assert "including lifecycle or admission work" in instructions
++        assert "do not select focused implementer from the parent task or topic" in instructions
++        assert "current slice itself requires high-difficulty reasoning" in instructions
+ 
+ 
+ def test_exact_phase_two_profile_bytes_are_recognized_only_for_own_role() -> None:
+@@ -601,3 +617,9 @@ def test_knowledge_maintenance_and_formal_docs_stay_in_instruction_sources() ->
+     assert "formal project documentation" in focused
+     assert "semantic drift" in reviewer
+     assert "semantic drift" in packs
++    for rendered in (managed, packs):
++        normalized = " ".join(rendered.lower().split())
++        assert "small, bounded modifications with a confirmed direction and no complex semantic uncertainty" in normalized
++        assert "including lifecycle or admission work" in normalized
++        assert "do not select focused implementer from the parent task or topic" in normalized
++        assert "current slice itself requires high-difficulty reasoning" in normalized
+diff --git a/tests/test_single_handoff.py b/tests/test_single_handoff.py
+index 57f08bd62b8cc066137506ac3b200715176decd2..658ccda8f0031692eb6bbc12a204ece247bd9cfc 100644
+--- a/tests/test_single_handoff.py
++++ b/tests/test_single_handoff.py
+@@ -1766,7 +1766,10 @@ def test_role_profiles_define_distilled_results_without_semantic_workflow(tmp_pa
+     assert "degraded mode does not define a separate role\nsequence" in codex_adapter.MANAGED
+     assert "For divisible work, the Controller chooses bounded semantic slices" in codex_adapter.MANAGED
+     assert "not by token, file, or task-count\nthresholds" in codex_adapter.MANAGED
+-    assert "Choose the model per handoff and semantic slice difficulty. Deterministic\ndocumentation, test, configuration, or reference cleanup and small defined\nimplementations default to standard Implementer on Luna" in codex_adapter.MANAGED
++    assert "Choose the model per handoff and semantic slice difficulty. Deterministic\ndocumentation, test, configuration, or reference cleanup and small, bounded\nmodifications with a confirmed direction and no complex semantic uncertainty\ndefault to standard Implementer on Luna" in codex_adapter.MANAGED
++    assert "including lifecycle or admission work" in codex_adapter.MANAGED
++    assert "Do not select Focused Implementer from the\nparent task or topic" in codex_adapter.MANAGED
++    assert "current\nslice itself requires high-difficulty reasoning" in codex_adapter.MANAGED
+     assert "Use Reasoning Specialist on Sol only when problem framing or slice decomposition\nis unclear; it does not implement." in codex_adapter.MANAGED
+     assert "already small,\nunusually demanding slice or an evidenced Sol failure" in codex_adapter.MANAGED
+     assert "Host instruction activation remains UNKNOWN" in codex_adapter.MANAGED

@@ -1,0 +1,1352 @@
+{
+  "0ebbba3:AGENTS.md": {
+    "commit": "0ebbba3d8469072abdf59f3fcc486283c0951272",
+    "git_blob": "0324b9addf8b2c93ee4da2e5f9b144e27b86a32c",
+    "original_path": "AGENTS.md",
+    "sha256": "b0b82811fc08c4a90f0784ddef7ea4b813fd9986da2286d9a48a6e980fa453ca"
+  },
+  "0ebbba3:docs/thaliris-role-packs.md": {
+    "commit": "0ebbba3d8469072abdf59f3fcc486283c0951272",
+    "git_blob": "11ab72e62a899adc3c7c00b1217646be5c500904",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "e3473113697a9343d0ca108468434b26a53b8d8175a4f344e86067e93bf2c853"
+  },
+  "0ebbba3:src/thaliris/codex_adapter.py": {
+    "commit": "0ebbba3d8469072abdf59f3fcc486283c0951272",
+    "git_blob": "a04444d9220f654241cf54dd2b9b6e923cc64cd1",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "a967442d64bc83ac50e013ad8b79761592e527a008ec269222799003fe2cff19"
+  },
+  "11e0cc9:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "11e0cc9:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "11e0cc9:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "11e0cc9:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "11e0cc9:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "11e0cc9:.codex/agents/thaliris-verifier.toml": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "11e0cc9:AGENTS.md": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "79910ff9b3fd60c0784c5ac0110938966aa4b4fb",
+    "original_path": "AGENTS.md",
+    "sha256": "3bf8ad982c3c716fe066295e9450281f01b16e3cc17230e091b7d8c564feb22e"
+  },
+  "11e0cc9:docs/thaliris-role-packs.md": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "f8dda3d4d649c617a6fe539f1391d46a1fd3e2f4",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "edd1e7e1e9a1f121ba868eaa808d95fc1505553f37408df7eda495c42a22a7f0"
+  },
+  "11e0cc9:src/thaliris/codex_adapter.py": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "45e959d0edba47a68d424cee18eb5fe9e1217af9",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "1fd6f01497e80659e05ab219c884d557d05136feffc32a41eb221c8b6257d612"
+  },
+  "11e0cc9:src/thaliris/roles.py": {
+    "commit": "11e0cc95d31f86bd1adf342ac9e96941ee445c54",
+    "git_blob": "97d0aa292ead1f89385f215620cd22b66370a5f4",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "14e30de358f1c9e29ba62f1bc3f3e0907812d10b765912f107e57df908ad0a9b"
+  },
+  "1f98dae:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "1f98dae:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "1f98dae:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "1f98dae:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "1f98dae:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "1f98dae:.codex/agents/thaliris-verifier.toml": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "1f98dae:AGENTS.md": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "b69293e5e091092dde81651330f818b53b819536",
+    "original_path": "AGENTS.md",
+    "sha256": "f098b7add2a38b49f0c12880a3e2b14645b41cd7f2a76a42bf6a1638982fb50e"
+  },
+  "1f98dae:docs/thaliris-role-packs.md": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "b6c5d058603976020bf5001216e6854bc7f2664c",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "fb3170c5512178aad4f8e5b757e2ce01b0f28ae154596efbd483f220f376b2ca"
+  },
+  "1f98dae:src/thaliris/codex_adapter.py": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "b7e26ce90a940ba874390ab4cfa72982c2d0f813",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "18cd516f617b89632c1efc3c5909e37ab005c95100ce118a5bfa75c0b3c1ef36"
+  },
+  "1f98dae:src/thaliris/roles.py": {
+    "commit": "1f98dae57ad0b5ce8b6ebbc1857c8a1e9e32f613",
+    "git_blob": "c0ec3ad81b5461bff4d09aaf3e7a5357f2a3d407",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "48359ab27f16c91742230c7220124dedec2cc45654d191426d2318447a598144"
+  },
+  "210782b1:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "210782b1:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "210782b1:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "210782b1:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "210782b1:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "210782b1:.codex/agents/thaliris-verifier.toml": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "210782b1:AGENTS.md": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "db857541a9f8a1a4ac72cc13fdeae3ecb9446195",
+    "original_path": "AGENTS.md",
+    "sha256": "3fd907d183f7488e57eeaa7540693eded5d24ea7a0ec71142633a63a73a61234"
+  },
+  "210782b1:docs/thaliris-role-packs.md": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "e8b45fa2aea50f4bf724ced263f744c70c56c1c7",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "be9eb98ca23f0bb394b0820500f665ca85881ae300f4ba3ee542131ab3dbe09b"
+  },
+  "210782b1:src/thaliris/codex_adapter.py": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "5382e28735dac8197f7e4bb7fc9f9bfd5ef8c0e1",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "cc5133cbb02181b721086f4b9ff8eeca2c51cbeb9cae56c39c7dcabd1023c70f"
+  },
+  "210782b1:src/thaliris/roles.py": {
+    "commit": "210782b1d652e8266859e2999e558be8e061d46f",
+    "git_blob": "97d0aa292ead1f89385f215620cd22b66370a5f4",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "14e30de358f1c9e29ba62f1bc3f3e0907812d10b765912f107e57df908ad0a9b"
+  },
+  "28e4297:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "f54c3d03925626916bc7e4e42fe5380f494096bb",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "6b255fa51ad04def5bbe248c30d5e247bb17af3913cffd815e283ec9178aae53"
+  },
+  "28e4297:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "b40fe0145dd4bd99e6985f20b24bf8989e573b31",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "6484ff491175ebf56a63d65d7439c3c661f782e6401c09e43f6bfbf26a3f0ff1"
+  },
+  "28e4297:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "2f9165f51e86ffa396344be30bdd60fc12942f6e",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "edeb1136eab3d7685552e7a8ec4da70a7cec22085dc236e203a7ef2c7d8f03a4"
+  },
+  "28e4297:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "28e4297:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "28e4297:.codex/agents/thaliris-verifier.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "28e4297:AGENTS.md": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "d2edbd7e56e63a9c72ef9204a99b7f746024fc84",
+    "original_path": "AGENTS.md",
+    "sha256": "f621bef034c76343aa8892f48715d834b58e84d68616ff1718f1923838525536"
+  },
+  "28e4297:docs/thaliris-role-packs.md": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "12f5b9bcca05d26987c4430084b388651ad62daa",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "51c7bdfab8dac172c18d7cf7797e4421c100ee88dd5fc9ac84e9bd607ce77eb9"
+  },
+  "28e4297:src/thaliris/codex_adapter.py": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "443f92a103ba7bfb1e0ad1c14cd4eab7d8960bec",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "8ff3d95f503e405e355ccd41b617f3baef18eb6b2d8596eb62284217bcdcb7bb"
+  },
+  "28e4297:src/thaliris/roles.py": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "c3ded0e264771024f7cad71bccee0308a6f009a5",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "fd368d7a7c64c2f55722e661a3b6464a52db8aea5ab2a14622bd1dfb9a34a799"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "f54c3d03925626916bc7e4e42fe5380f494096bb",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "6b255fa51ad04def5bbe248c30d5e247bb17af3913cffd815e283ec9178aae53"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "b40fe0145dd4bd99e6985f20b24bf8989e573b31",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "6484ff491175ebf56a63d65d7439c3c661f782e6401c09e43f6bfbf26a3f0ff1"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "2f9165f51e86ffa396344be30bdd60fc12942f6e",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "edeb1136eab3d7685552e7a8ec4da70a7cec22085dc236e203a7ef2c7d8f03a4"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:.codex/agents/thaliris-verifier.toml": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:AGENTS.md": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "d2edbd7e56e63a9c72ef9204a99b7f746024fc84",
+    "original_path": "AGENTS.md",
+    "sha256": "f621bef034c76343aa8892f48715d834b58e84d68616ff1718f1923838525536"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:docs/thaliris-role-packs.md": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "12f5b9bcca05d26987c4430084b388651ad62daa",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "51c7bdfab8dac172c18d7cf7797e4421c100ee88dd5fc9ac84e9bd607ce77eb9"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:src/thaliris/codex_adapter.py": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "443f92a103ba7bfb1e0ad1c14cd4eab7d8960bec",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "8ff3d95f503e405e355ccd41b617f3baef18eb6b2d8596eb62284217bcdcb7bb"
+  },
+  "28e4297d2e489a8f893cb75aec7291cbb3518dcb:src/thaliris/roles.py": {
+    "commit": "28e4297d2e489a8f893cb75aec7291cbb3518dcb",
+    "git_blob": "c3ded0e264771024f7cad71bccee0308a6f009a5",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "fd368d7a7c64c2f55722e661a3b6464a52db8aea5ab2a14622bd1dfb9a34a799"
+  },
+  "3485ec4:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "3485ec4:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "3485ec4:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "3485ec4:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "3485ec4:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "3485ec4:.codex/agents/thaliris-verifier.toml": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "3485ec4:AGENTS.md": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "0af5e832b1bb997d4982dc6ff3a15a697b226825",
+    "original_path": "AGENTS.md",
+    "sha256": "6c93da4f62ac05dbb23bd742b34a8e387393cdf1397c6b78eaeae32922011dbd"
+  },
+  "3485ec4:docs/thaliris-role-packs.md": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "bd8ef5f37b6c3b6cb3eec75863e9a0bad8b06817",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "139d6f403532b022d9815d3a0f8ab57914fbeea849d0de3cb27d34c0b8d7de22"
+  },
+  "3485ec4:src/thaliris/codex_adapter.py": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "d4d3bc07e65c85e0d20ceea57b1c33ef95771303",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "34579c732533a0ddd17d173bacb96b7504089d160176e98adb832d8c6126eb7c"
+  },
+  "3485ec4:src/thaliris/roles.py": {
+    "commit": "3485ec404388ead19a41d56752ac8559954c9468",
+    "git_blob": "4c9e0ef3ca3445cbd939fc966c58e52c5d0afe6d",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "573042edb47a43ab70380241ed7d933236e4bdf922e73a20e1396b8dda3f5aee"
+  },
+  "40fd5f2:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "197889999d829d301fd47b9eb48b3f64e0326680",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "91e423f5640a2936216e24e2c1c1d3de5f0609c6133f399f1bcdffa202bfc369"
+  },
+  "40fd5f2:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "148b6a0a1a7e8bea1caad42f7a5a6b25cb0658a4",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "8640467871d3c841dbad4d84df88d6d5c560bb7958eb8427fdaf7a0bd3c0f64e"
+  },
+  "40fd5f2:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "2d9dba9e18f6e0c7d3a37d629f60247573ece05d",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "d4e8399c78f22ccf0a41b63a1b9cb5878b41e5a9e57be66494948739545c1335"
+  },
+  "40fd5f2:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "662580116f54d1fa23422f71638496b505cf67da",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "b18c9d7439d8f26c8c858e5ab91214d74c2433636ee42aa64ab6c72d1070845a"
+  },
+  "40fd5f2:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "3343610386068358ffffb54bc409f5e9b22161da",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "edfde7a10c6a6b095db0e3f78d1412c1e3f21594e24121931eff12bd877c80be"
+  },
+  "40fd5f2:.codex/agents/thaliris-verifier.toml": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "cac377fe4267626ab44a1f5bbc98494104837fda",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "5f422419b0b83d25e967ec0b0f2f50f7b56abd5b322595ffb1bfb0ba001884eb"
+  },
+  "40fd5f2:AGENTS.md": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "ed9d37ab890f27c043976794514da543114c84a1",
+    "original_path": "AGENTS.md",
+    "sha256": "ce38e0eceebe82027d9b398d4c814dd5c30cd5c13322148d8cf8b64301558ecc"
+  },
+  "40fd5f2:docs/thaliris-role-packs.md": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "d9fd575f0753cef767c79cf82e3b2d241ee0d9fc",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "156771800df802acb9a23ed9a0682e4b7a50c3f5859dcd747cfd4d23e5b54f49"
+  },
+  "40fd5f2:src/thaliris/codex_adapter.py": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "d1badfc56feb2c65a72f80d158ce67d0ad88f30c",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "c8d92b9e0603169aec15516e669d2a9ab7a1cb6180befd85dbd3516912c1742c"
+  },
+  "40fd5f2:src/thaliris/roles.py": {
+    "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
+    "git_blob": "2e092e2e9293c6b51897a83e8b5de9d8326b2225",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "5f352a737cb3c1702758dc8c8385ca8fdc3a27ac05752d955090f4011b737373"
+  },
+  "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31:.codex/agents/thaliris-verifier.toml": {
+    "commit": "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31",
+    "git_blob": "06bb923a9374ede4d5b8a70610e3f80084090fc6",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "8b1d70c1979319ba6cee33ac5341afa977064b006484f8f1718ba59bc939f419"
+  },
+  "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31:AGENTS.md": {
+    "commit": "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31",
+    "git_blob": "09ea649306c37a613f60552b9e4212026f154990",
+    "original_path": "AGENTS.md",
+    "sha256": "20625738773ce029c4e9b7eba2211a4e4b0d769b235fabf660e08e7cedc9daa5"
+  },
+  "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31:docs/thaliris-role-packs.md": {
+    "commit": "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31",
+    "git_blob": "7dfd7ab321c4ec1f1c32bd02b1d87f1b88d2aef7",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "0a51833bf936b14053c08a6502a6a1d27ecd1518263e7eea5c4e43f53fa1c5f1"
+  },
+  "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31:src/thaliris/codex_adapter.py": {
+    "commit": "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31",
+    "git_blob": "880d5a9753220bcf09f27bc34890e411ccee17c4",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "91b093bfcee6ff4185e37e61317b833b7be7ddcec71388da7ff538e9310ba332"
+  },
+  "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31:src/thaliris/roles.py": {
+    "commit": "5e6554196d27c4d6bc87c2a8008bd3c37ef01b31",
+    "git_blob": "481aba1ef66448238f1b00ff4b58eba3f28f9605",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "c33067b5c7bf09b3e4cc1ad5e77150a9f08055d536d06b4f874a346feb45613b"
+  },
+  "69d9a33:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "f54c3d03925626916bc7e4e42fe5380f494096bb",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "6b255fa51ad04def5bbe248c30d5e247bb17af3913cffd815e283ec9178aae53"
+  },
+  "69d9a33:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "b40fe0145dd4bd99e6985f20b24bf8989e573b31",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "6484ff491175ebf56a63d65d7439c3c661f782e6401c09e43f6bfbf26a3f0ff1"
+  },
+  "69d9a33:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "2f9165f51e86ffa396344be30bdd60fc12942f6e",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "edeb1136eab3d7685552e7a8ec4da70a7cec22085dc236e203a7ef2c7d8f03a4"
+  },
+  "69d9a33:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "69d9a33:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "69d9a33:.codex/agents/thaliris-verifier.toml": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "69d9a33:AGENTS.md": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "3f66356bcd7552f3c1c33ee8dcfeeff4418cb956",
+    "original_path": "AGENTS.md",
+    "sha256": "72d003afa52f587e941cafdaab83b2b100726dcce703490b7aa1ca242ceee941"
+  },
+  "69d9a33:docs/thaliris-role-packs.md": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "ab6b40299cd9593d5f2bd16fb97090f7b8a40c4b",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "fa0b3365d5901484d281958e94853c325e0007a5d84d19b05c7205c5cd475728"
+  },
+  "69d9a33:src/thaliris/codex_adapter.py": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "4267491de58d4aaa7dc249360ad6586126c2b82e",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "181a63ff4fd5d43b28d9119e5ca6d68a479994cf17e988094d51657fd3346bba"
+  },
+  "69d9a33:src/thaliris/roles.py": {
+    "commit": "69d9a33b4f8243d9554721221c942bb1aae4faeb",
+    "git_blob": "9cb4cf2cafd310baef6531fd123a765017fc9613",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "10c1b29b2e5cef7087fd58f04b30a9a5d3086a5722fe97408c7a13356550853f"
+  },
+  "78fca60^:AGENTS.md": {
+    "commit": "12e3e79aa6369bb0d7247f632c4a3c16a0ff30ce",
+    "git_blob": "a2dd4de48f2a1ebf9907523f5bf1e0bc5af4c856",
+    "original_path": "AGENTS.md",
+    "sha256": "0d64416a6a153206c75cd3e935342029252ad0b0a7254b990ba3386ff013edd1"
+  },
+  "78fca60^:docs/thaliris-role-packs.md": {
+    "commit": "12e3e79aa6369bb0d7247f632c4a3c16a0ff30ce",
+    "git_blob": "e20ef4360c851a56517485696fbba6518b782094",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "844a2278b311c253c2da3a06133b503edb822a2929eeb082b50ecd2925e4cd30"
+  },
+  "78fca60^:src/thaliris/codex_adapter.py": {
+    "commit": "12e3e79aa6369bb0d7247f632c4a3c16a0ff30ce",
+    "git_blob": "41a5938fab26428f41bf226450c686e983ab5452",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "2fe76485d2f4fa530352ffd1607476eeb470cc53750d67b521044384617025c0"
+  },
+  "7a940327:.codex/agents/thaliris-verifier.toml": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "073db5ebf9f8ae4c6495440c8588c6d3192eb922",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "fa1585e8df2c9136eed055f22e85594805c62a0cec0d6387700dd4959fe9dc19"
+  },
+  "7a940327:AGENTS.md": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "a2dd4de48f2a1ebf9907523f5bf1e0bc5af4c856",
+    "original_path": "AGENTS.md",
+    "sha256": "0d64416a6a153206c75cd3e935342029252ad0b0a7254b990ba3386ff013edd1"
+  },
+  "7a940327:docs/thaliris-role-packs.md": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "e06153d7cfd1fd53924bd4902c476c8e6f115e5b",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "b6dba8d5d5e855face02667993601f84c4a54e77d7c33012d542a6b91483ec6c"
+  },
+  "7a940327:src/thaliris/codex_adapter.py": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "242c12ff2db5f5b632f6d2a86c06ee5ca775c5ce",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "96bb1bb3d8d64182d43f013c169d680f0f14b29230f2d34f2b764fa65b968bb6"
+  },
+  "7a94032:.codex/agents/thaliris-verifier.toml": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "073db5ebf9f8ae4c6495440c8588c6d3192eb922",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "fa1585e8df2c9136eed055f22e85594805c62a0cec0d6387700dd4959fe9dc19"
+  },
+  "7a94032:AGENTS.md": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "a2dd4de48f2a1ebf9907523f5bf1e0bc5af4c856",
+    "original_path": "AGENTS.md",
+    "sha256": "0d64416a6a153206c75cd3e935342029252ad0b0a7254b990ba3386ff013edd1"
+  },
+  "7a94032:docs/thaliris-role-packs.md": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "e06153d7cfd1fd53924bd4902c476c8e6f115e5b",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "b6dba8d5d5e855face02667993601f84c4a54e77d7c33012d542a6b91483ec6c"
+  },
+  "7a94032:src/thaliris/codex_adapter.py": {
+    "commit": "7a940327cafb533a3b041b7488bd6b361b8b6837",
+    "git_blob": "242c12ff2db5f5b632f6d2a86c06ee5ca775c5ce",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "96bb1bb3d8d64182d43f013c169d680f0f14b29230f2d34f2b764fa65b968bb6"
+  },
+  "8a3fe930:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "8a3fe930:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "8a3fe930:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "8a3fe930:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "8a3fe930:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "8a3fe930:.codex/agents/thaliris-verifier.toml": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "8a3fe930:AGENTS.md": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "93d73da4f4bde059ac7d85bb7e520fb1fea1d33c",
+    "original_path": "AGENTS.md",
+    "sha256": "9e24f54380d90ec6bb351c391178248afd1e9673ccebb8d4baf8a25ff1bbfd23"
+  },
+  "8a3fe930:docs/thaliris-role-packs.md": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "3253fc8cb1b7263adf3bde8fa32b28a46ab76ef5",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "4ee70a3c36b2c76d74c03179359181dfd34c96bbfae5bf1e5e7ee1c71b6f13d7"
+  },
+  "8a3fe930:src/thaliris/codex_adapter.py": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "7c7d7ea689461206502efe9fe4f521df5489dae4",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "bbec1b0b325bd3220329fcf1c4fd806516f20d1de26ae6ff5ec6c98d79f55ad1"
+  },
+  "8a3fe930:src/thaliris/roles.py": {
+    "commit": "8a3fe930b236396f598c143a12be646c9faf5939",
+    "git_blob": "758a31568fb6b8755b68721028d9b4a912bb6ef0",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "c4386e6eee7c6cae2fcb892f9f98fb39731669b5eb594f951f35c33718cd6c35"
+  },
+  "8eb1707:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "8eb1707:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "8eb1707:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "8eb1707:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "8eb1707:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "8eb1707:.codex/agents/thaliris-verifier.toml": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "8eb1707:AGENTS.md": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "811d52aa0eb7a11ea96ed8b8750a8c145b93c96f",
+    "original_path": "AGENTS.md",
+    "sha256": "a37e40892a3f8d3a51ace805bc19b29e0ddb1724b3c3fc5f02ab94433140211b"
+  },
+  "8eb1707:docs/thaliris-role-packs.md": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "90ba79f921788eae7e66276e5ddb8d6e958ab5fa",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "d26bd4476fa7fcdaa8518011059d75e0e20e4b3784fd46a24c9bc8c13067825c"
+  },
+  "8eb1707:src/thaliris/codex_adapter.py": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "cfc0c7ce8d46453441c21fddfbd98323ae3f80e2",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "a00062d05ffdced59a59341f5f7e2e3bb730ec89890c6985e709ffb2e405dc5e"
+  },
+  "8eb1707:src/thaliris/roles.py": {
+    "commit": "8eb1707558434c006be988bdbe76f0a5bf9d83cf",
+    "git_blob": "5ed82d9ffa0d4c61978961eb7606ef67bd8f8ba8",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "2f66654c6ab992016fab8fb9e4e7ca79039efc00f240f2d738c024481e7dd091"
+  },
+  "99a58fc:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "99a58fc:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "99a58fc:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "99a58fc:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "99a58fc:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "99a58fc:.codex/agents/thaliris-verifier.toml": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "99a58fc:AGENTS.md": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "5783bd13e9d57fcdca580e2a61002c8a6e2305ff",
+    "original_path": "AGENTS.md",
+    "sha256": "8bca470ee18a04025acf66d2a4e1607c5537bc3021491511b5f5091f0655d3a5"
+  },
+  "99a58fc:docs/thaliris-role-packs.md": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "17b8fd735d44595369d206d20382ff1939c4a373",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "d2b3a1c5a776f6a1dbb3be52a907c1704903f64a92d2388f64dc2171096e92e8"
+  },
+  "99a58fc:src/thaliris/codex_adapter.py": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "a61aabc81608e0e035a8d5373c1bf7612a2fd971",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "1f13400da6ccfdedb937a913c1a01b936c46270bad8d43f628fcca1150ce8f39"
+  },
+  "99a58fc:src/thaliris/roles.py": {
+    "commit": "99a58fcb7d51398bb35c22c80647f0332a4e8cba",
+    "git_blob": "c85ad85ebe67ad1023b79dfa0658a14686844acc",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "681cf2728f20068025e6b709ecf2e1dbee82c1c51976612bd4398c516f80717d"
+  },
+  "9b5bcf2:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "9b5bcf2:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "9b5bcf2:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "9b5bcf2:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "9b5bcf2:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "9b5bcf2:.codex/agents/thaliris-verifier.toml": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "9b5bcf2:AGENTS.md": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "29802e43bd5212aed323dff7020586187562863c",
+    "original_path": "AGENTS.md",
+    "sha256": "2b6ed3e63c22aa6e08d1f8344a78a0840e991612d25c18d86d3d7c8ee7fa6d61"
+  },
+  "9b5bcf2:docs/thaliris-role-packs.md": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "8d2dac3ff1a6da84d0a24677fa103e769c31414d",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "7009fc69d97ca403404c57d739e354cc3ebf7656fdca690c0fd60b2cfa9f6267"
+  },
+  "9b5bcf2:src/thaliris/codex_adapter.py": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "df132d7ea9376bd420e0ce13dfcf7304f923f3f3",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "e4f1151406ccb6a8ab16211b1e1ee85a20a0c65baeb4c4207b11f33541d818d7"
+  },
+  "9b5bcf2:src/thaliris/roles.py": {
+    "commit": "9b5bcf23dd5a503f1ede887698d78c5a08bb192d",
+    "git_blob": "8ec64ed56337e3f31fe9a3ce430a3ef8b27248a5",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "431639b067044a8159d658ede15ed52cd500e2026b7b2e3125ee052bc421c2d1"
+  },
+  "b1d517f:.codex/agents/thaliris-verifier.toml": {
+    "commit": "b1d517f948454c9326ca9a384cd81f54835a3965",
+    "git_blob": "06bb923a9374ede4d5b8a70610e3f80084090fc6",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "8b1d70c1979319ba6cee33ac5341afa977064b006484f8f1718ba59bc939f419"
+  },
+  "b1d517f:AGENTS.md": {
+    "commit": "b1d517f948454c9326ca9a384cd81f54835a3965",
+    "git_blob": "09ea649306c37a613f60552b9e4212026f154990",
+    "original_path": "AGENTS.md",
+    "sha256": "20625738773ce029c4e9b7eba2211a4e4b0d769b235fabf660e08e7cedc9daa5"
+  },
+  "b1d517f:docs/thaliris-role-packs.md": {
+    "commit": "b1d517f948454c9326ca9a384cd81f54835a3965",
+    "git_blob": "7dfd7ab321c4ec1f1c32bd02b1d87f1b88d2aef7",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "0a51833bf936b14053c08a6502a6a1d27ecd1518263e7eea5c4e43f53fa1c5f1"
+  },
+  "b1d517f:src/thaliris/codex_adapter.py": {
+    "commit": "b1d517f948454c9326ca9a384cd81f54835a3965",
+    "git_blob": "5554dc93b20663c35430f3615c6f16459f6c5b36",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "7da80d15d4a3ec6e0c712a8329b0d9d5361a8bd6d2ee80005f08ad755317dc61"
+  },
+  "b1d517f:src/thaliris/roles.py": {
+    "commit": "b1d517f948454c9326ca9a384cd81f54835a3965",
+    "git_blob": "5d68f2a660b4b00ce0205c17ca5d4c972f0d8190",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "b3c4f195ae24eb5d580c14019a683bce7bcd822a6bc62f2f6db88172f670800f"
+  },
+  "b218783:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "b218783:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "b218783:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "b218783:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "b218783:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "b218783:.codex/agents/thaliris-verifier.toml": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "b218783:AGENTS.md": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "b69293e5e091092dde81651330f818b53b819536",
+    "original_path": "AGENTS.md",
+    "sha256": "f098b7add2a38b49f0c12880a3e2b14645b41cd7f2a76a42bf6a1638982fb50e"
+  },
+  "b218783:docs/thaliris-role-packs.md": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "91389d0b4c8ce439f264eeff8e68799b05ae310d",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "65e744ea4e9fecfffa5845e09fabfe1b2b2f94f9cfa5d8f182902f5e885b41dd"
+  },
+  "b218783:src/thaliris/codex_adapter.py": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "4484a7ccad85d8d985976421737d04cd89a514e6",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "903caaee007bf006ce37cc77962abb2cb0f477bb795b6376ceaf7a806b7cd21a"
+  },
+  "b218783:src/thaliris/roles.py": {
+    "commit": "b218783e1ddc016acda33c92fcd8e1b47cfee049",
+    "git_blob": "758a31568fb6b8755b68721028d9b4a912bb6ef0",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "c4386e6eee7c6cae2fcb892f9f98fb39731669b5eb594f951f35c33718cd6c35"
+  },
+  "ba84553:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "ba84553:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "ba84553:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "ba84553:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "ba84553:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "ba84553:.codex/agents/thaliris-verifier.toml": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "ba84553:AGENTS.md": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "73470b22c58e1b4e98d8fec297c69949023fbd76",
+    "original_path": "AGENTS.md",
+    "sha256": "173b875c2534938ea550071424614f4d80c01df1f316fe1dd5d87ce6ed82205a"
+  },
+  "ba84553:docs/thaliris-role-packs.md": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "2163fb3d2146f6b3282deb5a27523675ce90fe24",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "0fe1ff343839ba57ab3cc275bff62960a01a1cb51d0127043422df487a45decc"
+  },
+  "ba84553:src/thaliris/codex_adapter.py": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "e1262c3440bdb5f6007a0cab5d78b49141cecbd9",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "fe1742d01b74229e0e07ee4295c5fc8e93945a5cff7d4c46069a6ed9ff339b92"
+  },
+  "ba84553:src/thaliris/roles.py": {
+    "commit": "ba84553acbfbca7288944b67fa3d6184ec6c5481",
+    "git_blob": "151f4ea6a403062fcc070acfd8b5fd1f830600f0",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "5362a2c1f78189e993c9bbf93af32848caaa5e0baca53272110b34336fbd4bdc"
+  },
+  "db6f19d:AGENTS.md": {
+    "commit": "db6f19ddc3ed11192ca7938f9f39b7e7609b66a9",
+    "git_blob": "7f0f6ea99bc36066001a954265f04c61caab0453",
+    "original_path": "AGENTS.md",
+    "sha256": "c4f55363128772d33f66e59c4224d254c1285c258b046ccdbbc17c0e0f0e363f"
+  },
+  "db6f19d:docs/thaliris-role-packs.md": {
+    "commit": "db6f19ddc3ed11192ca7938f9f39b7e7609b66a9",
+    "git_blob": "1274985328f82740ffa5b330f9617c0c84b33861",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "ea1f1c8386b41a0138bcdf3691cae95cc9c816db47bfa14dcdcbf36d2e87f0d9"
+  },
+  "db6f19d:src/thaliris/codex_adapter.py": {
+    "commit": "db6f19ddc3ed11192ca7938f9f39b7e7609b66a9",
+    "git_blob": "5b8c0e80b348708e97ac5b1c765a79ce96578977",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "6ee974d9da905b0a80c65b9645aa4e71b381f94a5a255ad9c916cd71245ccb3e"
+  },
+  "dde3d0f:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "dde3d0f:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "dde3d0f:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "dde3d0f:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "dde3d0f:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "dde3d0f:.codex/agents/thaliris-verifier.toml": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "dde3d0f:AGENTS.md": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "093716c466336ccaf5e842f76600c4af3a2845fc",
+    "original_path": "AGENTS.md",
+    "sha256": "327d4169915483542d0aa0becb0293238b19401069a155eb1e6298d53058964c"
+  },
+  "dde3d0f:docs/thaliris-role-packs.md": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "879a883fadc897bfa87224e828a51f71c60a6fec",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "44fad20e3e751dcaaa4d055d567bf3875242b158e62c58f312c4ea0bfdcb025c"
+  },
+  "dde3d0f:src/thaliris/codex_adapter.py": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "573fc3357022cebb7c555c9e4675bc6229e253fe",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "0c103eaafd5e167bbcf6a46a935326fbfe334a9379fcf2c3d3408bd4fcd1ed81"
+  },
+  "dde3d0f:src/thaliris/roles.py": {
+    "commit": "dde3d0f872d7b1b9ecb97d2aa59049ae104f6363",
+    "git_blob": "dd318ae84327e8a475c572aa868fdf8d9caec327",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "6555c0f7ac458294bf7c6767e70088970228f55d205e6108f83ea6a5611b2bdb"
+  },
+  "e02b9532e8dfd50aaafe480377a4aa735466697a:.codex/agents/thaliris-verifier.toml": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "073db5ebf9f8ae4c6495440c8588c6d3192eb922",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "fa1585e8df2c9136eed055f22e85594805c62a0cec0d6387700dd4959fe9dc19"
+  },
+  "e02b9532e8dfd50aaafe480377a4aa735466697a:AGENTS.md": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "e0e3c3d8cd3dc2240c8c8b4ebe8739db851b7fee",
+    "original_path": "AGENTS.md",
+    "sha256": "6a9e561d823e9e4b1c205f65188266a2d59fc342cbae55af4a2ed57db75f183d"
+  },
+  "e02b9532e8dfd50aaafe480377a4aa735466697a:docs/thaliris-role-packs.md": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "ca4702fe16d0ed9dd740558793aecb205f007812",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "bc3dbb06e930e7baa3832cfd6175b9f79dd69870add17e94e03614ce94173555"
+  },
+  "e02b9532e8dfd50aaafe480377a4aa735466697a:src/thaliris/codex_adapter.py": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "86f6c753a1921f05b016927da1af3d2675552a2b",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "685a6728eceac294ff1ecfe7b678f587e7426f10b62468157a0843001fe2dcb0"
+  },
+  "e02b953:.codex/agents/thaliris-verifier.toml": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "073db5ebf9f8ae4c6495440c8588c6d3192eb922",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "fa1585e8df2c9136eed055f22e85594805c62a0cec0d6387700dd4959fe9dc19"
+  },
+  "e02b953:AGENTS.md": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "e0e3c3d8cd3dc2240c8c8b4ebe8739db851b7fee",
+    "original_path": "AGENTS.md",
+    "sha256": "6a9e561d823e9e4b1c205f65188266a2d59fc342cbae55af4a2ed57db75f183d"
+  },
+  "e02b953:docs/thaliris-role-packs.md": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "ca4702fe16d0ed9dd740558793aecb205f007812",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "bc3dbb06e930e7baa3832cfd6175b9f79dd69870add17e94e03614ce94173555"
+  },
+  "e02b953:src/thaliris/codex_adapter.py": {
+    "commit": "e02b9532e8dfd50aaafe480377a4aa735466697a",
+    "git_blob": "86f6c753a1921f05b016927da1af3d2675552a2b",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "685a6728eceac294ff1ecfe7b678f587e7426f10b62468157a0843001fe2dcb0"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:.codex/agents/thaliris-verifier.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:AGENTS.md": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "7f6df228a25157379d12e62656f0b58dabddb282",
+    "original_path": "AGENTS.md",
+    "sha256": "ac890e18fa399bc5dc7c381342d1038fca00292b46a03c8a2a5b147cebb6abcf"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:docs/thaliris-role-packs.md": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "24c4008787a9f9326e1144b6abdf0b819f26cb3d",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "4f6f4a41baedc5bc0b01fa8a37b86d3bdee2384846e260bf8f896cff12b650f4"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:src/thaliris/codex_adapter.py": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "16ad86097d0635c25f1a3acf936963930c7f310c",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "22f9cbc518e0b4836816db2367ed4f8e852d542275fd35c2534aa53afad759d4"
+  },
+  "e4b6975889ef348e13e94521dc300f1e572b42a3:src/thaliris/roles.py": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "ca8daae4f2182028d7927daabcca917ff4b17447",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "da8f5b1a48b5c43efda691eee21e92b2ca1769493e2f7280bfc84398f2cebb11"
+  },
+  "e4b6975:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "1c684a7612f1937c8d00161d5772232bac42c41e",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "7ae1bef593fc06fa4d8e5ee40a009718b0ca31358ed1a9de362dc3cfb65055e3"
+  },
+  "e4b6975:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "4ca9cc714858bfad6e970cc5c647183f40350ce0",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "fe996dfb59c467d173d7da754bbe73ee9659d88b7bb27ff09cc32c730a6fd2e9"
+  },
+  "e4b6975:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "85aef0a2d910e837e880e2c2dfe8936eec392ae4",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "3b19e5d8a0e72e794f76883ad3242c83bb4d542388c076ffacf9a28e377bf86a"
+  },
+  "e4b6975:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "e4b6975:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "e4b6975:.codex/agents/thaliris-verifier.toml": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "e4b6975:AGENTS.md": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "7f6df228a25157379d12e62656f0b58dabddb282",
+    "original_path": "AGENTS.md",
+    "sha256": "ac890e18fa399bc5dc7c381342d1038fca00292b46a03c8a2a5b147cebb6abcf"
+  },
+  "e4b6975:docs/thaliris-role-packs.md": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "24c4008787a9f9326e1144b6abdf0b819f26cb3d",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "4f6f4a41baedc5bc0b01fa8a37b86d3bdee2384846e260bf8f896cff12b650f4"
+  },
+  "e4b6975:src/thaliris/codex_adapter.py": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "16ad86097d0635c25f1a3acf936963930c7f310c",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "22f9cbc518e0b4836816db2367ed4f8e852d542275fd35c2534aa53afad759d4"
+  },
+  "e4b6975:src/thaliris/roles.py": {
+    "commit": "e4b6975889ef348e13e94521dc300f1e572b42a3",
+    "git_blob": "ca8daae4f2182028d7927daabcca917ff4b17447",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "da8f5b1a48b5c43efda691eee21e92b2ca1769493e2f7280bfc84398f2cebb11"
+  },
+  "ec1ad7b:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "f54c3d03925626916bc7e4e42fe5380f494096bb",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "6b255fa51ad04def5bbe248c30d5e247bb17af3913cffd815e283ec9178aae53"
+  },
+  "ec1ad7b:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "b40fe0145dd4bd99e6985f20b24bf8989e573b31",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "6484ff491175ebf56a63d65d7439c3c661f782e6401c09e43f6bfbf26a3f0ff1"
+  },
+  "ec1ad7b:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "2f9165f51e86ffa396344be30bdd60fc12942f6e",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "edeb1136eab3d7685552e7a8ec4da70a7cec22085dc236e203a7ef2c7d8f03a4"
+  },
+  "ec1ad7b:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "11730c3a0e90ad69a6f5457b4d5aae2812d106ae",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "cf81e133c7382584a16852c22eedffe7a5c6a67388f64421b073ec721754fadd"
+  },
+  "ec1ad7b:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "b02184110b1da93b4cd47f055768e9b660b544f0",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "b88730b4bd7d9a18d5e57c95db2316c895f44c74cea32f0eba5810bbdee38211"
+  },
+  "ec1ad7b:.codex/agents/thaliris-verifier.toml": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "c63aad6c297a162e132fb29967ddd7dd485ac962",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "67f965ebb7566330cdf771bfb78da20d4a0248c34c231b6ec336657bb529df0f"
+  },
+  "ec1ad7b:AGENTS.md": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "d2edbd7e56e63a9c72ef9204a99b7f746024fc84",
+    "original_path": "AGENTS.md",
+    "sha256": "f621bef034c76343aa8892f48715d834b58e84d68616ff1718f1923838525536"
+  },
+  "ec1ad7b:docs/thaliris-role-packs.md": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "181be75eb1bf192023aec0e14448b04039b699fc",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "4e4a1af986df48f8c9e0e632506ef13636531dba163fa7ae7032a7d18ab2c36a"
+  },
+  "ec1ad7b:src/thaliris/codex_adapter.py": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "4464b7551045fadfd565a84380ea387195642317",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "726d1e076c13dcf19e4c44bf89e89efdb875fb19c28261dce054b6ee2c5a7d80"
+  },
+  "ec1ad7b:src/thaliris/roles.py": {
+    "commit": "ec1ad7b1878da7b59724972e587087074f3abe58",
+    "git_blob": "3a670e2cf987cd1e71d8922b2a07c3115da99624",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "6f9d69ee480314261fabbd366834ac90908dc450d215f3cbb0bc3f5f8143deed"
+  },
+  "fd4fba36:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "197889999d829d301fd47b9eb48b3f64e0326680",
+    "original_path": ".codex/agents/thaliris-focused-implementer-astra-medium.toml",
+    "sha256": "91e423f5640a2936216e24e2c1c1d3de5f0609c6133f399f1bcdffa202bfc369"
+  },
+  "fd4fba36:.codex/agents/thaliris-focused-implementer-xhigh.toml": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "148b6a0a1a7e8bea1caad42f7a5a6b25cb0658a4",
+    "original_path": ".codex/agents/thaliris-focused-implementer-xhigh.toml",
+    "sha256": "8640467871d3c841dbad4d84df88d6d5c560bb7958eb8427fdaf7a0bd3c0f64e"
+  },
+  "fd4fba36:.codex/agents/thaliris-focused-implementer.toml": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "2d9dba9e18f6e0c7d3a37d629f60247573ece05d",
+    "original_path": ".codex/agents/thaliris-focused-implementer.toml",
+    "sha256": "d4e8399c78f22ccf0a41b63a1b9cb5878b41e5a9e57be66494948739545c1335"
+  },
+  "fd4fba36:.codex/agents/thaliris-reasoning-specialist-astra-medium.toml": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "662580116f54d1fa23422f71638496b505cf67da",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-astra-medium.toml",
+    "sha256": "b18c9d7439d8f26c8c858e5ab91214d74c2433636ee42aa64ab6c72d1070845a"
+  },
+  "fd4fba36:.codex/agents/thaliris-reasoning-specialist-xhigh.toml": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "3343610386068358ffffb54bc409f5e9b22161da",
+    "original_path": ".codex/agents/thaliris-reasoning-specialist-xhigh.toml",
+    "sha256": "edfde7a10c6a6b095db0e3f78d1412c1e3f21594e24121931eff12bd877c80be"
+  },
+  "fd4fba36:.codex/agents/thaliris-verifier.toml": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "cac377fe4267626ab44a1f5bbc98494104837fda",
+    "original_path": ".codex/agents/thaliris-verifier.toml",
+    "sha256": "5f422419b0b83d25e967ec0b0f2f50f7b56abd5b322595ffb1bfb0ba001884eb"
+  },
+  "fd4fba36:AGENTS.md": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "ed9d37ab890f27c043976794514da543114c84a1",
+    "original_path": "AGENTS.md",
+    "sha256": "ce38e0eceebe82027d9b398d4c814dd5c30cd5c13322148d8cf8b64301558ecc"
+  },
+  "fd4fba36:docs/thaliris-role-packs.md": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "d9fd575f0753cef767c79cf82e3b2d241ee0d9fc",
+    "original_path": "docs/thaliris-role-packs.md",
+    "sha256": "156771800df802acb9a23ed9a0682e4b7a50c3f5859dcd747cfd4d23e5b54f49"
+  },
+  "fd4fba36:src/thaliris/codex_adapter.py": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "45b0e509dd491adfc2f55723036e4f1aab5a7cc2",
+    "original_path": "src/thaliris/codex_adapter.py",
+    "sha256": "ef7f32f6e7bbd87d212bfabed5b6ba7776e3a3c00534cfca7a3c3e2884731648"
+  },
+  "fd4fba36:src/thaliris/roles.py": {
+    "commit": "fd4fba36b6794871ac048d89c09352a3e015d460",
+    "git_blob": "2e092e2e9293c6b51897a83e8b5de9d8326b2225",
+    "original_path": "src/thaliris/roles.py",
+    "sha256": "5f352a737cb3c1702758dc8c8385ca8fdc3a27ac05752d955090f4011b737373"
+  }
+}

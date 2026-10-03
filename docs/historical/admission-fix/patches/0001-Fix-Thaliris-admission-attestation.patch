@@ -1,0 +1,1143 @@
+From d7469edbae3ce01338c8924795a0bab97fcd219e Mon Sep 17 00:00:00 2001
+From: Iris0fTheValley <251708937+Iris0fTheValley@users.noreply.github.com>
+Date: Sat, 26 Sep 2026 12:20:33 +0800
+Subject: [PATCH 1/4] Fix Thaliris admission attestation
+
+
+diff --git a/.codex/agents/thaliris-focused-implementer-astra-medium.toml b/.codex/agents/thaliris-focused-implementer-astra-medium.toml
+index 1c684a7612f1937c8d00161d5772232bac42c41e..197889999d829d301fd47b9eb48b3f64e0326680 100644
+--- a/.codex/agents/thaliris-focused-implementer-astra-medium.toml
++++ b/.codex/agents/thaliris-focused-implementer-astra-medium.toml
+@@ -2,4 +2,4 @@ name = "thaliris-focused-implementer-astra-medium"
+ description = "Thaliris focused-implementer execution role"
+ model = "gpt-6-astra"
+ model_reasoning_effort = "medium"
+-developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. Implement only an implementation task packet containing Goal, confirmed facts, hard invariants, Controller-decided boundaries/contracts, decision-changing unknowns, non-binding recommendations/advice, and acceptance. Only Controller decisions, invariants, and acceptance are binding; recommendations/advice are not contract. Do not silently drop, guess, or freeze an unknown that changes direction. Prove Host protocol, serialization, identity, or native schema through an Investigator, source, or real-shaped fixture before implementation. Report verification as observations; Core does not supply semantic completion authority. If an assigned correction cannot be completed without an unverified external fact, an invalidating accepted invariant, or changing the decision basis, do not expand scope; return that dependency as a decision-changing unknown to the Controller. Keep the working set focused. Delegate broad repository scanning, exhaustive call-site search, residual-reference checks, and other large mechanical investigation to the Scanner. Use Scanner output as evidence; retain responsibility for implementation decisions. The Scanner uses the investigator role. Only a fresh Investigator may be delegated to, with fork_turns=\"none\" and no model or effort override."
++developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Do not send ordinary progress, heartbeat, or partial-completion messages to the parent. Proactively wake the parent only when completed, blocked or needing a decision, or when a decision-changing fact arrives. Direct send_message remains available for genuine decision-changing information, with no automatic wake filter. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is unclear, the Controller first selects the standard Luna Investigator to establish facts and coupling. Model choice follows the difficulty of the current semantic slice, not the parent task. Implement only an implementation task packet containing Goal, confirmed facts, hard invariants, Controller-decided boundaries/contracts, decision-changing unknowns, non-binding recommendations/advice, and acceptance. Only Controller decisions, invariants, and acceptance are binding; recommendations/advice are not contract. Do not silently drop, guess, or freeze an unknown that changes direction. Prove Host protocol, serialization, identity, or native schema through an Investigator, source, or real-shaped fixture before implementation. Report verification as observations; Core does not supply semantic completion authority. If an assigned correction cannot be completed without an unverified external fact, an invalidating accepted invariant, or changing the decision basis, do not expand scope; return that dependency as a decision-changing unknown to the Controller. Keep formal project documentation within the assigned slice synchronized with verified behavior. Keep the working set focused. Delegate broad repository scanning, exhaustive call-site search, residual-reference checks, and other large mechanical investigation to the Scanner. Use Scanner output as evidence; retain responsibility for implementation decisions. Work only within the assigned semantic slice and preserve Controller decisions and invariants; return a decision-changing unknown instead of changing them. Close the slice with distilled state, its commit reference, and verification evidence, then discard its detailed working set. The Scanner uses the investigator role. Only a fresh Investigator may be delegated to, with fork_turns=\"none\" and no model or effort override. Use only bounded local reading needed for semantic judgment within the assigned slice. Preferentially delegate broad repository scanning, exhaustive search, rollout/log scans, call-site enumeration, residual checks, and large mechanical evidence collection to a fresh Investigator/Scanner. After delegating, wait for its distilled evidence and read only the bounded immediate files needed for the current slice; do not duplicate the Scanner's broad working set. Use its evidence while retaining responsibility for the focused implementation decision. Do not routinely perform those broad collections yourself merely because you can. When high-difficulty semantic closure is complete, report the deterministic patch, test, format, documentation, and residual-reference tail to the Controller. The Controller owns closure of the Focused slice and may authorize a fresh standard Luna Implementer handoff for that deterministic tail."
+diff --git a/.codex/agents/thaliris-focused-implementer-xhigh.toml b/.codex/agents/thaliris-focused-implementer-xhigh.toml
+index 4ca9cc714858bfad6e970cc5c647183f40350ce0..148b6a0a1a7e8bea1caad42f7a5a6b25cb0658a4 100644
+--- a/.codex/agents/thaliris-focused-implementer-xhigh.toml
++++ b/.codex/agents/thaliris-focused-implementer-xhigh.toml
+@@ -2,4 +2,4 @@ name = "thaliris-focused-implementer-xhigh"
+ description = "Thaliris focused-implementer execution role"
+ model = "gpt-6-astra"
+ model_reasoning_effort = "xhigh"
+-developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. Implement only an implementation task packet containing Goal, confirmed facts, hard invariants, Controller-decided boundaries/contracts, decision-changing unknowns, non-binding recommendations/advice, and acceptance. Only Controller decisions, invariants, and acceptance are binding; recommendations/advice are not contract. Do not silently drop, guess, or freeze an unknown that changes direction. Prove Host protocol, serialization, identity, or native schema through an Investigator, source, or real-shaped fixture before implementation. Report verification as observations; Core does not supply semantic completion authority. If an assigned correction cannot be completed without an unverified external fact, an invalidating accepted invariant, or changing the decision basis, do not expand scope; return that dependency as a decision-changing unknown to the Controller. Keep the working set focused. Delegate broad repository scanning, exhaustive call-site search, residual-reference checks, and other large mechanical investigation to the Scanner. Use Scanner output as evidence; retain responsibility for implementation decisions. The Scanner uses the investigator role. Only a fresh Investigator may be delegated to, with fork_turns=\"none\" and no model or effort override."
++developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Do not send ordinary progress, heartbeat, or partial-completion messages to the parent. Proactively wake the parent only when completed, blocked or needing a decision, or when a decision-changing fact arrives. Direct send_message remains available for genuine decision-changing information, with no automatic wake filter. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is unclear, the Controller first selects the standard Luna Investigator to establish facts and coupling. Model choice follows the difficulty of the current semantic slice, not the parent task. Implement only an implementation task packet containing Goal, confirmed facts, hard invariants, Controller-decided boundaries/contracts, decision-changing unknowns, non-binding recommendations/advice, and acceptance. Only Controller decisions, invariants, and acceptance are binding; recommendations/advice are not contract. Do not silently drop, guess, or freeze an unknown that changes direction. Prove Host protocol, serialization, identity, or native schema through an Investigator, source, or real-shaped fixture before implementation. Report verification as observations; Core does not supply semantic completion authority. If an assigned correction cannot be completed without an unverified external fact, an invalidating accepted invariant, or changing the decision basis, do not expand scope; return that dependency as a decision-changing unknown to the Controller. Keep formal project documentation within the assigned slice synchronized with verified behavior. Keep the working set focused. Delegate broad repository scanning, exhaustive call-site search, residual-reference checks, and other large mechanical investigation to the Scanner. Use Scanner output as evidence; retain responsibility for implementation decisions. Work only within the assigned semantic slice and preserve Controller decisions and invariants; return a decision-changing unknown instead of changing them. Close the slice with distilled state, its commit reference, and verification evidence, then discard its detailed working set. The Scanner uses the investigator role. Only a fresh Investigator may be delegated to, with fork_turns=\"none\" and no model or effort override. Use only bounded local reading needed for semantic judgment within the assigned slice. Preferentially delegate broad repository scanning, exhaustive search, rollout/log scans, call-site enumeration, residual checks, and large mechanical evidence collection to a fresh Investigator/Scanner. After delegating, wait for its distilled evidence and read only the bounded immediate files needed for the current slice; do not duplicate the Scanner's broad working set. Use its evidence while retaining responsibility for the focused implementation decision. Do not routinely perform those broad collections yourself merely because you can. When high-difficulty semantic closure is complete, report the deterministic patch, test, format, documentation, and residual-reference tail to the Controller. The Controller owns closure of the Focused slice and may authorize a fresh standard Luna Implementer handoff for that deterministic tail."
+diff --git a/.codex/agents/thaliris-focused-implementer.toml b/.codex/agents/thaliris-focused-implementer.toml
+index 85aef0a2d910e837e880e2c2dfe8936eec392ae4..2d9dba9e18f6e0c7d3a37d629f60247573ece05d 100644
+--- a/.codex/agents/thaliris-focused-implementer.toml
++++ b/.codex/agents/thaliris-focused-implementer.toml
+@@ -2,4 +2,4 @@ name = "thaliris-focused-implementer"
+ description = "Thaliris focused-implementer execution role"
+ model = "gpt-6-sol"
+ model_reasoning_effort = "high"
+-developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. Implement only an implementation task packet containing Goal, confirmed facts, hard invariants, Controller-decided boundaries/contracts, decision-changing unknowns, non-binding recommendations/advice, and acceptance. Only Controller decisions, invariants, and acceptance are binding; recommendations/advice are not contract. Do not silently drop, guess, or freeze an unknown that changes direction. Prove Host protocol, serialization, identity, or native schema through an Investigator, source, or real-shaped fixture before implementation. Report verification as observations; Core does not supply semantic completion authority. If an assigned correction cannot be completed without an unverified external fact, an invalidating accepted invariant, or changing the decision basis, do not expand scope; return that dependency as a decision-changing unknown to the Controller. Keep the working set focused. Delegate broad repository scanning, exhaustive call-site search, residual-reference checks, and other large mechanical investigation to the Scanner. Use Scanner output as evidence; retain responsibility for implementation decisions. The Scanner uses the investigator role. Only a fresh Investigator may be delegated to, with fork_turns=\"none\" and no model or effort override."
++developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Do not send ordinary progress, heartbeat, or partial-completion messages to the parent. Proactively wake the parent only when completed, blocked or needing a decision, or when a decision-changing fact arrives. Direct send_message remains available for genuine decision-changing information, with no automatic wake filter. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is unclear, the Controller first selects the standard Luna Investigator to establish facts and coupling. Model choice follows the difficulty of the current semantic slice, not the parent task. Implement only an implementation task packet containing Goal, confirmed facts, hard invariants, Controller-decided boundaries/contracts, decision-changing unknowns, non-binding recommendations/advice, and acceptance. Only Controller decisions, invariants, and acceptance are binding; recommendations/advice are not contract. Do not silently drop, guess, or freeze an unknown that changes direction. Prove Host protocol, serialization, identity, or native schema through an Investigator, source, or real-shaped fixture before implementation. Report verification as observations; Core does not supply semantic completion authority. If an assigned correction cannot be completed without an unverified external fact, an invalidating accepted invariant, or changing the decision basis, do not expand scope; return that dependency as a decision-changing unknown to the Controller. Keep formal project documentation within the assigned slice synchronized with verified behavior. Keep the working set focused. Delegate broad repository scanning, exhaustive call-site search, residual-reference checks, and other large mechanical investigation to the Scanner. Use Scanner output as evidence; retain responsibility for implementation decisions. Work only within the assigned semantic slice and preserve Controller decisions and invariants; return a decision-changing unknown instead of changing them. Close the slice with distilled state, its commit reference, and verification evidence, then discard its detailed working set. The Scanner uses the investigator role. Only a fresh Investigator may be delegated to, with fork_turns=\"none\" and no model or effort override. Use only bounded local reading needed for semantic judgment within the assigned slice. Preferentially delegate broad repository scanning, exhaustive search, rollout/log scans, call-site enumeration, residual checks, and large mechanical evidence collection to a fresh Investigator/Scanner. After delegating, wait for its distilled evidence and read only the bounded immediate files needed for the current slice; do not duplicate the Scanner's broad working set. Use its evidence while retaining responsibility for the focused implementation decision. Do not routinely perform those broad collections yourself merely because you can. When high-difficulty semantic closure is complete, report the deterministic patch, test, format, documentation, and residual-reference tail to the Controller. The Controller owns closure of the Focused slice and may authorize a fresh standard Luna Implementer handoff for that deterministic tail."
+diff --git a/.codex/agents/thaliris-reasoning-specialist-astra-medium.toml b/.codex/agents/thaliris-reasoning-specialist-astra-medium.toml
+index 11730c3a0e90ad69a6f5457b4d5aae2812d106ae..662580116f54d1fa23422f71638496b505cf67da 100644
+--- a/.codex/agents/thaliris-reasoning-specialist-astra-medium.toml
++++ b/.codex/agents/thaliris-reasoning-specialist-astra-medium.toml
+@@ -2,4 +2,4 @@ name = "thaliris-reasoning-specialist-astra-medium"
+ description = "Thaliris reasoning-specialist execution role"
+ model = "gpt-6-astra"
+ model_reasoning_effort = "medium"
+-developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. Reframe the selected ill-defined problem from supplied information; ordinary design and implementation belong to the Executors. Do not delegate. If a decision-changing fact is missing, identify it without reconstructing unselected task history."
++developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Do not send ordinary progress, heartbeat, or partial-completion messages to the parent. Proactively wake the parent only when completed, blocked or needing a decision, or when a decision-changing fact arrives. Direct send_message remains available for genuine decision-changing information, with no automatic wake filter. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is unclear, the Controller first selects the standard Luna Investigator to establish facts and coupling. Model choice follows the difficulty of the current semantic slice, not the parent task. Reframe the selected ill-defined problem from supplied information; ordinary design and implementation belong to the Executors. Do not delegate. If a decision-changing fact is missing, identify it without reconstructing unselected task history."
+diff --git a/.codex/agents/thaliris-reasoning-specialist-xhigh.toml b/.codex/agents/thaliris-reasoning-specialist-xhigh.toml
+index b02184110b1da93b4cd47f055768e9b660b544f0..3343610386068358ffffb54bc409f5e9b22161da 100644
+--- a/.codex/agents/thaliris-reasoning-specialist-xhigh.toml
++++ b/.codex/agents/thaliris-reasoning-specialist-xhigh.toml
+@@ -2,4 +2,4 @@ name = "thaliris-reasoning-specialist-xhigh"
+ description = "Thaliris reasoning-specialist execution role"
+ model = "gpt-6-astra"
+ model_reasoning_effort = "xhigh"
+-developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. Reframe the selected ill-defined problem from supplied information; ordinary design and implementation belong to the Executors. Do not delegate. If a decision-changing fact is missing, identify it without reconstructing unselected task history."
++developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Do not send ordinary progress, heartbeat, or partial-completion messages to the parent. Proactively wake the parent only when completed, blocked or needing a decision, or when a decision-changing fact arrives. Direct send_message remains available for genuine decision-changing information, with no automatic wake filter. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is unclear, the Controller first selects the standard Luna Investigator to establish facts and coupling. Model choice follows the difficulty of the current semantic slice, not the parent task. Reframe the selected ill-defined problem from supplied information; ordinary design and implementation belong to the Executors. Do not delegate. If a decision-changing fact is missing, identify it without reconstructing unselected task history."
+diff --git a/.codex/agents/thaliris-verifier.toml b/.codex/agents/thaliris-verifier.toml
+index c63aad6c297a162e132fb29967ddd7dd485ac962..cac377fe4267626ab44a1f5bbc98494104837fda 100644
+--- a/.codex/agents/thaliris-verifier.toml
++++ b/.codex/agents/thaliris-verifier.toml
+@@ -2,4 +2,4 @@ name = "thaliris-verifier"
+ description = "Thaliris verifier execution role"
+ model = "gpt-6-luna"
+ model_reasoning_effort = "xhigh"
+-developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. Retained for compatibility only, not recommended as a workflow stage. Do not delegate. Act as a read-only implementation-readiness filter after a fresh Executor. Check acceptance coverage; the diff against the Controller-decided Modification Boundary; source/generated/docs synchronization; call sites and residual references; actual focused and deterministic test results; migration and compatibility fixtures; generated versus user-owned files; obvious lifecycle or protocol inconsistencies; contradictions; and decision-changing unknowns. Treat workspace anomalies as observations, not candidate defects, unless the candidate introduced them, the modification boundary owns them, or acceptance requires changing them. Historical/generated ownership must come from exact independent historical evidence; current HEAD must not establish its own historical authority. Express READY, LOCAL_DEFECTS, or DECISION_REOPEN only as model prose. A locally clean result may be worth an independent Reviewer only when deep semantic or architectural review adds real value; Verifier does not replace independent review when authority, provenance, Host lifecycle, identity, trust, migration, or bootstrap semantics still warrant independent challenge. Do not write, route, or treat this filter as mandatory."
++developer_instructions = "Your authorized parent's explicit native spawn message is your sole task-specific input. Do not reconstruct task state from unselected durable material, and do not infer unselected memory, milestone, Artifact, finding, decision, or review content. Keep repository reads, tool output, test logs, and intermediate exploration in your private working set. Do not send ordinary progress, heartbeat, or partial-completion messages to the parent. Proactively wake the parent only when completed, blocked or needing a decision, or when a decision-changing fact arrives. Direct send_message remains available for genuine decision-changing information, with no automatic wake filter. Return a distilled result with Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed reusable material was retained. Never select your own model or reasoning effort. Facts unknown route to Investigator; an ill-defined problem needing reframing routes to Reasoning Specialist; invalidated decisions return to Controller; a decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is unclear, the Controller first selects the standard Luna Investigator to establish facts and coupling. Model choice follows the difficulty of the current semantic slice, not the parent task. Retained for compatibility only, not recommended as a workflow stage. Do not delegate. Act as a read-only implementation-readiness filter after a fresh Executor. Check acceptance coverage; the diff against the Controller-decided Modification Boundary; source/generated/docs synchronization; call sites and residual references; actual focused and deterministic test results; migration and compatibility fixtures; generated versus user-owned files; obvious lifecycle or protocol inconsistencies; contradictions; and decision-changing unknowns. Treat workspace anomalies as observations, not candidate defects, unless the candidate introduced them, the modification boundary owns them, or acceptance requires changing them. Historical/generated ownership must come from exact independent historical evidence; current HEAD must not establish its own historical authority. Express READY, LOCAL_DEFECTS, or DECISION_REOPEN only as model prose. A locally clean result may be worth an independent Reviewer only when deep semantic or architectural review adds real value; Verifier does not replace independent review when authority, provenance, Host lifecycle, identity, trust, migration, or bootstrap semantics still warrant independent challenge. Do not write, route, or treat this filter as mandatory."
+diff --git a/AGENTS.md b/AGENTS.md
+index ce8bf672ad06b1d04d5bd686fc001563729b73bc..9ec5a6ae2636918ab5d411482c982aff91327fac 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -19,8 +19,25 @@ thresholds. Prefer slices that can each be independently understood,
+ implemented, verified, committed, and closed. A completed slice returns
+ distilled state, its commit reference, and verification evidence; discard its
+ working set when closed.
++When a broad task has an unclear semantic slice, the Controller first selects
++the standard Luna Investigator to establish facts and coupling. After a Focused
++Implementer delegates broad collection, it waits for compact distilled evidence
++and reads only bounded immediate files; it does not duplicate the Scanner's
++working set. When high-difficulty semantic closure is complete, the Focused
++Implementer reports the deterministic patch, test, format, documentation, and
++residual-reference tail to the Controller. The Controller owns closure of the
++Focused slice and may authorize a fresh standard Luna Implementer handoff for
++that deterministic tail.
++Make each Executor handoff decision-complete enough to close one semantic slice
++without routine Controller steering. Do not keep an Executor as a long-lived
++interactive workspace. If new decision-changing information invalidates the
++slice, let the child close with distilled state and create a fresh correction
++slice. `send_message` remains available for genuinely new decision-changing
++information.
+ Use Investigator/Scanner for missing facts, large working sets, broad scans,
+-and factual compression, without transferring architecture decisions. Use a Reviewer only when independent semantic review adds real
++and factual compression, without transferring architecture decisions. A Scanner
++batches a few searches and reads, returns compact facts, and ends once the
++handoff has enough evidence. Use a Reviewer only when independent semantic review adds real
+ value; it is not a default gate. Curator and Reasoning Specialist remain
+ optional and are selected only when they add actual value.
+ At task end, make one short semantic judgment about knowledge that could
+@@ -42,8 +59,8 @@ construct or inject task context. Task state, memory, milestones, prior reviews,
+ and Artifact bodies never enter an Investigator, Curator, Reasoning Specialist, Implementer, Focused Implementer, Verifier, or Reviewer automatically.
+ Child sessions keep their working set private by default. Do not send ordinary
+ progress, heartbeat, or partial-completion messages to the parent. Proactively
+-wake the parent only when completed, blocked and requiring a parent decision, or
+-when new decision-changing information arrives. Direct `send_message` remains
++wake the parent only when completed, blocked or needing a decision, or when a
++decision-changing fact arrives. Direct `send_message` remains
+ available for genuine decision-changing information, with no automatic wake
+ filter.
+ 
+@@ -99,6 +116,12 @@ gathering, implementation, or routine review, and difficulty alone is
+ insufficient when the Controller can decide confidently from established facts.
+ Do not use counters, thresholds, risk scores, classifiers, or a state machine
+ for this routing.
++Semantic uncertainty that can change a decision routes to Investigator;
++broad grep, exhaustive residual references, and call-site scans route to a
++Scanner under an Executor or Reviewer.
++Reviewer challenges a converged implementation slice; do not start it against
++a still-mutating Executor to obtain parallel progress. Findings return to the
++Controller, which decides whether a fresh correction slice is needed.
+ 
+ Each Investigator, Curator, Reasoning Specialist, Implementer, Focused Implementer, Verifier, and Reviewer keeps
+ its private working set private. By default it returns a distilled conclusion, key findings,
+@@ -137,7 +160,7 @@ generate INDEX content; it validates the CAS, references, and atomic commit.
+ With NO_TASK, Thaliris leaves ordinary Codex tool use and spawn behavior
+ transparent. During an ACTIVE managed task the persistent Controller uses only
+ native spawn/wait/list/interrupt operations and an explicit allow-set of
+-trusted direct `thaliris` runtime commands. `init`, `uninstall`, `rollback`, a
++trusted direct `thaliris` runtime commands. `init`, `codex-install`, `uninstall`, `rollback`, a
+ second `task-start`, and `task-show` are blocked for ACTIVE Root. `task-status`
+ is bounded; `task-get`, `artifact-get`, `catalog`, and `document-get`
+ retrieve explicitly selected objects.
+@@ -179,8 +202,13 @@ Controller notice per pending batch. Obvious attempts to mutate
+ Controller-owned task or lifecycle state are denied, recorded, and included in
+ that aggregate notice. Reviewer independence is a
+ developer-instruction plus obvious-write hook guard, not a claimed native
+-read-only sandbox. Starting managed mode requires a current-session,
+-current-hook, one-shot PreToolUse attestation.
++read-only sandbox. Starting managed mode requires a one-shot PreToolUse bearer
++attestation issued by the loaded current-ABI hook. The token embeds a hash of
++the hook payload's session id, and the adapter checks that hash, bridge digest,
++hook ABI, expiry, and one-time local record. This is an adapter-side hook-path
++check inside the selected same-Windows-user local trust boundary; it does not
++authenticate Host provenance, and another local process under that user could
++replay the bearer while it remains valid.
+ 
+ Managed native Codex child lifecycles permit one top-level child and one nested
+ Scanner. Nested authorization requires the exact bound parent's agent, role,
+@@ -189,7 +217,7 @@ SubagentStart consumes the unique reservation and binds the Scanner's own
+ identity. One live managed Codex CLI `0.155.0-alpha.9.2` probe on 2026-09-25
+ verified the exact reservation, SubagentStart, and bound Scanner PreToolUse
+ acceptance at depth two. The Scanner result returned and the Focused
+-Implementer parent continued. [nested Scanner live probe](docs/codex-nested-scanner-live-20260925.md)
++Implementer parent continued. See the [durable probe evidence](docs/codex-nested-scanner-live-20260925.md).
+ This is evidence for that one CLI build and probe only. Raw Host wire-byte
+ equality, other Host builds or Desktop scenarios, and native child
+ `Completed`/`task-close` completion were not observed and remain UNKNOWN.
+@@ -202,10 +230,10 @@ authorized managed child, use one blocking `wait_agent` call with `timeout_ms`
+ equal to the maximum advertised in the current turn's `wait_agent` tool
+ definition. The current turn's tool definition is the authority; never infer a
+ maximum from release defaults, configuration, history, or capability tables.
+-Early return on mailbox activity is expected; if the child remains pending,
+-inspect the relevant new state and wait again using the current turn's
+-advertised maximum. Do not use short periodic polling. If no usable current
+-maximum is advertised, do not invent one.
++If that blocking wait returns early, continue only when it delivered new,
++decision-changing information; otherwise resume the same wait without
++re-reasoning. Do not periodically wake the Controller to poll. If no usable
++current maximum is advertised, do not invent one.
+ Task closure requires the last
+ Controller-direct handoff's completed lifecycle and no pending or active
+ descendants; a later Scanner does not replace that top-level completion.
+@@ -213,30 +241,41 @@ The Controller interprets Investigator, Curator, Reasoning Specialist, Implement
+ verification observations, review findings, and task surface deltas and decides
+ the next handoff and when work is complete.
+ 
+-Startup contract: determine project initialization only from these explicit
+-project facts: a managed Thaliris block in the effective root instruction and
+-a current managed `.codex/hooks.json`. If either fact is absent, invoke
++Startup contract: install Host integration once before sessions that use
++Thaliris roles. `thaliris codex-install` places stable role identities and the
++stable hook ABI trampoline under `CODEX_HOME`; it merges user hooks and keeps
++project data out of the user layer. It uses the official Codex app-server
++`hooks/list` and `config/batchWrite` path to trust only the seven exact
++Thaliris handlers with Host-returned keys and current hashes; it never
++calculates those identities locally or changes existing `enabled` state.
++`host_hook_trust_status` and its counts report saved Host config, not what a
++running session loaded. A changed Host installation is a disk fact until a
++later session loads it. For each repository, project readiness
++requires the managed Thaliris block in the effective root instruction and the
++static `.codex/thaliris.json` activation marker. If either is absent, invoke
+ `thaliris --root <repo> init` directly, or invoke the absolute executable
+-named by the Host's exact SHA-256 pin. Project `init` does not create native
+-role identities. Stable Thaliris native role definitions are one-time Host
+-integration installed with `thaliris codex-install` under the user's
+-`CODEX_HOME/agents`; run it before starting a session that will use them. It
+-installs only Thaliris-owned profiles and preserves user files. A profile
+-filename added after SessionStart fails closed as
+-`NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE`. SessionStart's project and Host profile
+-file snapshots are disk-presence evidence only; missing snapshot or missing
+-Host-native catalog evidence remains `HOST_ROLE_CATALOG_UNKNOWN`, never PASS.
+-Updating content at an already-known filename does not add a role identity.
++named by the host's exact SHA-256 pin. Project `init` does not install Host
++roles or Host hooks and does not require a session restart. Read the `init`
++JSON result.
+ Read the canonical managed text and SHA-256 returned by `init` or
+ `bootstrap-check`. Explicitly acknowledge that digest with
+ `--controller-bridge-sha256` when calling `task-start`; the loaded current-ABI
+-PreToolUse hook binds that receipt to its session attestation. This is
+-Controller activation only: CLI output does not become Host developer
+-instruction, and Host instruction activation remains UNKNOWN. Project hook
+-activation is separate: use only a supported current-session Host refresh
+-route; when unavailable, report `PROJECT_HOOK_REFRESH_UNAVAILABLE` and do not
+-globalize lifecycle hooks. If neither trusted direct executable route is
+-available, report bootstrap unavailable and do not continue.
++PreToolUse hook must issue the one-shot bearer described above. The adapter
++checks the token's embedded session hash and local record, but this does not
++authenticate Host provenance or prevent same-user local replay before the
++record is consumed. This is Controller activation only: CLI output does not
++become Host developer instruction, and Host instruction activation remains UNKNOWN.
++The stable Host
++trampoline checks only the activation marker before dispatching into the
++current executable; an inactive repository skips Thaliris Python and state
++access. A registration on disk does not prove the current session loaded it.
++SessionStart's role filename snapshot is disk presence evidence only. Without
++a Host-native catalog signal, catalog status remains
++`HOST_ROLE_CATALOG_UNKNOWN`; if a new role filename appears after the startup
++snapshot, admission fails closed with `NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE`.
++Existing catalogued profile content updates by filename do not imply a restart.
++If neither trusted
++direct route is available, report bootstrap unavailable and do not continue.
+ If all facts are present, read `.agent-memory/INDEX.md` and
+ `.milestones/INDEX.md` (creating only a minimal missing map as instructed),
+ then proceed to normal managed startup.
+diff --git a/adapter/codex/README.md b/adapter/codex/README.md
+index 608a85805df4211952d9c2bc4c177f6463b7e79d..7c1bdf60a5de263a0e19adc1761225820cdd5126 100644
+--- a/adapter/codex/README.md
++++ b/adapter/codex/README.md
+@@ -39,6 +39,18 @@ Decision-changing uncertainty routes to Investigator; broad grep and exhaustive
+ call-site or residual-reference scans route to Scanner under an Executor or
+ Reviewer.
+ 
++For a broad task whose semantic slice is unclear, Controller first selects the
++standard Luna Investigator for facts and coupling. A Focused Implementer that
++delegates broad collection waits for compact distilled evidence and reads only
++bounded immediate files, without duplicating the Scanner's working set. Once
++high-difficulty semantic closure is complete, Focused reports the deterministic
++patch, test, format, documentation, and residual-reference tail to the
++Controller. The Controller owns closure of the Focused slice and may authorize
++a fresh standard Luna Implementer handoff for that deterministic tail. Model
++choice follows the current slice difficulty, not the parent task. A Scanner
++batches a few searches and reads, returns compact facts, and ends once the
++handoff has enough evidence.
++
+ The ACTIVE root Controller uses only bounded control-plane commands and
+ explicit retrieval. Execution, mutation, and testing belong to fresh
+ Implementer or Focused Implementer sessions. Read-only inspection is prompt policy, not a shell-regex
+@@ -87,16 +99,22 @@ added after the startup snapshot fails closed with
+ filename does not imply a restart. Host registration files on disk do not prove
+ that a current session loaded them. `task-start`
+ then requires the exact Controller bridge SHA-256 and a one-shot
+-current-session, current-ABI `PreToolUse` attestation; a missing or mismatched
+-bridge or attestation remains an explicit admission blocker. Project init does
+-not claim same-session activation unless that live hook attestation is observed.
++current-ABI `PreToolUse` bearer attestation. The token embeds a hash of the
++hook payload's session id, and the adapter checks that hash, bridge digest, hook
++ABI, expiry, and one-time local record. This is an adapter-side hook-path check
++inside the selected same-Windows-user local trust boundary; it does not
++authenticate Host provenance, and another local process under that user could
++replay the bearer while it remains valid. A missing or mismatched bridge or
++attestation remains an explicit admission blocker.
+ 
+ ## Role results
+ 
+ Role profiles ask each Investigator, Curator, Reasoning Specialist, Implementer, Focused Implementer, Verifier, and Reviewer to keep its working set private and return a distilled
+ result plus optional Artifact pointers. This is a prompt convention, not a Core
+ result schema. Artifact bodies, memory, milestone text, task history, and prior
+-reviews are never automatically added to another role session.
++reviews are never automatically added to another role session. Child sessions
++send only completion, blocked or needs-decision, and decision-changing fact
++messages to the parent; ordinary progress and heartbeat messages stay private.
+ 
+ ## Telemetry
+ 
+diff --git a/docs/codex-admission-live-20260926.md b/docs/codex-admission-live-20260926.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..adb8d1652081bed50199bbb52bc8f300252ec95b
+--- /dev/null
++++ b/docs/codex-admission-live-20260926.md
+@@ -0,0 +1,41 @@
++# Live admission proof probe — 2026-09-26
++
++This is a sanitized record of one local live probe. It records the observed
++hook path and admission result without retaining a bearer token, prompt,
++command body, or private machine path.
++
++## Environment
++
++- Codex CLI: `0.155.0-alpha.9.2`
++- Managed hook ABI: `thaliris-hook-abi-10`
++- Host hook configuration: 7 Thaliris hooks enabled and trusted in the saved
++  Host configuration
++- Target: a fresh disposable temporary Git repository
++- Candidate source: loaded through process-local `PYTHONPATH`; no installed
++  candidate package was substituted
++- Evidence log path: `<redacted local temp path>/admission-evidence.jsonl`
++- Evidence log SHA-256: `<redacted>`
++
++## One-session sequence
++
++One Host session made four distinct calls against the fresh repository:
++
++1. `bootstrap-check` returned the canonical bridge data.
++2. `init` created the project activation state.
++3. A harmless `PreToolUse` call traversed the live hook and issued the
++   admission bearer for that session payload.
++4. `task-start` consumed the bearer with the bridge digest and returned
++   `ACTIVE`.
++
++A second consumption attempt was rejected, demonstrating one-shot local
++   consumption. The report contains no bearer token or secret payload.
++
++## Scope
++
++The sequence demonstrates a real hook path and one-shot adapter state for this
++CLI build, ABI, local user, and fresh repository. The bearer embeds a session
++hash and is checked against a local record, bridge digest, ABI, and expiry. The
++selected trust boundary includes local processes running as the same Windows
++user, so another same-user process could replay the bearer while it remains
++valid. This observation does not provide cryptographic Host provenance and
++does not generalize to other Host builds, Desktop scenarios, or repositories.
+diff --git a/docs/thaliris-role-packs.md b/docs/thaliris-role-packs.md
+index 3253fc8cb1b7263adf3bde8fa32b28a46ab76ef5..066022f0299705008375f7203372550d75b86312 100644
+--- a/docs/thaliris-role-packs.md
++++ b/docs/thaliris-role-packs.md
+@@ -30,8 +30,8 @@ Keep repository reads, tool output, test logs, and intermediate exploration in
+ the role session's private working set. Do not copy an Artifact body into the result
+ unless the Controller explicitly requested that content.
+ Child sessions do not send ordinary progress, heartbeat, or partial-completion
+-messages. They proactively wake the parent only when completed, blocked and
+-requiring a parent decision, or when new decision-changing information arrives.
++messages. They proactively wake the parent only when completed, blocked or
++needing a decision, or when a decision-changing fact arrives.
+ Direct `send_message` to the exact bound parent remains available for genuine
+ decision-changing information, with no automatic wake filter. Follow-up and
+ input tools remain denied for managed children.
+@@ -39,7 +39,10 @@ input tools remain denied for managed children.
+ ## Investigator
+ 
+ Investigator/Scanner handles missing facts, broad scans, large working sets,
+-and factual compression, not architecture decisions. It cannot delegate.
++and factual compression, not architecture decisions. A broad task whose
++semantic slice is unclear starts with a standard Luna Investigator for facts
++and coupling. The Scanner batches a few searches and reads, returns compact
++facts, and ends once the handoff has enough evidence. It cannot delegate.
+ Investigate the task in the handoff. Save detailed reusable evidence as
+ an optional repo-relative Artifact and return its pointer with a short result.
+ 
+@@ -97,7 +100,12 @@ within the assigned slice. Preferentially delegate broad repository scanning,
+ exhaustive search, rollout/log scans, call-site enumeration, residual checks, and
+ large mechanical evidence collection to a fresh Investigator/Scanner. Use its
+ evidence while retaining responsibility for the focused implementation decision.
+-Do not routinely perform those broad collections yourself merely because you can.
++After delegating, wait for the distilled evidence and read only bounded immediate
++files; do not duplicate the Scanner's broad working set. Do not routinely perform those broad collections yourself merely because you can. When
++high-difficulty semantic closure is complete, report the deterministic patch,
++test, format, documentation, and residual-reference tail to the Controller. The
++Controller owns closure of the Focused slice and may authorize a fresh standard
++Luna Implementer handoff for that deterministic tail.
+ 
+ The Controller chooses the model per handoff and semantic slice difficulty.
+ Deterministic documentation, test, configuration, or reference cleanup and
+@@ -187,3 +195,8 @@ returned and the Focused parent continued. See the [durable probe evidence](code
+ This scoped probe covers that one CLI build and probe only. Raw Host wire-byte
+ equality, other Host builds or Desktop scenarios, and native child
+ `Completed`/`task-close` completion were not observed and remain UNKNOWN.
++The startup admission bearer is a local one-shot hook-path check scoped to the
++selected same-Windows-user trust boundary. It binds the hook payload's session
++hash, bridge digest, ABI, expiry, and local consumption record, but does not
++authenticate Host provenance; another same-user local process could replay it
++while it remains valid.
+diff --git a/docs/thaliris-routing-protocol.md b/docs/thaliris-routing-protocol.md
+index fc97564a0fb0b4785c20bf56dcddd4f2fb56b383..e375aee520be1a0421e3a5382d5d90160c1845e1 100644
+--- a/docs/thaliris-routing-protocol.md
++++ b/docs/thaliris-routing-protocol.md
+@@ -24,8 +24,12 @@ define a second routing flow. A straightforward, bounded, low-risk task with
+ confirmed facts may take the Controller -> fresh Implementer -> done path: the
+ Implementer may do necessary bounded local reading, implementation, and
+ deterministic verification. Decision-changing investigation belongs to
+-Investigator/Scanner also handles broad scanning and factual compression of
+-large working sets, without architecture decisions. Bounded local reading
++Investigator. The Investigator/Scanner also handles broad scanning and factual
++compression of large working sets, without architecture decisions. For a broad
++task whose semantic slice is unclear, the Controller first uses a standard Luna
++Investigator for facts and coupling. The Scanner batches a few searches and
++reads, returns compact facts, and ends once the handoff has enough evidence.
++Bounded local reading
+ needed for implementation may stay inside either Executor. Reviewer is conditional, not a mechanical post-implementation gate;
+ select it only when independent semantic review adds real value, such as
+ for architecture or cross-module changes, lifecycle, Host, identity, or
+@@ -65,6 +69,17 @@ implemented, verified, committed, and closed. A completed slice returns
+ distilled state, its commit reference, and verification evidence; discard its
+ working set when closed.
+ 
++When a broad task has an unclear semantic slice, the Controller first selects
++the standard Luna Investigator to establish facts and coupling. After a Focused
++Implementer delegates broad collection, it waits for compact distilled evidence
++and reads only bounded immediate files; it does not duplicate the Scanner's
++working set. When high-difficulty semantic closure is complete, the Focused
++Implementer reports the deterministic patch, test, format, documentation, and
++residual-reference tail to the Controller. The Controller owns closure of the
++Focused slice and may authorize a fresh standard Luna Implementer handoff for
++that deterministic tail. Model choice follows the difficulty of the current
++slice, not the parent task.
++
+ Controller has no fixed model, effort, or native profile. The Host/user selects
+ its model. Investigator, Curator, and standard Implementer use
+ `gpt-6-luna/xhigh`; Focused Implementer, Reasoning Specialist, and Reviewer use
+@@ -94,8 +109,14 @@ cannot delegate. Fresh children always use `fork_turns="none"`. Executors work
+ only within their assigned semantic slice, preserve Controller decisions and
+ invariants, and return a decision-changing unknown rather than changing them.
+ They synchronize formal project documentation for behavior changed within
+-their slice. Reviewer challenges semantic drift between a candidate and its
+-formal project documentation when selected.
++their slice. After a Focused Implementer delegates broad collection, it waits
++for the distilled evidence and reads only bounded immediate files; it does not
++duplicate the Scanner's broad working set. When high-difficulty semantic
++closure is complete, it reports the deterministic patch, test, format,
++documentation, and residual-reference tail to the Controller. The Controller
++owns closure of the Focused slice and may authorize a fresh standard Luna
++Implementer handoff for that deterministic tail. Reviewer challenges semantic
++drift between a candidate and its formal project documentation when selected.
+ 
+ When Thaliris routing, roles, bootstrap, trust boundaries, or Controller
+ contracts change, check and synchronize both the repository-managed instruction
+@@ -112,13 +133,23 @@ not rechecked, and ACTIVE tasks do not run `init`. The installed instruction
+ includes the exact executable path and SHA-256 used for Host integration, so
+ the Controller can verify and invoke that direct route even if an ordinary PATH
+ command is stale. It requires the explicit bridge digest at same-session
+-`task-start`. It does not carry task routing policy or mutate repositories from
+-a hook. Install replaces
++`task-start`; the loaded hook's bearer check is described below. It does not
++carry task routing policy or mutate repositories from a hook. Install replaces
+ only the well-formed `thaliris:global` span; uninstall removes only that span.
+ Text outside the span remains byte-for-byte intact, and damaged, duplicate, or
+ conflicting Thaliris markers require manual resolution. A newly saved global
+ instruction does not prove what the current session loaded.
+ 
++The `task-start` bridge also requires a one-shot PreToolUse bearer attestation
++from the loaded current-ABI hook. The token embeds a hash of the hook payload's
++session id; the adapter checks that hash, bridge digest, hook ABI, expiry, and
++one-time local record. This is an adapter-side hook-path check inside the
++selected same-Windows-user local trust boundary. It does not authenticate Host
++provenance, and another local process under that user could replay the bearer
++while it remains valid.
++
++The scoped live sequence is recorded in the [admission proof probe report](codex-admission-live-20260926.md).
++
+ `SubagentStart` is lifecycle-only. It validates the authorized native Codex child and binds
+ identity, role, session, start time, provenance, handoff ID, and payload hash.
+ It does not construct a role packet or inject task state.
+@@ -132,8 +163,8 @@ verification performed, and optional Artifact references. The detailed working
+ set does not automatically re-enter the Controller.
+ Child sessions do not send ordinary progress, heartbeat, or partial-completion
+ messages to the parent. They proactively wake the parent only when completed,
+-blocked and requiring a parent decision, or when new decision-changing
+-information arrives. Direct `send_message` to the exact bound parent remains
++blocked or needing a decision, or when a decision-changing fact arrives. Direct
++`send_message` to the exact bound parent remains
+ available for genuine decision-changing information, with no automatic wake
+ filter. Follow-up and input tools remain denied for managed children.
+ Scanner results return to their requesting Executor/Reviewer.
+diff --git a/src/thaliris/codex_adapter.py b/src/thaliris/codex_adapter.py
+index 5837e959f01b0e627471402af3736b8aed8fc41c..8e2cb0c77eecbe35cef7cb1241cbafda015aa0ca 100644
+--- a/src/thaliris/codex_adapter.py
++++ b/src/thaliris/codex_adapter.py
+@@ -498,6 +498,15 @@ thresholds. Prefer slices that can each be independently understood,
+ implemented, verified, committed, and closed. A completed slice returns
+ distilled state, its commit reference, and verification evidence; discard its
+ working set when closed.
++When a broad task has an unclear semantic slice, the Controller first selects
++the standard Luna Investigator to establish facts and coupling. After a Focused
++Implementer delegates broad collection, it waits for compact distilled evidence
++and reads only bounded immediate files; it does not duplicate the Scanner's
++working set. When high-difficulty semantic closure is complete, the Focused
++Implementer reports the deterministic patch, test, format, documentation, and
++residual-reference tail to the Controller. The Controller owns closure of the
++Focused slice and may authorize a fresh standard Luna Implementer handoff for
++that deterministic tail.
+ Make each Executor handoff decision-complete enough to close one semantic slice
+ without routine Controller steering. Do not keep an Executor as a long-lived
+ interactive workspace. If new decision-changing information invalidates the
+@@ -505,7 +514,9 @@ slice, let the child close with distilled state and create a fresh correction
+ slice. `send_message` remains available for genuinely new decision-changing
+ information.
+ Use Investigator/Scanner for missing facts, large working sets, broad scans,
+-and factual compression, without transferring architecture decisions. Use a Reviewer only when independent semantic review adds real
++and factual compression, without transferring architecture decisions. A Scanner
++batches a few searches and reads, returns compact facts, and ends once the
++handoff has enough evidence. Use a Reviewer only when independent semantic review adds real
+ value; it is not a default gate. Curator and Reasoning Specialist remain
+ optional and are selected only when they add actual value.
+ At task end, make one short semantic judgment about knowledge that could
+@@ -527,8 +538,8 @@ construct or inject task context. Task state, memory, milestones, prior reviews,
+ and Artifact bodies never enter {_native_role_names_text(final_conjunction="or", with_article=True)} automatically.
+ Child sessions keep their working set private by default. Do not send ordinary
+ progress, heartbeat, or partial-completion messages to the parent. Proactively
+-wake the parent only when completed, blocked and requiring a parent decision, or
+-when new decision-changing information arrives. Direct `send_message` remains
++wake the parent only when completed, blocked or needing a decision, or when a
++decision-changing fact arrives. Direct `send_message` remains
+ available for genuine decision-changing information, with no automatic wake
+ filter.
+ 
+@@ -670,8 +681,13 @@ Controller notice per pending batch. Obvious attempts to mutate
+ Controller-owned task or lifecycle state are denied, recorded, and included in
+ that aggregate notice. Reviewer independence is a
+ developer-instruction plus obvious-write hook guard, not a claimed native
+-read-only sandbox. Starting managed mode requires a current-session,
+-current-hook, one-shot PreToolUse attestation.
++read-only sandbox. Starting managed mode requires a one-shot PreToolUse bearer
++attestation issued by the loaded current-ABI hook. The token embeds a hash of
++the hook payload's session id, and the adapter checks that hash, bridge digest,
++hook ABI, expiry, and one-time local record. This is an adapter-side hook-path
++check inside the selected same-Windows-user local trust boundary; it does not
++authenticate Host provenance, and another local process under that user could
++replay the bearer while it remains valid.
+ 
+ Managed native Codex child lifecycles permit one top-level child and one nested
+ Scanner. Nested authorization requires the exact bound parent's agent, role,
+@@ -723,9 +739,12 @@ JSON result.
+ Read the canonical managed text and SHA-256 returned by `init` or
+ `bootstrap-check`. Explicitly acknowledge that digest with
+ `--controller-bridge-sha256` when calling `task-start`; the loaded current-ABI
+-PreToolUse hook binds that receipt to its session attestation. This is
+-Controller activation only: CLI output does not become Host developer
+-instruction, and Host instruction activation remains UNKNOWN. The stable Host
++PreToolUse hook must issue the one-shot bearer described above. The adapter
++checks the token's embedded session hash and local record, but this does not
++authenticate Host provenance or prevent same-user local replay before the
++record is consumed. This is Controller activation only: CLI output does not
++become Host developer instruction, and Host instruction activation remains UNKNOWN.
++The stable Host
+ trampoline checks only the activation marker before dispatching into the
+ current executable; an inactive repository skips Thaliris Python and state
+ access. A registration on disk does not prove the current session loaded it.
+@@ -783,8 +802,8 @@ Keep repository reads, tool output, test logs, and intermediate exploration in
+ the role session's private working set. Do not copy an Artifact body into the result
+ unless the Controller explicitly requested that content.
+ Child sessions do not send ordinary progress, heartbeat, or partial-completion
+-messages. They proactively wake the parent only when completed, blocked and
+-requiring a parent decision, or when new decision-changing information arrives.
++messages. They proactively wake the parent only when completed, blocked or
++needing a decision, or when a decision-changing fact arrives.
+ Direct `send_message` to the exact bound parent remains available for genuine
+ decision-changing information, with no automatic wake filter. Follow-up and
+ input tools remain denied for managed children.
+@@ -792,7 +811,10 @@ input tools remain denied for managed children.
+ ## Investigator
+ 
+ Investigator/Scanner handles missing facts, broad scans, large working sets,
+-and factual compression, not architecture decisions. It cannot delegate.
++and factual compression, not architecture decisions. A broad task whose
++semantic slice is unclear starts with a standard Luna Investigator for facts
++and coupling. The Scanner batches a few searches and reads, returns compact
++facts, and ends once the handoff has enough evidence. It cannot delegate.
+ Investigate the task in the handoff. Save detailed reusable evidence as
+ an optional repo-relative Artifact and return its pointer with a short result.
+ 
+@@ -850,7 +872,12 @@ within the assigned slice. Preferentially delegate broad repository scanning,
+ exhaustive search, rollout/log scans, call-site enumeration, residual checks, and
+ large mechanical evidence collection to a fresh Investigator/Scanner. Use its
+ evidence while retaining responsibility for the focused implementation decision.
+-Do not routinely perform those broad collections yourself merely because you can.
++After delegating, wait for the distilled evidence and read only bounded immediate
++files; do not duplicate the Scanner's broad working set. Do not routinely perform those broad collections yourself merely because you can. When
++high-difficulty semantic closure is complete, report the deterministic patch,
++test, format, documentation, and residual-reference tail to the Controller. The
++Controller owns closure of the Focused slice and may authorize a fresh standard
++Luna Implementer handoff for that deterministic tail.
+ 
+ The Controller chooses the model per handoff and semantic slice difficulty.
+ Deterministic documentation, test, configuration, or reference cleanup and
+@@ -940,6 +967,11 @@ returned and the Focused parent continued. See the [durable probe evidence](code
+ This scoped probe covers that one CLI build and probe only. Raw Host wire-byte
+ equality, other Host builds or Desktop scenarios, and native child
+ `Completed`/`task-close` completion were not observed and remain UNKNOWN.
++The startup admission bearer is a local one-shot hook-path check scoped to the
++selected same-Windows-user trust boundary. It binds the hook payload's session
++hash, bridge digest, ABI, expiry, and local consumption record, but does not
++authenticate Host provenance; another same-user local process could replay it
++while it remains valid.
+ """
+ 
+ 
+@@ -1320,9 +1352,18 @@ directories do not call for proactive project bootstrap.
+ {trusted_route}
+ Read the canonical managed instruction text and SHA-256 from `init` or
+ `bootstrap-check`, then acknowledge that digest with
+-`--controller-bridge-sha256` in `task-start` in the same session. Follow the
+-effective project instruction for task routing. A CLI result does not prove
+-Host instruction activation or a loaded current-session hook.
++`--controller-bridge-sha256` in `task-start`, normally from the same session.
++That describes the intended workflow, not Host authentication. The loaded
++current-ABI PreToolUse hook must issue a one-shot bearer attestation. The token
++embeds a hash of the hook payload's session id, and the adapter checks that
++hash, bridge digest, hook ABI, expiry, and one-time local record. This is an
++adapter-side hook-path check inside the selected same-Windows-user local trust
++boundary; it does not authenticate Host provenance, and another local process
++under that user could replay the bearer while it remains valid. Follow the
++effective project instruction for task routing and its slice-based cost rules;
++choose by semantic difficulty rather than fixed token, file, or tool thresholds.
++A CLI result does not prove Host instruction activation or a loaded hook for
++the current session.
+ <!-- thaliris:global:end -->
+ """.encode("utf-8")
+ 
+@@ -1867,7 +1908,15 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
+ 
+ 
+ def audit_hook(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
+-    result = handle_hook(root, event, payload, managed_hook_abi)
++    bridge_sha256 = None
++    if (
++        event == "PreToolUse" and managed_hook_abi == lifecycle.MANAGED_HOOK_ABI
++        and isinstance(payload, dict) and payload.get("agent_id") is None
++        and payload.get("agent_type") is None
++        and payload.get("tool_name", payload.get("tool")) == "Bash"
++    ):
++        bridge_sha256 = _controller_bridge()["controller_bridge_sha256"]
++    result = handle_hook(root, event, payload, managed_hook_abi, bridge_sha256)
+     if result or event != "PreToolUse" or not isinstance(payload, dict):
+         return result
+     root = core._repo_root(root)
+diff --git a/src/thaliris/lifecycle.py b/src/thaliris/lifecycle.py
+index 4df4cc1bd1e6ffa84b04e1ac679064d2ac0e70d4..6e76525927afcae1b190975b682a45fabdc849ca 100644
+--- a/src/thaliris/lifecycle.py
++++ b/src/thaliris/lifecycle.py
+@@ -776,7 +776,7 @@ def _observed_health(root: Path) -> dict[str, str]:
+     return {"runtime_observed": observed, "current_hook_hash_observed": current_hash}
+ 
+ 
+-def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
++def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str | None = None, controller_bridge_sha256: str | None = None) -> str:
+     """Apply mechanical guard/lifecycle rules and record hash-only telemetry."""
+     try:
+         if event not in HOOK_EVENTS or not isinstance(payload, dict):
+@@ -798,10 +798,10 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
+         if event == "PreToolUse":
+             tool = payload.get("tool_name") or payload.get("tool")
+             if isinstance(tool, str) and _tool_basename(tool) == "spawn_agent":
+-                decision = _pre_tool_output(payload, root, managed_hook_abi)
++                decision = _pre_tool_output(payload, root, managed_hook_abi, controller_bridge_sha256)
+                 _best_effort_record(_record_runtime_event, root, payload, event, tool)
+                 return decision
+-            return _pre_tool_output(payload, root, managed_hook_abi)
++            return _pre_tool_output(payload, root, managed_hook_abi, controller_bridge_sha256)
+         if event == "SessionStart":
+             _record_session_start(root, payload)
+             return _session_start_output(root, payload)
+@@ -2175,9 +2175,8 @@ def _task_key(task_id: str | None) -> str:
+     return hashlib.sha256((task_id or "unknown-task").encode("utf-8")).hexdigest()[:24]
+ 
+ 
+-def _start_attestation_path(root: Path, nonce: str) -> Path:
+-    digest = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+-    return root / ".context" / "audit" / "task-start-attestations" / f"{digest}.json"
++def _start_attestation_path(root: Path, session_hash: str) -> Path:
++    return root / ".context" / "audit" / "task-start-attestations" / f"{session_hash}.json"
+ 
+ 
+ def new_role_profile_files(root: Path, session_hash: str) -> list[str] | None:
+@@ -2245,31 +2244,56 @@ def role_catalog_session_status(root: Path, session_hash: str) -> str:
+     return HOST_ROLE_CATALOG_UNKNOWN
+ 
+ 
+-def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None = None) -> str:
++def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None = None, controller_bridge_sha256: str | None = None) -> str:
+     session_hash = _session_id_hash(payload)
+-    if session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI:
+-        return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+-    command = _bash_command(payload)
+-    bridge_match = re.search(r"(?:^|\s)--controller-bridge-sha256\s+([0-9a-f]{64})(?=$|\s)", command or "")
+-    if bridge_match is None:
+-        return _permission_deny("THALIRIS_CONTROLLER_BRIDGE_REQUIRED: acknowledge the exact managed instruction SHA-256.")
+-    nonce = secrets.token_urlsafe(24)
+-    token = f"v1.{session_hash}.{nonce}"
+-    now = time.time_ns()
+-    record = {
+-        "version": 1,
+-        "nonce_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+-        "session_id_hash": session_hash,
+-        "managed_hook_spec_hash": managed_hook_spec_hash(),
+-        "adapter_protocol_version": CODEX_ADAPTER_PROTOCOL_VERSION,
+-        "managed_hook_abi": MANAGED_HOOK_ABI,
+-        "controller_bridge_sha256": bridge_match.group(1),
+-        "created_at_ns": now,
+-        "expires_at_ns": now + _START_ATTESTATION_TTL_NS,
+-    }
++    marker = root / ".codex" / "thaliris.json"
++    if (
++        session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI
++        or not isinstance(controller_bridge_sha256, str)
++        or re.fullmatch(r"[0-9a-f]{64}", controller_bridge_sha256) is None
++        or marker.is_symlink() or not marker.is_file()
++        or marker.read_bytes() != b'{"format":"thaliris-project-activation-v1"}\n'
++    ):
++        return ""
+     with core._lock(root):
+-        _write_capture(_start_attestation_path(root, token), record)
+-    return _updated_command_output(payload, f"--hook-attestation {token}")
++        path = _start_attestation_path(root, session_hash)
++        try:
++            record = json.loads(path.read_text(encoding="utf-8"))
++        except (OSError, ValueError, TypeError, json.JSONDecodeError):
++            record = None
++        now = time.time_ns()
++        if not (
++            isinstance(record, dict)
++            and record.get("version") == 2
++            and record.get("session_id_hash") == session_hash
++            and record.get("managed_hook_spec_hash") == managed_hook_spec_hash()
++            and record.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
++            and record.get("managed_hook_abi") == MANAGED_HOOK_ABI
++            and record.get("controller_bridge_sha256") == controller_bridge_sha256
++            and isinstance(record.get("token"), str)
++            and re.fullmatch(rf"v2\.{session_hash}\.[A-Za-z0-9_-]{{16,128}}", record["token"]) is not None
++            and type(record.get("created_at_ns")) is int
++            and type(record.get("expires_at_ns")) is int
++            and record["created_at_ns"] <= now <= record["expires_at_ns"]
++        ):
++            token = f"v2.{session_hash}.{secrets.token_urlsafe(24)}"
++            record = {
++                "version": 2,
++                "token": token,
++                "session_id_hash": session_hash,
++                "managed_hook_spec_hash": managed_hook_spec_hash(),
++                "adapter_protocol_version": CODEX_ADAPTER_PROTOCOL_VERSION,
++                "managed_hook_abi": MANAGED_HOOK_ABI,
++                "controller_bridge_sha256": controller_bridge_sha256,
++                "created_at_ns": now,
++                "expires_at_ns": now + _START_ATTESTATION_TTL_NS,
++            }
++            _write_capture(path, record)
++        token = record["token"]
++    return json.dumps({"hookSpecificOutput": {
++        "hookEventName": "PreToolUse",
++        "additionalContext": f"Current-session Thaliris admission proof: --hook-attestation {token}. Pass it with the Controller bridge SHA-256 returned by init or bootstrap-check when calling task-start.",
++    }}, ensure_ascii=False, separators=(",", ":"))
+ 
+ 
+ def consume_task_start_attestation(root: Path, token: str | None, controller_bridge_sha256: str | None = None) -> str:
+@@ -2277,10 +2301,10 @@ def consume_task_start_attestation(root: Path, token: str | None, controller_bri
+     error = ValueError("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+     if not isinstance(token, str):
+         raise error
+-    match = re.fullmatch(r"v1\.([0-9a-f]{64})\.([A-Za-z0-9_-]{16,128})", token)
++    match = re.fullmatch(r"v2\.([0-9a-f]{64})\.([A-Za-z0-9_-]{16,128})", token)
+     if match is None:
+         raise error
+-    path = _start_attestation_path(root, token)
++    path = _start_attestation_path(root, match.group(1))
+     with core._lock(root):
+         try:
+             record = json.loads(path.read_text(encoding="utf-8"))
+@@ -2288,8 +2312,8 @@ def consume_task_start_attestation(root: Path, token: str | None, controller_bri
+             raise error
+         valid = (
+             isinstance(record, dict)
+-            and record.get("version") == 1
+-            and record.get("nonce_sha256") == hashlib.sha256(token.encode("utf-8")).hexdigest()
++            and record.get("version") == 2
++            and record.get("token") == token
+             and record.get("session_id_hash") == match.group(1)
+             and record.get("managed_hook_spec_hash") == managed_hook_spec_hash()
+             and record.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
+@@ -2387,7 +2411,7 @@ def _isolation_classification(tool: str, tool_input: dict[str, Any], _role: str)
+     return {"required": "YES", "fork_turns": "OTHER", "status": "FAIL"}
+ 
+ 
+-def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_hook_abi: str | None = None) -> str:
++def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_hook_abi: str | None = None, controller_bridge_sha256: str | None = None) -> str:
+     """Enforce the small ACTIVE Root tool boundary before native dispatch."""
+     tool = payload.get("tool_name") or payload.get("tool")
+     if not isinstance(tool, str):
+@@ -2395,7 +2419,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
+     root = _hook_repository_root(root or Path.cwd(), payload)
+     normalized = _tool_basename(tool)
+     state_status, _task_id = managed_task_state(root)
+-    operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
++    operation = _context_operation(payload) if state_status != "NO_TASK" and normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
+ 
+     if state_status == "INVALID_STATE":
+         # Damaged managed state does not make unrelated native tools unsafe.
+@@ -2409,8 +2433,8 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
+             return _permission_deny("THALIRIS_INVALID_STATE: managed control is unavailable until the task state is diagnosed or repaired.")
+         return ""
+ 
+-    if state_status == "NO_TASK" and operation == "task-start":
+-        return _issue_task_start_attestation(root, payload, managed_hook_abi)
++    if state_status == "NO_TASK" and normalized == "Bash":
++        return _issue_task_start_attestation(root, payload, managed_hook_abi, controller_bridge_sha256)
+ 
+     if state_status == "ACTIVE":
+         if normalized in _FRESH_CHILD_REUSE_TOOL_NAMES or normalized == "Agent":
+diff --git a/src/thaliris/roles.py b/src/thaliris/roles.py
+index 758a31568fb6b8755b68721028d9b4a912bb6ef0..8a747fae09e06cd43f8879f30763b4e51c388719 100644
+--- a/src/thaliris/roles.py
++++ b/src/thaliris/roles.py
+@@ -130,8 +130,8 @@ _SHARED_INSTRUCTIONS = (
+     "memory, milestone, Artifact, finding, decision, or review content. Keep repository "
+     "reads, tool output, test logs, and intermediate exploration in your private working "
+     "set. Do not send ordinary progress, heartbeat, or partial-completion messages to the parent. "
+-    "Proactively wake the parent only when completed, blocked and requiring a parent decision, "
+-    "or when new decision-changing information arrives. Direct send_message remains available "
++    "Proactively wake the parent only when completed, blocked or needing a decision, "
++    "or when a decision-changing fact arrives. Direct send_message remains available "
+     "for genuine decision-changing information, with no automatic wake filter. Return a distilled "
+     "result with Conclusion, Key findings, Decision-changing "
+     "unknowns, Contradictions if any, Verification performed, and Artifact refs if detailed "
+@@ -139,7 +139,10 @@ _SHARED_INSTRUCTIONS = (
+     "Facts unknown route to Investigator; an ill-defined problem needing reframing routes to "
+     "Reasoning Specialist; invalidated decisions return to Controller; a "
+     "decided packet routes to Implementer; an independent challenge routes to Reviewer. Difficulty "
+-    "alone is not a Reasoning Specialist trigger. "
++    "alone is not a Reasoning Specialist trigger. For a broad task whose semantic slice is "
++    "unclear, the Controller first selects the standard Luna Investigator to establish facts "
++    "and coupling. Model choice follows the difficulty of the current semantic slice, not "
++    "the parent task. "
+ )
+ 
+ _EXECUTOR_INSTRUCTIONS = (
+@@ -157,9 +160,14 @@ _FOCUSED_SCANNER_INSTRUCTIONS = (
+     " Use only bounded local reading needed for semantic judgment within the assigned slice. "
+     "Preferentially delegate broad repository scanning, exhaustive search, rollout/log scans, "
+     "call-site enumeration, residual checks, and large mechanical evidence collection to a "
+-    "fresh Investigator/Scanner. Use its evidence while retaining responsibility for the "
++    "fresh Investigator/Scanner. After delegating, wait for its distilled evidence and read "
++    "only the bounded immediate files needed for the current slice; do not duplicate the "
++    "Scanner's broad working set. Use its evidence while retaining responsibility for the "
+     "focused implementation decision. Do not routinely perform those broad collections "
+-    "yourself merely because you can."
++    "yourself merely because you can. When high-difficulty semantic closure is complete, "
++    "report the deterministic patch, test, format, documentation, and residual-reference "
++    "tail to the Controller. The Controller owns closure of the Focused slice and may "
++    "authorize a fresh standard Luna Implementer handoff for that deterministic tail."
+ )
+ 
+ _REVIEWER_SCANNER_INSTRUCTIONS = (
+@@ -178,7 +186,9 @@ def _instructions(role: str) -> str:
+     role_instruction = {
+         "investigator": (
+             "Act as the Investigator/Scanner: investigate facts, scan large working sets, and "
+-            "compress evidence, without making architecture decisions. Do not delegate. "
++            "compress evidence, without making architecture decisions. Batch a few searches "
++            "and reads, return compact facts, and end once the handoff has enough evidence; "
++            "do not keep collecting after sufficiency. Do not delegate. "
+             "You may save detailed reusable material as a "
+             "repo-relative Artifact; return only its pointer and the distilled result by default."
+         ),
+diff --git a/tests/test_admission_proof.py b/tests/test_admission_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d037b6399810246dcdbad3d0a6be4625ef877831
+--- /dev/null
++++ b/tests/test_admission_proof.py
+@@ -0,0 +1,89 @@
++from __future__ import annotations
++
++import hashlib
++import json
++from pathlib import Path
++import re
++import subprocess
++
++import pytest
++
++from thaliris import codex_adapter, lifecycle
++
++
++def test_same_session_activation_issues_command_independent_one_shot_proof(tmp_path: Path, monkeypatch) -> None:
++    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
++    payload = {
++        "session_id": "same-session",
++        "turn_id": "turn",
++        "cwd": str(tmp_path),
++        "tool_name": "Bash",
++        # The Host emits the inner Bash call; its text is unrelated to task-start.
++        "tool_input": {"command": "Get-Date"},
++    }
++    codex_adapter.audit_hook(tmp_path, "SessionStart", {
++        "session_id": "same-session", "source": "startup", "cwd": str(tmp_path),
++    })
++    assert codex_adapter.audit_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI) == ""
++
++    result = codex_adapter.init(tmp_path)
++    digest = result["controller_bridge_sha256"]
++    assert codex_adapter.audit_hook(tmp_path, "PreToolUse", payload, "thaliris-hook-abi-9") == ""
++    output = json.loads(codex_adapter.audit_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI))
++    specific = output["hookSpecificOutput"]
++    assert specific["hookEventName"] == "PreToolUse"
++    assert "updatedInput" not in specific
++    assert "permissionDecision" not in specific
++    token = re.search(r"--hook-attestation (v2\.[0-9a-f]{64}\.[A-Za-z0-9_-]{16,128})", specific["additionalContext"]).group(1)
++    wrong_session_hash = hashlib.sha256(b"wrong-session").hexdigest()
++    wrong_session_token = f"v2.{wrong_session_hash}.{token.rsplit('.', 1)[1]}"
++    with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
++        lifecycle.consume_task_start_attestation(tmp_path, wrong_session_token, digest)
++    repeated = json.loads(codex_adapter.audit_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI))
++    assert token in repeated["hookSpecificOutput"]["additionalContext"]
++    record_path = lifecycle._start_attestation_path(tmp_path, token.split(".")[1])
++    record = json.loads(record_path.read_text(encoding="utf-8"))
++    record["expires_at_ns"] = 0
++    record_path.write_text(json.dumps(record), encoding="utf-8")
++    with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
++        lifecycle.consume_task_start_attestation(tmp_path, token, digest)
++    renewed = json.loads(codex_adapter.audit_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI))
++    token = re.search(r"--hook-attestation (v2\.[0-9a-f]{64}\.[A-Za-z0-9_-]{16,128})", renewed["hookSpecificOutput"]["additionalContext"]).group(1)
++    assert token != record["token"]
++
++    monkeypatch.setattr(lifecycle, "managed_executable_health", lambda: {"canonical_executable_available": "YES"})
++    monkeypatch.setattr(codex_adapter, "selected_continuation_mode", lambda _root: "BLOCKING_WAIT")
++    monkeypatch.setattr(codex_adapter, "native_child_completion_reenters_root", lambda: "UNSUPPORTED")
++    monkeypatch.setattr(codex_adapter, "host_explicit_blocking_wait", lambda: {"status": "PASS"})
++    assert codex_adapter.task_start(tmp_path, "goal", None, None, token, "0" * 64)["status"] == "CONTROLLER_BRIDGE_REQUIRED"
++    started = codex_adapter.task_start(tmp_path, "goal", None, None, token, digest)
++    assert started["status"] == "ACTIVE"
++    with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
++        lifecycle.consume_task_start_attestation(tmp_path, token, digest)
++
++
++@pytest.mark.parametrize(
++    "changes",
++    [
++        {"agent_id": "child", "agent_type": "thaliris-implementer"},
++        {"tool_name": "spawn_agent"},
++        {"tool_name": "Bash", "tool_input": {"command": "Get-Date"}, "agent_type": "worker"},
++    ],
++)
++def test_admission_proof_is_not_minted_for_child_or_non_controller_calls(
++    tmp_path: Path, changes: dict[str, object],
++) -> None:
++    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
++    codex_adapter.init(tmp_path)
++    payload: dict[str, object] = {
++        "session_id": "controller-session",
++        "turn_id": "turn",
++        "cwd": str(tmp_path),
++        "tool_name": "Bash",
++        "tool_input": {"command": "Get-Date"},
++    }
++    payload.update(changes)
++    codex_adapter.audit_hook(tmp_path, "SessionStart", {
++        "session_id": "controller-session", "source": "startup", "cwd": str(tmp_path),
++    })
++    assert codex_adapter.audit_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI) == ""
+diff --git a/tests/test_mechanical_core.py b/tests/test_mechanical_core.py
+index d69f8bbfb607bf311f57d9a0873d13025f58a03f..94926d447cb6d2a52cd3e81a939962cc8917beda 100644
+--- a/tests/test_mechanical_core.py
++++ b/tests/test_mechanical_core.py
+@@ -161,6 +161,20 @@ def test_authoritative_prose_uses_role_names_or_explicit_native_child_context()
+     for surface in surfaces:
+         text = surface.read_text(encoding="utf-8")
+         assert not re.search(r"(?m)^#+ (?:Shared )?Child(?: |$)", text), surface
++    project_agents = (root / "AGENTS.md").read_text(encoding="utf-8")
++    core_contract = (
++        "## Thaliris Core\n\n"
++        "This repository contains the runtime-neutral Core and the Codex adapter. Keep\n"
++        "production mechanics smaller than model policy. Do not add role-based semantic\n"
++        "projection, automatic Artifact or memory propagation, semantic state\n"
++        "transitions, verification sufficiency gates, hidden model auditors, or\n"
++        "benchmark authority to the production package.\n\n"
++        "Detailed Investigator, Curator, Reasoning Specialist, Implementer, Verifier, and Reviewer work stays private unless explicitly saved as an Artifact.\n"
++        "Controller handoffs and retrieval are explicit. Runtime-specific lifecycle and\n"
++        "role-profile instructions belong in the adapter."
++    )
++    assert core_contract in project_agents
++    assert project_agents.index("<!-- thaliris:end -->") < project_agents.index("## Thaliris Core")
+     generated = (root / "src" / "thaliris" / "codex_adapter.py").read_text(encoding="utf-8")
+     assert "Do not delegate to another child" not in generated
+     assert "another native Codex child session" not in generated
+diff --git a/tests/test_roles.py b/tests/test_roles.py
+index 4472b147653a321adbea469327fc9d6357a10ac8..90ee5d863912ffcaa19778c951c2fbc9918d017d 100644
+--- a/tests/test_roles.py
++++ b/tests/test_roles.py
+@@ -197,12 +197,10 @@ def test_1f98dae_profiles_migrate_by_exact_filename_and_preserve_edits(tmp_path:
+     } == expected
+ 
+     tracked = tuple(expected)
+-    changed = {
+-        "thaliris-focused-implementer.toml",
+-        "thaliris-focused-implementer-astra-medium.toml",
+-        "thaliris-focused-implementer-xhigh.toml",
+-        "thaliris-reviewer.toml",
+-    }
++    # The current shared role contract changed every generated profile after
++    # this historical revision, so each exact historical byte sequence must
++    # migrate while user-edited files remain protected.
++    changed = set(tracked)
+     historical: dict[str, bytes] = {}
+     for name in tracked:
+         value = _historical_profile("1f98dae", name)
+@@ -239,7 +237,8 @@ def test_1f98dae_profiles_migrate_by_exact_filename_and_preserve_edits(tmp_path:
+ def test_child_communication_and_slice_routing_contract_is_shared() -> None:
+     communication = (
+         "ordinary progress, heartbeat, or partial-completion messages",
+-        "proactively wake the parent only when completed, blocked and requiring a parent decision",
++        "proactively wake the parent only when completed, blocked or needing a decision",
++        "when a decision-changing fact arrives",
+         "genuine decision-changing information, with no automatic wake filter",
+     )
+     routing = (
+@@ -247,6 +246,11 @@ def test_child_communication_and_slice_routing_contract_is_shared() -> None:
+         "Deterministic documentation, test, configuration, or reference cleanup and small defined implementations default",
+         "current slice",
+         "multi-option reasoning",
++        "batches a few searches and reads",
++        "high-difficulty semantic closure",
++        "deterministic patch, test, format, documentation, and residual-reference tail to the Controller",
++        "Controller owns closure of the Focused slice",
++        "may authorize a fresh standard Luna Implementer handoff",
+     )
+     for name, (model, effort, role) in roles.agent_profiles().items():
+         instructions = tomllib.loads(
+@@ -263,6 +267,26 @@ def test_child_communication_and_slice_routing_contract_is_shared() -> None:
+         assert all(" ".join(phrase.split()).lower() in normalized for phrase in communication)
+         assert all(" ".join(phrase.split()).lower() in normalized for phrase in routing)
+ 
++    focused_profiles = {
++        name
++        for name, (_model, _effort, role) in roles.agent_profiles().items()
++        if role == "focused-implementer"
++    }
++    assert focused_profiles
++    for name in focused_profiles:
++        instructions = tomllib.loads(
++            codex_adapter._agent_profile(
++                name.removesuffix(".toml"),
++                "focused-implementer",
++                roles.agent_profiles()[name][0],
++                roles.agent_profiles()[name][1],
++            ).decode()
++        )["developer_instructions"]
++        assert "report the deterministic patch" in instructions
++        assert "Controller owns closure of the Focused slice" in instructions
++        assert "may authorize a fresh standard Luna Implementer handoff" in instructions
++        assert "hand the deterministic patch" not in instructions
++
+ 
+ def test_focused_roles_keep_local_judgment_bounded_and_prefer_scanner_evidence() -> None:
+     required = (
+diff --git a/tests/test_single_handoff.py b/tests/test_single_handoff.py
+index 2857ee67170ef4fb9abadaa05be46b35f02fdbe5..57f08bd62b8cc066137506ac3b200715176decd2 100644
+--- a/tests/test_single_handoff.py
++++ b/tests/test_single_handoff.py
+@@ -19,6 +19,19 @@ def repo(tmp_path: Path) -> Path:
+     return tmp_path
+ 
+ 
++def admission_token(output: str) -> str:
++    """Extract the one-shot hook bearer from additionalContext."""
++    payload = json.loads(output)
++    specific = payload["hookSpecificOutput"]
++    assert specific["hookEventName"] == "PreToolUse"
++    assert "updatedInput" not in specific
++    assert "permissionDecision" not in specific
++    return re.search(
++        r"--hook-attestation (v2\.[0-9a-f]{64}\.[A-Za-z0-9_-]{16,128})",
++        specific["additionalContext"],
++    ).group(1)
++
++
+ def test_project_init_does_not_re_attest_or_restart_for_host_hook_state(tmp_path: Path, monkeypatch) -> None:
+     root = repo(tmp_path)
+     runtime = root / ".context" / "audit" / "stale-session" / "runtime.json"
+@@ -106,8 +119,7 @@ def test_task_start_blocks_roles_added_after_current_session_start(tmp_path: Pat
+     )
+     digest = init["controller_bridge_sha256"]
+     pre = {"session_id": "same-session", "turn_id": "turn", "tool_name": "Bash", "tool_input": {"command": f"thaliris task-start goal --controller-bridge-sha256 {digest}"}}
+-    rewritten = json.loads(codex_adapter.audit_hook(tmp_path, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+-    token = re.search(r"--hook-attestation ([A-Za-z0-9._-]+)$", rewritten["hookSpecificOutput"]["updatedInput"]["command"]).group(1)
++    token = admission_token(codex_adapter.audit_hook(tmp_path, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+     result = codex_adapter.task_start(tmp_path, "goal", None, None, token, digest)
+     assert result["status"] == "NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE"
+     assert result["new_role_profile_files"] == [".codex/agents/thaliris-implementer.toml"]
+@@ -186,8 +198,7 @@ def test_task_start_blocks_host_role_added_after_current_session_start(tmp_path:
+     codex_adapter.codex_install()
+     digest = init["controller_bridge_sha256"]
+     pre = {"session_id": "late-host-session", "turn_id": "turn", "tool_name": "Bash", "tool_input": {"command": f"thaliris task-start goal --controller-bridge-sha256 {digest}"}}
+-    rewritten = json.loads(codex_adapter.audit_hook(tmp_path, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+-    token = re.search(r"--hook-attestation ([A-Za-z0-9._-]+)$", rewritten["hookSpecificOutput"]["updatedInput"]["command"]).group(1)
++    token = admission_token(codex_adapter.audit_hook(tmp_path, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+     result = codex_adapter.task_start(tmp_path, "goal", None, None, token, digest)
+     assert result["status"] == lifecycle_module.NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE
+     assert result["new_role_profile_files"] == sorted(str(host_home.resolve() / "agents" / name) for name in codex_adapter._AGENT_PROFILES)
+@@ -482,8 +493,7 @@ def test_initialized_task_start_reports_unavailable_trusted_executable(tmp_path:
+     root = repo(tmp_path)
+     digest = codex_adapter._controller_bridge()["controller_bridge_sha256"]
+     payload = {"session_id": "exec-s1", "turn_id": "exec-turn", "tool_name": "Bash", "tool_input": {"command": f"thaliris task-start x --controller-bridge-sha256 {digest}"}}
+-    rewritten = json.loads(codex_adapter.audit_hook(root, "PreToolUse", payload, lifecycle_module.MANAGED_HOOK_ABI))
+-    token = re.search(r"--hook-attestation ([A-Za-z0-9._-]+)$", rewritten["hookSpecificOutput"]["updatedInput"]["command"]).group(1)
++    token = admission_token(codex_adapter.audit_hook(root, "PreToolUse", payload, lifecycle_module.MANAGED_HOOK_ABI))
+     result = codex_adapter.task_start(root, "x", None, None, token, digest)
+     assert result["status"] == "BOOTSTRAP_REQUIRED"
+     assert result["bootstrap"]["canonical_executable_available"] == "NO"
+@@ -1555,13 +1565,9 @@ def test_task_start_requires_current_one_shot_hook_attestation(tmp_path: Path, m
+ 
+     digest = codex_adapter._controller_bridge()["controller_bridge_sha256"]
+     pre = hook_payload(tool_name="Bash", tool_input={"command": f"thaliris task-start goal --controller-bridge-sha256 {digest}"})
+-    old_registration = json.loads(codex_adapter.audit_hook(root, "PreToolUse", pre))
+-    assert "MANAGED_CURRENT_SESSION_NOT_ATTESTED" in json.dumps(old_registration)
+-    old_abi_registration = json.loads(codex_adapter.audit_hook(root, "PreToolUse", pre, "thaliris-hook-abi-9"))
+-    assert "MANAGED_CURRENT_SESSION_NOT_ATTESTED" in json.dumps(old_abi_registration)
+-    rewritten = json.loads(codex_adapter.audit_hook(root, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+-    command = rewritten["hookSpecificOutput"]["updatedInput"]["command"]
+-    token = re.search(r"--hook-attestation ([A-Za-z0-9._-]+)$", command).group(1)
++    assert codex_adapter.audit_hook(root, "PreToolUse", pre) == ""
++    assert codex_adapter.audit_hook(root, "PreToolUse", pre, "thaliris-hook-abi-9") == ""
++    token = admission_token(codex_adapter.audit_hook(root, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+     assert cli.main(["--root", str(root), "task-start", "attested", "--controller-bridge-sha256", "0" * 64, "--hook-attestation", token]) == 3
+     assert json.loads(capsys.readouterr().out)["status"] == "CONTROLLER_BRIDGE_REQUIRED"
+     assert cli.main(["--root", str(root), "task-start", "attested", "--controller-bridge-sha256", digest, "--hook-attestation", token]) == 0
+@@ -1601,12 +1607,7 @@ def test_powershell_call_operator_to_pinned_executable_mints_task_start_attestat
+         tool_name="Bash",
+         tool_input={"command": command},
+     )
+-    rewritten = json.loads(
+-        codex_adapter.audit_hook(root, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI)
+-    )
+-    updated_command = rewritten["hookSpecificOutput"]["updatedInput"]["command"]
+-    assert updated_command.startswith(command)
+-    token = re.search(r"--hook-attestation ([A-Za-z0-9._-]+)$", updated_command).group(1)
++    token = admission_token(codex_adapter.audit_hook(root, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+ 
+     assert cli.main(
+         ["--root", str(root), "task-start", "powershell direct route", "--controller-bridge-sha256", digest, "--hook-attestation", token]
+@@ -1633,8 +1634,7 @@ def test_unsupported_prerelease_after_valid_attestation_is_continuation_unavaila
+     monkeypatch.setattr(codex_adapter, "selected_continuation_mode", lambda _root: "UNAVAILABLE")
+     digest = codex_adapter._controller_bridge()["controller_bridge_sha256"]
+     pre = hook_payload(tool_name="Bash", tool_input={"command": f"thaliris task-start goal --controller-bridge-sha256 {digest}"})
+-    command = json.loads(codex_adapter.audit_hook(root, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))["hookSpecificOutput"]["updatedInput"]["command"]
+-    token = re.search(r"--hook-attestation ([A-Za-z0-9._-]+)$", command).group(1)
++    token = admission_token(codex_adapter.audit_hook(root, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
+     assert cli.main(["--root", str(root), "task-start", "attested", "--controller-bridge-sha256", digest, "--hook-attestation", token]) == 3
+     result = json.loads(capsys.readouterr().out)
+     assert result["status"] == "MANAGED_CONTINUATION_UNAVAILABLE"
