@@ -20,8 +20,8 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Iris0fTheValley/Thaliris-Codex"
-Issues = "https://github.com/Iris0fTheValley/Thaliris/issues"
+Repository = "https://github.com/Iris0fTheValley/Thaliris-codex"
+Issues = "https://github.com/Iris0fTheValley/Thaliris-codex/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]

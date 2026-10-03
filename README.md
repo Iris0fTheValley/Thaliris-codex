@@ -7,8 +7,8 @@ Codex 的 Host 适配器，依赖共享 [Thaliris Core](https://github.com/Iris0
 在独立 Python 3.11+ 环境内，先安装 Core，再安装适配器：
 
 ```sh
-python -m pip install 'git+https://github.com/Iris0fTheValley/Thaliris'
-python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-Codex'
+python -m pip install 'git+https://github.com/Iris0fTheValley/Thaliris.git@da663e86ffea1fc8d09ea9bbec3ec8da21eeef34'
+python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-codex'
 thaliris version
 ```
 
@@ -22,7 +22,7 @@ pytest
 
 安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。正式 Host 安装应将两个 wheel 安装进禁用 system site packages 的专用环境；editable .pth 路径不会通过运行时 pin 验证。整个环境的文件（含共享 Core）被纳入 manifest。
 
-[共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 协议与历史证据](https://github.com/Iris0fTheValley/Thaliris/tree/main/benchmarks/abcd) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-DSH) 使用同一个 Core。
+[共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 协议与历史证据](https://github.com/Iris0fTheValley/Thaliris/tree/main/benchmarks/abcd) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
 
 共享语义保持模型负责判断：INDEX 是由模型维护的薄语义导航地图，Core 只执行路径、CAS、大小与链接检查。Controller 选择要保留的知识，角色结果不会自动成为持久记忆。
 
