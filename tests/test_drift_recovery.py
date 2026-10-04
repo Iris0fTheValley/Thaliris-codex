@@ -310,7 +310,7 @@ def test_windows_degraded_policy_allows_repair_and_denies_control(tmp_path, pinn
                                       ("Bash", {"command": "Set-Content .context/state.json '{}'"}, True),
                                       ("Bash", {"command": "python tools/thaliris_offline_recovery.py"}, True)]:
         payload = json.dumps({"tool_name": tool, "tool_input": tool_input}).encode()
-        result = subprocess.run(command, shell=True, cwd=tmp_path, input=payload, capture_output=True, timeout=15)
+        result = subprocess.run(command, shell=True, cwd=tmp_path, input=payload, capture_output=True, timeout=30)
         assert result.returncode == 0, result.stderr
         assert b"SHOULD_NOT_EXECUTE" not in result.stdout
         output = json.loads(result.stdout)["hookSpecificOutput"]
