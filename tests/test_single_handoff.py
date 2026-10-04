@@ -286,7 +286,10 @@ def test_codex_install_updates_and_uninstall_removes_only_global_owned_span(tmp_
     assert b"directly reopen decision-critical originals, call chains, diffs, and\ntests" in expected
     assert b"do not reconstruct the covered broad inventory" in expected
     assert b"genuinely uncovered decision-changing evidence gap" in expected
-    assert "Focused Implementer may continue accepted implementation across local checkpoints" in " ".join(expected.decode().split())
+    normalized_expected = " ".join(expected.decode().split())
+    assert "Continue core implementation across local checkpoints only while the next step could still change the core semantic solution" in normalized_expected
+    assert "Focused Implementer owns semantic convergence of its implementation candidate" in normalized_expected
+    assert "Continue only verification or repair that could still change the core semantic solution" in normalized_expected
     assert b"every explicit user goal is addressed, explicitly deferred, or has a\ndecision-changing blocker" in expected
     assert b"semantic instruction, not a mechanical\nchecklist or state machine" in expected
 
@@ -2523,8 +2526,8 @@ def test_role_profiles_keep_routing_and_model_choice_with_the_controller(tmp_pat
     assert "do not expand scope" in implementer
     assert "decision-changing unknown to the Controller" in implementer
     assert "The native child profiles are Investigator" in codex_adapter.ROLE_PACKS
-    assert "Controller-decided boundaries/contracts" in codex_adapter.ROLE_PACKS
-    assert "recommendations/advice are not\ncontract" in codex_adapter.ROLE_PACKS
+    assert "Controller-decided boundaries/contracts" in " ".join(codex_adapter.ROLE_PACKS.split())
+    assert "recommendations/advice are not contract" in " ".join(codex_adapter.ROLE_PACKS.split())
     assert "Do not silently drop, guess, or freeze an unknown" in codex_adapter.ROLE_PACKS
     # Git may materialize this LF-owned document as CRLF when core.autocrlf is
     # enabled; keep the ownership check exact after normalizing line endings.
