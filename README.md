@@ -1,8 +1,12 @@
 # Thaliris Codex adapter
 
+语言：简体中文 | [English](README.en.md)
+
 Codex 的 Host 适配器，依赖共享 [Thaliris Core](https://github.com/Iris0fTheValley/Thaliris)，不是独立 Core，也不复制 Core。
 
 `thaliris-codex` 发布 `thaliris_codex` 命名空间及 `thaliris` / `context` 命令。原生引导、角色配置、生命周期、Hook 信任、运行时身份、诊断和恢复由本适配器负责。共享记录、检索、证据、记忆与 authority API 来自 `thaliris`。
+
+pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.3,<0.5。
 
 在独立 Python 3.11+ 环境内，先安装 Core，再安装适配器：
 
@@ -19,23 +23,21 @@ python -m pip install -e '../Thaliris[test]'
 python -m pip install --no-deps -e '.[test]'
 ```
 
-The offline-recovery source-runner test needs `THALIRIS_CORE_SOURCE` set to
-that checkout's root (the directory containing `src/thaliris/core.py`). The
-runner deliberately loads this explicit checkout and does not treat the
-installed Core package as reviewed source. In PowerShell, set it before running
-the tests:
+离线恢复 source-runner 测试需要设置 THALIRIS_CORE_SOURCE，指向包含
+src/thaliris/core.py 的 Core checkout 根目录。runner 会明确加载该源码 checkout，
+不会把已安装的 Core package 当作已审阅源码。PowerShell 中，在运行测试前设置：
 
 ```powershell
 $env:THALIRIS_CORE_SOURCE = (Resolve-Path '../Thaliris').Path
 pytest
 ```
 
-In POSIX shells, use `export THALIRIS_CORE_SOURCE=../Thaliris` before `pytest`.
-CI sets this variable to its `shared-core` checkout.
+POSIX shell 中，先设置 THALIRIS_CORE_SOURCE=../Thaliris，再运行 pytest。
+CI 将该变量指向 shared-core checkout。
 
 安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。正式 Host 安装应将两个 wheel 安装进禁用 system site packages 的专用环境；editable .pth 路径不会通过运行时 pin 验证。整个环境的文件（含共享 Core）被纳入 manifest。
 
-[共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 协议与历史证据](https://github.com/Iris0fTheValley/Thaliris/tree/main/benchmarks/abcd) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
+[共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 基准结果](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
 
 共享语义保持模型负责判断：INDEX 是由模型维护的薄语义导航地图，Core 只执行路径、CAS、大小与链接检查。Controller 选择要保留的知识，角色结果不会自动成为持久记忆。
 
@@ -43,14 +45,339 @@ CI sets this variable to its `shared-core` checkout.
 
 旧 admission-fix 提案的原始补丁与 profile 字节来源快照保存在[历史归档](docs/historical/admission-fix/README.md)；其中的 profile 内容变更拒绝行为不是当前启用契约。
 
-语义角色、职责、路由和只读限制与执行模型分离。专用 Codex 安装可用
-`codex-install --execution-constraint luna-only` 将所有普通 worker profile
-设为 `gpt-6-luna/xhigh`，保留同一角色 ID 和指令。任务 authority contract
-必须明确包含 `"execution_constraint": "luna-only"`；Core 将这个可选非空字符串作为不可变 intent 保存，适配器只接受 `luna-only` 并验证其执行绑定。外部 anchor 固定已校验的
-profile/config 哈希，子角色及可变配置不能扩展或解除约束。安装后需新 Host session；
-admission 比较 SessionStart 时记录的 role profile 和公开 config 文件哈希。这些磁盘观察
-不能证明 Host 实际加载的 role map 或 CLI `-c` 覆盖。SubagentStart 核对受约束子角色的
-Host model；缺失或不匹配时不绑定 handoff，后续子角色工具被拒绝。该 hook 无法阻止子角色
-model 被调用。约束禁止 Astra profile 和每次 spawn 的模型覆盖；无约束时默认绑定不变。
 
-此功能需要 `thaliris>=0.4.3`。开发测试必须安装本次修复的实际 Core checkout；旧 monolithic wheel 不满足 split package 边界。
+## 执行约束
+
+语义角色、职责、路由和只读限制与执行模型分离。专用 Codex 安装可通过 codex-install --execution-constraint luna-only 将所有普通 worker profile 设为 gpt-6-luna/xhigh，同时保留原角色 ID 和指令。任务 authority contract 必须显式包含：
+
+```json
+{"execution_constraint": "luna-only"}
+```
+
+Core 将该可选非空字符串作为不可变 intent 保存；适配器只接受 luna-only，并验证每个执行绑定。外部 anchor 固定已校验的 profile/config hashes，子角色与可变配置不能扩展或解除约束。安装后需要新的 Host session。Admission 比较 SessionStart 时记录的 role profile 和公开 config 文件快照；磁盘快照不能证明 Host 实际加载的 role map 或 CLI -c 覆盖。SubagentStart 核对受约束子角色的 Host model；缺失或不匹配时 handoff 不绑定，之后该子角色的工具会被拒绝，但 hook 无法阻止模型调用。约束禁止 Astra profile 和每次 spawn 的模型覆盖；未启用约束时默认绑定不变。详细迁移说明见 [执行约束移植说明](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md)。
+
+该功能需要 thaliris>=0.4.3。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
+
+## Shared Thaliris Core
+
+Thaliris 是一个 Git-native 的机械上下文与生命周期层。它不运行 Agent，
+也不替模型判断什么重要、正确或足以完成任务。
+
+> 模型负责语义。机械层负责执行。
+
+0.4.2 runtime drift, current Host identity limits, and offline recovery:
+[Runtime drift and recovery](docs/thaliris-runtime-recovery.md).
+
+Persistent human task intent, reconnect recovery, explicit Controller-direct
+and single-agent modes: [Task authority](docs/thaliris-task-authority.md).
+
+## 生产信息流
+
+```text
+Controller
+    │ explicit task + selected information
+    ▼
+selected role session
+    ├── private working set
+    ├── optional detailed Artifact
+    └── distilled result
+            │
+            ▼
+        Controller
+            └── decides next handoff
+```
+
+授权父级的原生 spawn message 是各角色唯一的 task-specific 语义输入。
+`SubagentStart` 只验证授权、身份、角色与 session，绑定 lifecycle 和 handoff
+metadata；它不构建 task-specific `additionalContext`。
+
+不存在以下生产路径：
+
+```text
+task state -> role projection -> automatic native Codex child injection
+hidden model auditor -> Controller correction/block
+```
+
+## 职责
+
+Controller 负责路由、上下文选择、解释、接受与完成判断。无论 ACTIVE 还是 degraded，
+Controller 都只选择完成任务所需的最少 fresh roles；role 是认知分工，不是必经的
+workflow stage。当前设计把主要认知负载分开：Controller 维持目标并选择上下文；
+Investigator 承担大 working set、仓库扫描和事实压缩；Implementer 承担实现；
+Reviewer 独立挑战结果。复杂实现可以使用更聚焦、更高能力的执行绑定，但实现决策仍由
+执行角色负责。Reasoning Specialist 只在问题定义、抽象或前提本身不清楚时用于元认知
+重构；Curator 用于把已选择材料压缩成可复用知识。兼容或专用 profile 可以存在，但
+不构成 mandatory workflow。
+
+Implementer 与 Focused Implementer 都负责实现，保持聚焦的 working set；
+Investigator 可以拥有较大的私有 working set，将广泛扫描、调用点和残留引用
+压缩成事实、位置、证据和未知项。执行角色利用这些证据，并保留实现决策权。
+Reasoning Specialist 用于重构不明确的问题。Verifier 仅保留只读兼容，
+不推荐作为流程阶段。Focused Implementer 负责语义收敛；当核心实现和不变量已落实、
+会改变方向的未知已解决、证据能说明核心语义，而且剩余工作不太可能改变已定架构、因果模型、安全边界、
+范围或验收时，可以带上候选状态、证据限制和剩余任务返回 FINAL。测试通过本身不会切换角色。
+安装或 smoke 检查若仍用于证明核心语义，仍属于 Focused Implementer 的收敛工作。
+Root 决定后续是否仍需 Focused reasoning，或可将独立且确定的收尾交给普通 Implementer。
+小型直接常规操作无需仅为流程而建立子角色；这仍受既有执行模式约束。
+
+Controller 的 model、effort、native profile 均无固定值，由 Host/用户选择。
+Investigator、Curator 和标准 Implementer 默认 `gpt-6-luna/xhigh`；Focused
+Implementer、Reasoning Specialist 和 Reviewer 默认 `gpt-6.1-sol/high`；兼容 Verifier
+为 `gpt-6-luna/xhigh`。只有 Controller 可以在 spawn 前为特殊推理明确选择固定的
+Astra medium 或 xhigh profile，但必须获得当前任务的用户授权；自动路由止于 Sol，
+跨领域不确定性也不会自动启用 Astra。子角色不能自行选择 model/effort。
+这些 profile 仍映射至相同 role ID；不允许
+通过每次 spawn 的 model/effort 参数覆盖 profile。
+
+所有 role session 保留私有中间工作，默认只返回精炼结论、关键发现、会改变
+决策的未知、矛盾、验证与 Artifact pointer。
+
+Core 只提供：
+
+- task / native Codex child / handoff / artifact identity
+- revision 与 compare-and-swap
+- lock、atomic write、backup 与 rollback
+- hash、provenance、supersedes/history
+- 文件的 `FRESH` / `PARTIAL` / `RECORDED` / `CHANGED` / `MISSING` / `UNKNOWN` 客观事实
+- verification 与 task surface 的机械 observation
+- 显式 store / catalog / exact-path get
+
+Core 不判断 relevance、importance、correctness、role applicability、task
+completion，也不根据 stale evidence 自动改写 decision、constraint 或 workflow。
+
+Codex adapter 只负责 fresh spawn、`fork_turns="none"`、授权的有限二层 native Codex child lifecycle、
+handoff hash、SubagentStart/Stop identity、missing-stop reconciliation 和 native
+wait。Controller 本身由 Host/user 当前选择的根 session 承载；child profile 的模型与
+reasoning effort 由 adapter 的 role binding 管理。短 wait 只有在确实存在 pending
+reservation 或 managed native Codex child，且当前 session effective maximum 已被机械验证时，
+才会被规范化为长 blocking wait。当前 Host hook 尚未暴露该 maximum，因此会保留请求的
+timeout，不会自动扩展。`SubagentStop` 本身不是成功；
+只有明确观测到 native `Completed` 才满足 lifecycle completion。
+
+Controller 可以选择注册角色；仅 Implementer、Focused Implementer 和 Reviewer
+可以再委派一个 fresh Investigator/Scanner。最多一个顶层子角色与一个 Scanner
+同时活动，Scanner 结果归请求它的父级。嵌套授权要求父级精确的 agent、role、
+session、turn 身份，缺失或冲突即拒绝。一个 live managed Codex CLI
+`0.155.0-alpha.9.2` probe 已验证二层 Scanner 的精确 reservation、Start 和绑定的
+PreToolUse 接受，Scanner 结果已返回且 Focused parent 继续执行；详见
+[durable probe evidence](docs/codex-nested-scanner-live-20260925.md)。该证据只覆盖这一个
+CLI 构建与 probe；raw Host wire-byte equality、其他 Host 构建和其他 Desktop 场景仍为
+UNKNOWN。另一次 2026-09-28 Codex Desktop probe 观察到 `list_agents` 返回精确 child name
+和 native `completed` status；端到端 Desktop `task-close` 尚未观测。`task-close` 要求最后一个
+Controller 直接 handoff 有匹配的 Start、Stop 和 native `Completed` observation，且没有
+pending 或 active 后代。
+
+## Task ledger
+
+Task state 是一个带 revision 的机械账本。Controller 可以保存含 `id`、`kind`、
+`text`、`producer`、`status`、`source_refs`、`supersedes` 的记录。`kind` 和
+`status` 是模型写入的标签；Core 只验证 schema、identity 与引用完整性。
+
+`task-close` 检查 task identity、revision、基本状态一致性，以及 adapter 的授权
+lifecycle。它不判断测试是否充分，也不裁决任务语义上是否完成。
+
+## Artifact、Memory 与 Milestone
+
+Artifact 正文位于显式路径中；账本只保存 ID、producer、path、content hash、
+created revision、source refs 与 optional supersedes。Artifact 不会被自动读取或
+传播。Controller 显式取回正文，并自行选择是否交给后续被选中的 role session。
+
+Memory 默认不注入。模型自行维护 `.agent-memory/INDEX.md` 和
+`.milestones/INDEX.md` 里的薄语义导航地图，而不是单纯的文件清单。条目简要说明所链知识
+涵盖什么、何时适合读取，以及在有帮助时说明当前或历史/已取代的适用范围；让当前相关知识
+优先可见。Controller 读取描述后，选择要通过 `document-get` 明确恢复的文档。模型自行选择
+目录、层级与措辞，不设固定格式或 taxonomy。Core 不解释、生成或重建 INDEX 内容，只做路径、
+CAS、大小、链接与原子写入的机械检查。SessionStart 只提示两个 root INDEX 的路径，不注入
+完整地图。开始 managed task 前，Controller 应显式读取 root navigation；若 INDEX 尚不存在，
+先建立最小薄 INDEX 再开始 task。
+任务进行中不会自动重复读取，除非地图已修改、信息不足、freshness 失效，或 resume/compact
+需要恢复导航。
+`document-get` 可一次读取最多 8 个由 Controller 明确给出的 path，并受总返回大小
+限制；它不自动搜索、排序或补充文档。ACTIVE Controller 使用 bounded
+`task-status` 和单对象 `task-get`；`init`、`uninstall`、`rollback`、再次
+`task-start` 与完整 `task-show` 均不属于 ACTIVE allow-set。
+`Status` 是有界的记录标签。旧文档中的其它 metadata 仍可读取，但只作为不透明兼容字段，
+不是传播权限。
+
+长期知识是否需要准入由 Controller 独自判断。正常任务进行中，Root 留意用户指令、自己的架构或治理
+决策、Investigator 证据、Executor FINAL、Reviewer 发现和 Specialist 挑战中出现的可复用知识。这只是
+Controller 当前工作上下文中的判断；不建立候选清单、持久准入状态、分数、计数器、阈值或额外检查点，
+也不为记忆审查中断正在执行的 Workstream。Executor 返回正常结果、证据和会改变决策的信息，不追踪
+记忆候选、不生成 Curator、不维护 durable INDEX 导航，也不在 FINAL 增加单独的长期治理内容。
+
+接近任务自然结束时，Controller 在正常收尾中判断证据是否建立、修订、推翻或实质澄清了可复用的项目
+知识，以及简明、有来源且容易检索的记忆条目是否能改善、约束或加快未来决策或恢复。这不限于未来
+Agent 否则需要重新调查的知识。若选定的候选值得保留，Root 向新的 Curator 提供候选知识、事实与支撑
+证据、精确相关的既有 memory 与 INDEX 导航，以及需要对照的规范来源和文档；没有候选或没有未来决策价值时则跳过。普通小任务可以完全
+跳过 Curator；任务规模或架构工作本身不会触发必经阶段。
+
+现有文档、源码、指令、测试、提交和 rollout 既不是自动排除理由，也不代表必须另建 memory；把它们当作
+证据，并避免照抄规范文本。Memory 可以作为未来 Agent 的恢复入口，概述并链接容易找到的规范材料，或
+压缩散落在代码、Host、历史和设计中的决策依据。Curator 应把选定候选与提供的资料对照；若既有知识
+已经足够，应明确说明无需写入。添加、修订、合并、拆分、收窄、取代或删除选定 memory 时，Curator
+也判断相关 INDEX 导航是否要更新，并在需要时更新。保留每条结论的来源和适用范围；新证据修订或取代旧结论时，在相关情况
+下保留旧结论的历史适用性。任务时间线、实现日志、普通提交历史、临时测试输出或瞬时失败不应作为日志
+保存；但如果它们能建立会改善、约束或加快未来决策或恢复的可复用知识，也不能自动排除。正式产品/协议
+文档和 README 的行为同步由 Implementer 或 Focused Implementer 负责。详细原始证据保留在规范来源、
+Artifact、Git 或 rollout 记录中；memory 只保留未来恢复所需的简明依据和引用。`CHANGED` 仅表示证据
+变化；当依赖该证据的决策不再可靠时，Controller 可要求重新验证。Reviewer 被选用时检查文档与实现的
+语义偏差。
+`task-promote` 保存 Controller 明确选择的记录；Core 不裁决其 epistemic legitimacy。
+当 Controller 通过 `task-promote` 写入会改变 durable navigation 的记录时，应在同一次
+调用中提供 optional `index_update`。Curator 在单独整理 memory 时负责判断并维护相关导航。
+Core 不生成 INDEX 内容，只机械验证路径、CAS、大小、链接并原子提交。
+若 Codex 在 `SubagentStart` 前明确返回 native spawn failure，Controller 可针对
+该 handoff 调用 `thaliris recover-pending-spawn HANDOFF_ID`；Core 不从缺失事件、超时或重试推测失败。
+
+## Verification 与 task surface
+
+Verification 记录 command/tool、outcome、candidate identity、observed files、
+timestamp 与 result hash。Task surface 记录 start HEAD、dirty baseline、current
+state 与 delta。两者都只提供事实，不成为 correctness、ownership 或 close gate。
+
+## 持久任务授权
+
+Controller 通过 task-start 明确选择实际的人类任务意图、工作边界、不变量、验收条件和执行模式（delegated、controller-direct 或 single-agent），并在项目仓库之外保存任务锚点。当前 Host actor 是否为 Controller 仍可能 UNKNOWN；提示词字段、session 相同、PID、环境或 SessionSource 都不证明人类身份。普通的换轮次、网络、Hook、session 或 daemon 中断后可继续同一任务，无需重复证明 Root 身份。human revocation、任务关闭、Controller abandonment 或 replacement 会结束这项授权。
+
+task-recover-authority 只接受精确的外部 authority hash 与原因；它会归档冲突、恢复记录的字节并 fence 已知旧子角色。它不能把变化的安全配置当作新基线，也不会证明旧进程已终止。更改目标、范围、验收、执行模式、解除 fence 或建立新安全基线需要新的上级人类决定。子角色不能自行授权这些变化。
+
+## 命令
+
+READY 时先在独立步骤创建 UTF-8 JSON contract 文件，再在单独 task-start 调用中传入其绝对路径。
+
+Git repository 中的 substantive work 应先运行已安装的
+`thaliris-run.cmd --root <repo> codex-bootstrap`。若返回 READY，在同一 session
+将返回的 bootstrap receipt 传给 `thaliris-run.cmd --root <repo> task-start "goal" --bootstrap-receipt <receipt> --authority-contract <absolute-path-to-contract.json>`。
+DEFINITION_READY_ACTOR_UNKNOWN 也可用此显式 Controller 操作建立任务意图；
+Host Root 身份仍 UNKNOWN。外部授权保存 human instruction、boundary、invariants、
+acceptance、execution_mode，断线重连无需重复 Root 证明。
+
+```text
+thaliris init
+thaliris-run.cmd --root <repo> task-start "goal" --bootstrap-receipt <receipt> --authority-contract <absolute-path-to-contract.json>
+thaliris task-status
+thaliris task-get OBJECT_ID
+thaliris task-update --role controller --base-revision N --input update.json
+thaliris task-artifact --base-revision N --id A-001 --path path/to/file.md --summary "..."
+thaliris catalog
+thaliris document-get .agent-memory/model-chosen/a.md .milestones/current/status.md
+thaliris task-promote --role controller --base-revision N --input promotion.json
+thaliris task-close --base-revision N
+thaliris task-recover-authority --expected-authority-sha256 <hash> --reason "recover interrupted work"
+thaliris recover-pending-spawn HANDOFF_ID
+thaliris stale
+thaliris rollback BACKUP_ID
+thaliris doctor
+```
+
+`task-promote` 输入中的每条记录必须由 Controller 明确给出 `.agent-memory/**.md`
+目标 path；Core 不按文档 metadata 自动分类。Controller 的 native handoff 是
+被选中 role session 的唯一 task-specific 工作输入。
+
+## ABCD 基准测试结果
+
+我们运行了一项受控的单任务基准测试，以区分**模型能力**、**编排**和**异构智能分配**。A/B/C 使用相同任务、BASE 修订、Codex 版本、隔离的工作区/CODEX_HOME 和环境；D 是此前封存的生产架构运行，没有重新运行。
+
+四个已完成的实验组检验两个主要假设：
+
+**编排收益 — B → C：** 对 Luna-only 系统而言，角色拆分和隔离的多 Agent 执行是否比单个 Luna Agent 更好？
+
+**智能分配收益 — C → D：** 已有编排后，在语义实现、评审和收尾环节有选择地使用更强模型，是否会实质改善结果？
+
+### 结果
+
+| 实验组 | 配置 | 覆盖度 | 正确性 | 兼容性 | 实现 | 验证 | 均值 | 完成情况 | 墙钟时间 | 成本代理值 |<br>
+|---|---|---:|---:|---:|---:|---:|---:|---|---:|---:|
+| **A** | Sol medium，单 Agent | 6 | 4 | 6 | 6 | 7 | **5.8** | 部分 | **21m36s** | **$0.883** |
+| **B** | Luna xhigh，单 Agent | 6 | 5 | 6 | 6 | 4 | **5.4** | 部分 | **54m09s** | **$0.232–0.235** |
+| **C** | Thaliris，Luna-only | 4 | 6 | 7 | 6 | 4 | **5.4** | Managed DONE / 产品部分完成 | **41m11s** | **$0.272** |
+| **D** | Thaliris，异构路由 | **9** | **8** | **8** | **8.5** | **8** | **8.3** | 基本完成；仍有一个 P2 | **64m47s** | **$2.475** |
+| **E?** | D 拓扑，**全 Sol 工作节点** | **9?** | **8?** | **8?** | **8.5?** | **8?** | **8.3?** | 类似 D？ | **64m47s?** | **~$3.67 预测** |
+| **F?** | D + **语义收敛切换** | **9?** | **8?** | **8?** | **8.5?** | **8?** | **8.3?** | 类似 D？ | **64m47s?** | **~$2.06–2.07 预测** |
+
+A/B/C 的独立评分、运行时间和成本测量来自新一轮基准评估。D 最初封存的评估将五个维度都评为 GOOD；上表 8.3/10 是后来用 A/B/C 评分标准对同一个冻结候选做的只读重评。D 的原始运行仍保持封存且未修改。它的生产路由为 Luna Investigator → Sol Focused Implementer → Sol Reviewer → Luna repair → Sol Reviewer → Luna repair。
+
+### Token 结构
+
+cached input 是 input 的子集，不是额外 token。
+
+| 实验组 | 输入 | 缓存 | 新鲜输入 | 输出 | 推理输出 | 模型分布 |
+|---|---:|---:|---:|---:|---:|---|
+| **A** | **3.104M** | 2.962M | 0.142M | 30.3k | 7.1k | 100% Sol medium |
+| **B** | **16.70M** | 16.39M | 0.309M | 79.8k | 46.8k | 100% Luna xhigh |
+| **C** | **15.73M** | 15.03M | 0.695M | 105.0k | 66.3k | 100% Luna xhigh |
+| **D** | **15.22M** | 14.51M | 0.706M | 108.2k | 44.2k | Sol：9.96M 输入 / 64.3k 输出；Luna：5.26M / 43.9k |
+| **E? 全 Sol** | **~15.22M?** | ~14.51M? | ~0.706M? | **~80.9k 预测** | ? | 相同 D 拓扑，Luna 节点替换为 Sol |
+| **F? 语义切换** | **~14.05–14.65M 预测** | ? | ? | **~100.9–108.9k 预测** | ? | Sol ~8.09M 输入；Luna ~5.96–6.56M |
+
+D 的实际用量为 15.219M 输入，其中 14.513M 为缓存。Luna 消耗 5.260M 输入 / 43.9k 输出；Sol 消耗 9.959M 输入 / 64.3k 输出。
+
+### 各实验组的表现
+
+| 实验组 | 优点 | 主要弱点 |
+|---|---|---|
+| **A — Sol 单 Agent** | 运行最快；实现能力强，并自行生成了广泛的验证。 | 单条执行轨迹形成了连贯但不完整的语义模型。测试大多验证了自身假设，遗漏跨表面的所有权、重放和关闭缺陷。 |
+| **B — Luna 单 Agent** | 成本极低。投入更多计算和时间后，Luna 的总分几乎与 A 相同。 | 输入量约为 A 的 5.4 倍，墙钟时间约为 2.5 倍；全局语义收敛和验证较弱。大量计算仍未消除生命周期/authority 缺口。 |
+| **C — Luna 编排** | 角色分工清楚，managed lifecycle 完整；比 B 快约 13 分钟，正确性/兼容性略好。 | **总质量没有比 B 提升。** 覆盖度从 6 降到 4。Treatment review 错误地判定可以关闭，managed task 已到 DONE，但产品验收仍未完成。 |<br>
+| **D — Thaliris 异构模型** | 这是唯一实现了显著更高完成度的配置。独立评审 → 修复 → 再评审确实改变了候选并关闭了缺陷。 | 在已观测实验组中耗时和成本最高。Sol 累积了大量缓存上下文重放；之后仍有一个 P2 presentation-lifecycle 缺陷，真实 GPU/audio/UI 行为也未验证。 |
+
+A/B/C 各自的主要独立缺陷记录在评估材料中：它们分别实现了不同的部分正确方案，并非都以完全相同的方式失败。
+
+### 假设 1 — 编排收益
+
+**方法：** 在实际执行能力固定为 Luna xhigh 时比较 **B 与 C**。B 是单个 Luna Agent；C 使用 Thaliris 角色、隔离的子 Agent 上下文和 managed lifecycle，但所有已观测工作节点都是 Luna xhigh。
+
+**观测结果：**
+
+5.4 → 5.4
+
+没有观察到产品质量提升。C 快了约 **13 分钟**，总 token 略少，但因为未缓存输入更多，估算成本**高约 16–18%**。质量分布发生变化，却没有总体改善：覆盖度 −2，正确性 +1，兼容性 +1。<br>
+
+**结论：** 在这个样本中，单靠编排没有实质增强较弱模型。它展示了工作流/lifecycle 和吞吐量方面的好处，但没有提高总质量。
+
+### 假设 2 — 智能分配收益
+
+**方法：** 比较 **C 与 D**。两者都使用 Thaliris 编排；D 有选择地将 Sol 分配给 Controller、核心语义实现和独立评审，同时保留 Luna 处理调查和有界修复。
+
+**观测结果：**
+
+5.4 → 8.3
+
+评分变化最大的维度为：
+
+覆盖度：4 → 9（+5）<br>
+验证：4 → 8（+4）<br>
+实现：6 → 8.5（+2.5）<br>
+正确性：6 → 8（+2）<br>
+兼容性：7 → 8（+1）<br>
+
+D 的成本约为 C 的 **9.1 倍**，时间约为 **1.57 倍**，但它是唯一显著越过产品完成门槛的实验组。D 没有并行执行；主要可观测机制是反复的 **Reviewer → 有界修复 → 再评审**，而不是 Agent 数量或并行计算。
+
+**结论：** 结果支持的是**选择性智能分配**，而不是“Agent 越多越好”。
+
+### 接下来要验证的两个成本假设
+
+**E — 全 Sol 反事实。** 保持 D 的任务、拓扑、角色顺序和 lifecycle 不变，仅把 Luna Investigator/Implementer 节点替换成 Sol。输入/上下文重放量近似不变；仅按 A/B 输出效率比（79.8k / 30.3k ≈ 2.64×）调整输出。这预测全 Sol 的 D 型运行成本约为 **$3.67**，相对于**观测到的 $2.475**，若保持 D 级质量，异构执行约可节省 **32.6%**。不做输出效率调整时，简单的同 token 估算约为 **$3.94**。这仍是反事实，尚未运行。
+
+**F — 语义收敛切换。** 保留 D 的架构和高能力语义节点，但在 Sol Focused Implementer 建立核心实现和硬不变量后结束其执行。广泛测试、构建/lint 收尾、确定性的兼容问题和小修复交给新的 Luna Implementer；新的 Sol Reviewer 仍负责语义验收。基于 trace 的估算移除约 **1.87M Sol 输入 / 15.3k Sol 输出**，增加约 **0.7–1.3M Luna 输入 / 8–16k 输出**，预测成本为 **~$2.06–2.07**，比 D 低约 **16–17%**，目标是同样的 8.3 水平。实际测试前，质量仍明确未知。
+
+### 结语
+
+当前基准支持一个比“多 Agent 更好”更窄的结论：
+
+> **弱模型编排本身没有改善总质量。把更强智能有选择地放在语义实现、评审和收尾环节，确实带来了提升。**
+
+它也指出了下一步优化目标：**不是减少高能力实现，而是缩短昂贵上下文的生命周期**。高能力模型应继续用于执行期间确实需要其推理的工作；语义方案收敛后，可以把确定性的收尾交给成本更低的新工作节点，避免反复重放庞大的 Sol 上下文。
+
+## Benchmark 边界
+
+`benchmarks/abcd/` 可以包含复杂 collector、formal authority 与离线评分。
+Production `thaliris` package 不依赖 D11、formal registry、capture authority 或
+benchmark receipt issuer。Benchmark 观察 production；它不定义 production 架构。
+
+完整契约见 [DESIGN.md](DESIGN.md) 与
+[docs/thaliris-routing-protocol.md](docs/thaliris-routing-protocol.md)。
+
+## README 维护
+
+共享说明和完整 ABCD 结果以 [Thaliris Core 中文 README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md)与[英文 README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.en.md)为准。本仓库只记录 Codex 特有的功能、依赖和限制；共同内容变更应同步 Core 两种语言版本，并保持本仓库中英文 README 对齐。
