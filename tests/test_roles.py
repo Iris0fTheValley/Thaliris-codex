@@ -486,8 +486,8 @@ def test_workstream_scheduling_granularity_acceptance_is_explicit() -> None:
 
     contract = " ".join(normalized_documents)
     acceptance = (
-        "within a stable workstream, the same implementer session may complete multiple local closures",
-        "a local verification pass does not require returning to root",
+        "within a stable workstream, the ordinary implementer session may complete multiple local closures",
+        "a local verification pass does not by itself end a workstream or require a role switch",
         "ordinary test fixes",
         "generated or documentation synchronization",
         "integration checks",
@@ -500,16 +500,20 @@ def test_workstream_scheduling_granularity_acceptance_is_explicit() -> None:
         "if new evidence changes task direction, ownership, observable semantics",
         "the child stops and returns the concrete unknown in final",
         "execution authority",
-        "cannot expand controller-assigned scope",
+        "never expands controller-assigned scope",
         "no child acts as a second semantic controller",
         "do not use file, tool, token, time, or local-closure counts to end a workstream",
     )
     assert all(phrase in contract for phrase in acceptance)
 
-    for role in ("implementer", "focused-implementer"):
-        instructions = " ".join(roles.get_role(role).instructions.split()).lower()
-        assert "same authorized implementer session" in instructions
-        assert "a local verification pass does not require returning to root" in instructions
+    ordinary = " ".join(roles.get_role("implementer").instructions.split()).lower()
+    focused = " ".join(roles.get_role("focused-implementer").instructions.split()).lower()
+    assert "ordinary implementer may include multiple routine local closures in the same authorized session" in ordinary
+    assert "this same-session closure guidance applies to the ordinary implementer" in ordinary
+    assert "this same-session closure guidance applies to the ordinary implementer" in focused
+    assert "role-specific endpoint overrides the shared same-session closure guidance" in focused
+    for instructions in (ordinary, focused):
+        assert "a local verification pass" in instructions
         assert "only within the assigned semantic workstream" in instructions
         assert "do not use file, tool, token, time, or local-closure counts" in instructions
 
@@ -677,9 +681,10 @@ def test_focused_implementer_reads_known_sources_and_delegates_discovery() -> No
         "removes the discovery working set",
         "wait only while the scanner is known unfinished",
         "do not wait on that scanner again or repeat its discovery pass",
-        "continue complex implementation within the assigned workstream across local execution checkpoints",
+        "continue core implementation across local checkpoints only while the next step could still change the core semantic solution",
         "owns semantic convergence of its implementation candidate",
         "core implementation and hard invariants in place",
+        "no remaining work is likely to materially change the causal model, accepted architecture, contract, scope, acceptance, or direction",
         "a focused-test pass alone does not meet this boundary or trigger a role switch",
         "exact source locations or diff",
         "focused evidence and its limits",
@@ -718,18 +723,20 @@ def test_focused_implementer_reads_known_sources_and_delegates_discovery() -> No
         "removes an independent working set",
         "wait only while the scanner is known unfinished",
         "do not wait on it again or repeat its discovery pass",
-        "continue complex implementation within the assigned workstream across local checkpoints when it still benefits from focused reasoning",
+        "continue core implementation across local checkpoints only while the next step could still change the core semantic solution",
         "owns semantic convergence of its implementation candidate",
         "a focused-test pass alone does not meet this boundary or trigger a role switch",
         "core implementation and hard invariants are in place",
         "decision-changing unknowns are resolved",
         "focused evidence demonstrates the candidate's core semantics",
-        "remaining work is unlikely to change the causal model, scope, acceptance, or direction",
+        "no remaining work is likely to materially change the causal model, accepted architecture, contract, scope, acceptance, or direction",
         "exact source locations or diff",
         "focused evidence and its limits",
         "explicit remaining tasks",
         "acceptance, and the escalation boundary",
-        "documentation, generated output, configuration, installation, host smoke checks, fixtures, and git closure",
+        "include any check needed to prove core semantics before returning the handoff",
+        "ordinary regression, lint, build, generated or documentation synchronization, mechanical compatibility, small deterministic fixes, installation, and git closure belong to a fresh ordinary implementer workstream",
+        "role-specific endpoint overrides the shared same-session closure guidance",
         "installation or smoke feedback that exposes a semantic defect stays with focused implementer",
         "after a child returns final, it is complete and cannot be resumed",
         "accepted architecture or causal model, security boundary, hard invariant",
@@ -745,7 +752,9 @@ def test_focused_implementer_reads_known_sources_and_delegates_discovery() -> No
         "sol focused implementer profile",
         "astra focused implementer profile",
         "owns semantic convergence of its implementation candidate",
-        "documentation, generated output, configuration, installation, host smoke checks, fixtures, and git closure",
+        "no remaining work is likely to materially change the causal model, accepted architecture, contract, scope, acceptance, or direction",
+        "role-specific endpoint overrides the shared same-session closure guidance",
+        "ordinary regression, lint, build, generated or documentation synchronization, mechanical compatibility, small deterministic fixes, installation, and git closure belong to a fresh ordinary implementer workstream",
     )
     for rendered in _normalized_contract_sources()[0:1] + _normalized_contract_sources()[2:4] + _normalized_contract_sources()[-1:]:
         assert all(phrase in rendered for phrase in propagated)
@@ -775,7 +784,7 @@ def test_current_focused_profile_bytes_remain_upgradeable_by_exact_identity() ->
         model, effort, role = profiles[name]
         value = tomllib.loads(codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode())
         assert value["developer_instructions"] == roles.profile_instructions("focused-implementer", name.removesuffix(".toml"))
-        assert "continue complex implementation within the assigned workstream across local execution checkpoints" in value["developer_instructions"].lower()
+        assert "continue core implementation across local checkpoints only while the next step could still change the core semantic solution" in value["developer_instructions"].lower()
 
 
 def test_ec1ad7b_project_focused_profiles_have_exact_historical_ownership() -> None:
@@ -786,7 +795,8 @@ def test_ec1ad7b_project_focused_profiles_have_exact_historical_ownership() -> N
         assert codex_adapter._agent_profile_state(historical + b"\nuser edit\n", name) == "user"
         other_name = next(other for other in codex_adapter._EC1AD7B_FOCUSED_PROFILE_HASHES if other != name)
         assert codex_adapter._agent_profile_state(historical, other_name) == "user"
-        assert codex_adapter._agent_profile_state(Path(".codex/agents", name).read_bytes(), name) == "current"
+        # Project-local .codex profiles are ignored user state. The generated
+        # current template is verified below without relying on those files.
 
 
 def test_pre_split_host_profiles_migrate_by_exact_historical_identity() -> None:
@@ -944,6 +954,44 @@ def test_shared_child_instructions_exclude_controller_routing_and_model_choice()
         assert "within the assigned semantic workstream" in instructions
 
 
+def test_implementation_packet_preserves_acceptance_and_leaves_method_local() -> None:
+    required = (
+        "goal, confirmed facts and source of truth",
+        "starting state and modification boundary",
+        "original acceptance and semantic stopping condition",
+        "direction-changing unknowns",
+        "material known execution-path constraints",
+        "controller resolves task ambiguity that can be settled from the request and confirmed facts",
+        "does not prescribe the implementation algorithm",
+        "specific discrepancy or transformation",
+        "stop when the original acceptance is met",
+        "do not pursue defect-free refinement or reinvestigate an established source of truth",
+    )
+    for role in ("implementer", "focused-implementer"):
+        prompt = " ".join(roles.get_role(role).instructions.split()).lower()
+        assert all(phrase in prompt for phrase in required)
+    for rendered in _normalized_contract_sources():
+        assert all(phrase in rendered for phrase in required)
+
+
+def test_reviewer_is_optional_evidence_based_and_nonwriting() -> None:
+    reviewer = " ".join(roles.get_role("reviewer").instructions.split()).lower()
+    required = (
+        "original acceptance, hard invariants, and affected cross-boundary behavior",
+        "not only the internal diff",
+        "if a critical acceptance claim is unverified, report unknown or insufficient evidence",
+        "never call the candidate ready merely because no blocker was found",
+        "do not invent generic tests, gates, or missing scope",
+        "finding, invariant, affected surface, and needed validation",
+        "do not include review history, transcripts, or the private working set",
+        "do not write or repair the candidate",
+    )
+    assert all(phrase in reviewer for phrase in required)
+    for rendered in _normalized_contract_sources()[1:2] + _normalized_contract_sources()[-2:-1]:
+        assert "original acceptance, hard invariants, and affected cross-boundary behavior" in rendered
+        assert "unverified critical acceptance" in rendered
+
+
 def test_focused_roles_keep_local_judgment_bounded_and_prefer_scanner_evidence() -> None:
     reviewer_required = (
         "bounded local reading needed for semantic judgment",
@@ -974,7 +1022,8 @@ def test_focused_roles_keep_local_judgment_bounded_and_prefer_scanner_evidence()
         "file, token, or search-count threshold",
         "small local searches may be direct",
         "delegate when doing so removes the discovery working set",
-        "continue complex implementation within the assigned workstream across local execution checkpoints",
+        "continue core implementation across local checkpoints only while the next step could still change the core semantic solution",
+        "role-specific endpoint overrides the shared same-session closure guidance",
     )
     focused = roles.get_role("focused-implementer").instructions.lower()
     assert all(phrase in focused for phrase in focused_required)
@@ -1004,7 +1053,7 @@ def test_focused_roles_keep_local_judgment_bounded_and_prefer_scanner_evidence()
         "small local searches may be direct",
         "with the sol focused implementer profile, consider offloading",
         "with an astra focused implementer profile, explore evidence needed for the current workstream directly",
-        "continue complex implementation within the assigned workstream across local checkpoints",
+        "continue core implementation across local checkpoints only while the next step could still change the core semantic solution",
     )
     assert all(phrase in rendered for phrase in docs_required)
     assert "remaining execution, local code judgment, tests, synchronization, and mechanical consistency" in rendered
@@ -1019,7 +1068,6 @@ def test_executors_batch_workstream_and_scale_verification() -> None:
         "avoid per-patch, per-read, or per-grep reasoning rounds",
         "match verification to the changed behavior and its concrete regression surface",
         "focused checks for the changed contract, generated output, and acceptance",
-        "without a failure, anomaly, or new broader-risk evidence, continue any remaining assigned local closures within the workstream",
         "broaden",
         "concrete compatibility or integration risk",
         "rerun the smallest acceptance-relevant range",
@@ -1030,9 +1078,30 @@ def test_executors_batch_workstream_and_scale_verification() -> None:
     for role in ("implementer", "focused-implementer"):
         prompt = " ".join(roles.get_role(role).instructions.lower().split())
         assert all(phrase in prompt for phrase in executor_phrases)
-
+    ordinary = " ".join(roles.get_role("implementer").instructions.lower().split())
+    focused = " ".join(roles.get_role("focused-implementer").instructions.lower().split())
+    assert "ordinary implementer may continue remaining assigned local closures" in ordinary
+    assert "focused implementer continues only while verification or repair could still change the core semantic solution" in ordinary
+    assert "focused implementer continues only while verification or repair could still change the core semantic solution" in focused
+    assert "continue any remaining assigned local closures within the workstream" not in focused
+    assert "after fixing a test failure, rerun the smallest acceptance-relevant range and continue the workstream" not in focused
     for rendered in _normalized_contract_sources():
-        assert all(phrase in rendered for phrase in executor_phrases)
+        assert "focused checks for the changed contract, generated output, and acceptance" in rendered
+        assert "continue any remaining assigned local closures within the workstream" not in rendered
+        assert "after fixing a test failure, rerun the smallest acceptance-relevant range and continue the workstream" not in rendered
+    global_instructions = " ".join(codex_adapter._global_agents_block().decode("utf-8").lower().split())
+    assert "continue any remaining assigned local closures within the workstream" not in global_instructions
+    assert "after fixing a test failure, rerun the smallest acceptance-relevant range and continue the workstream" not in global_instructions
+    assert "role-specific endpoint overrides the shared same-session closure guidance" in global_instructions
+
+    for name, (model, effort, role) in roles.agent_profiles().items():
+        if role != "focused-implementer":
+            continue
+        instructions = tomllib.loads(
+            codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode("utf-8")
+        )["developer_instructions"].lower()
+        assert "continue any remaining assigned local closures within the workstream" not in instructions
+        assert "continue only verification or repair that could still change the core semantic solution" in instructions
 
 
 def test_exact_phase_two_profile_bytes_are_recognized_only_for_own_role() -> None:
@@ -1408,6 +1477,9 @@ def test_knowledge_maintenance_and_formal_docs_stay_in_instruction_sources() -> 
         "Keep currently relevant knowledge discoverable first",
         "maintain durable INDEX navigation",
         "Curator makes the corresponding semantic navigation judgment",
+        "The ordinary Implementer synchronizes formal project documentation",
+        "Focused Implementer synchronizes those documents only when needed to establish core semantics",
+        "after its endpoint, deterministic documentation synchronization belongs to a fresh ordinary Implementer Workstream",
     ):
         assert phrase in normalized_packs
     normalized_curator = " ".join(curator.split()).lower()
@@ -1436,10 +1508,21 @@ def test_knowledge_maintenance_and_formal_docs_stay_in_instruction_sources() -> 
     assert "do not keep or return a separate memory-candidate list" in focused
     assert "Executors do not maintain durable INDEX navigation" in implementer
     assert "Executors do not maintain durable INDEX navigation" in focused
-    assert "formal project documentation" in implementer
-    assert "formal project documentation" in focused
+    assert "keep formal project documentation" in implementer.lower()
+    assert "focused implementer synchronizes formal project documentation only when the documentation is needed to establish core semantics" in focused.lower()
+    assert "keep formal project documentation" not in focused.lower()
+    assert "once the semantic endpoint is reached, deterministic documentation synchronization belongs to a fresh ordinary implementer workstream" in focused.lower()
     assert "README" in implementer
-    assert "README" in focused
+    assert "README" not in focused
+    for profile_name in (
+        "thaliris-focused-implementer",
+        "thaliris-focused-implementer-astra-medium",
+        "thaliris-focused-implementer-xhigh",
+    ):
+        composed = " ".join(roles.profile_instructions("focused-implementer", profile_name).lower().split())
+        assert "focused implementer synchronizes formal project documentation only when the documentation is needed to establish core semantics" in composed
+        assert "keep formal project documentation" not in composed
+        assert "once the semantic endpoint is reached, deterministic documentation synchronization belongs to a fresh ordinary implementer workstream" in composed
     assert "semantic drift" in reviewer
     assert "semantic drift" in packs
     for path in ("AGENTS.md", "docs/thaliris-routing-protocol.md"):

@@ -52,20 +52,24 @@ session; it does not create another role or semantic Controller. A semantic
 checkpoint is not necessarily a scheduling checkpoint. Root routes workstreams.
 Executors close local loops inside them.
 
-Within a stable Workstream, the same Implementer session may complete multiple
-local closures: batch relevant reads, plan, implement, run focused verification,
-fix ordinary in-scope failures, synchronize generated output and documentation,
-run needed integration verification, inspect diff and status, and complete
-assigned Git closure. These are available execution checkpoints, not a mandatory
-bundle. A local verification PASS does not require returning to Root or
-switching roles. Root chooses the semantic boundary and may assign a separate
+Within a stable Workstream, the ordinary Implementer session may complete
+multiple local closures: batch relevant reads, plan, implement, run focused
+verification, fix ordinary in-scope failures, synchronize generated output and
+documentation, run needed integration verification, inspect diff and status,
+and complete assigned Git closure. These are available execution checkpoints,
+not a mandatory bundle. This same-session guidance does not extend the Focused
+Implementer's semantic endpoint below. A local verification PASS does not by
+itself end a Workstream or require a role switch. Root chooses the semantic boundary and may assign a separate
 closure Workstream when the remainder is independently deterministic. A new semantic Workstream may use a different role; the profile chosen for one
 Workstream does not bind the task's remaining operational work. Ordinary
 test fixes, generated or documentation synchronization, integration checks,
 and assigned Git closure are not automatically separate semantic routing
 boundaries. Local deterministic failures in paths, arguments, manifests,
 generated files, installation environment, documentation, fixtures, or Git may
-be fixed by the current executor within its assignment. The child retains
+be fixed by the ordinary Implementer within its assignment. Focused Implementer
+may fix them only while the correction could still change the core semantic
+solution; after its endpoint, the Controller can assign a fresh ordinary closure
+Workstream. The child retains
 execution authority only within the assigned goal, scope, invariants, and
 acceptance; this authority never expands Controller-assigned scope.
 Very small direct routine operations need no ceremonial child handoff when the
@@ -120,32 +124,44 @@ useful. There is no per-read delegation deliberation or file, token, or
 search-count threshold; small local searches may be direct. Delegate when
 doing so removes the discovery working set and leaves reasoning and
 implementation with the Focused Implementer. After delegating, it waits for the
-distilled result and does not repeat the discovery pass. It continues complex
-implementation within the assigned Workstream across local checkpoints when
-that work still benefits from focused reasoning. A local verification PASS
-does not force a return to Root or switch models. Focused Implementer owns
-semantic convergence of its implementation candidate. It may return FINAL once
-core implementation and hard invariants are in place, decision-changing
-unknowns are resolved, focused evidence demonstrates the candidate's core
-semantics, the candidate is internally coherent, and remaining work is unlikely
-to change the causal model, scope, acceptance, or direction. A focused-test
-PASS alone does not meet this boundary or trigger a role switch. The FINAL
+distilled result and does not repeat the discovery pass. Continue core
+implementation across local checkpoints only while the next step could still
+change the core semantic solution; a local verification PASS alone is not the
+endpoint. Focused Implementer owns semantic convergence of its implementation
+candidate. It may return FINAL once core implementation and hard invariants are
+in place, decision-changing unknowns are resolved, focused evidence demonstrates
+the candidate's core semantics, the candidate is internally coherent, and no
+remaining work is likely to materially change the causal model, accepted
+architecture, contract, scope, acceptance, or direction. A focused-test PASS
+alone does not meet this boundary or trigger a role switch. The FINAL
 handoff identifies candidate state and exact source locations or diff,
 invariants satisfied, focused evidence and its limits, explicit remaining
-tasks, acceptance, and the escalation boundary. Documentation, generated
-output, configuration, installation, Host smoke checks, fixtures, and Git
-closure are not automatically required before this handoff; include any check
-needed to prove core semantics. Installation or smoke feedback that exposes a
-semantic defect stays with Focused Implementer while needed to establish the
-candidate. The Controller decides whether remaining work still needs the core
-reasoning or is an independent deterministic closure for an ordinary
-Implementer. Coupled work may stay in the active Focused Workstream. After a
+tasks, acceptance, and the escalation boundary. Include any check needed to
+prove core semantics before returning the handoff. Continue only verification
+or repair that could still change the core semantic solution. Once this endpoint
+is reached, ordinary regression, lint, build, generated or documentation
+synchronization, mechanical compatibility, small deterministic fixes,
+installation, and Git closure belong to a fresh ordinary Implementer Workstream
+when assigned. This role-specific endpoint overrides the shared same-session
+closure guidance. Installation or smoke feedback that exposes a semantic defect
+stays with Focused Implementer while it could change the core solution. After a
 child returns FINAL, it is complete and cannot be resumed; further work
 requires a fresh session and Controller handoff. If evidence changes the
 accepted architecture or causal model, security boundary, hard invariant,
 compatibility, scope, acceptance, or direction, return
 the issue to Root without redesigning it.
-The Controller makes each child handoff decision-complete enough to close one
+Before an ordinary implementation handoff, the Controller resolves task
+ambiguity that can be settled from the request and confirmed facts. The packet
+includes Goal, confirmed facts and source of truth, starting state and
+modification boundary, original acceptance and semantic stopping condition,
+hard invariants, Controller-decided boundaries/contracts, direction-changing
+unknowns, and material known execution-path constraints. Recommendations and
+advice are non-binding; the packet does not prescribe the implementation
+algorithm, and local method choices belong to the assigned role. For open-ended cleanup,
+documentation, synchronization, or migration, identify the specific discrepancy
+or transformation and bound its scope. Stop when the original acceptance is met;
+do not pursue defect-free refinement or reinvestigate an established source of truth. The
+Controller makes each child handoff decision-complete enough to close one
 semantic Workstream without routine steering. Do not keep a child as a long-lived
 interactive workspace. If new decision-changing information invalidates the
 Workstream, the child closes with a distilled FINAL containing the unknown, and
@@ -156,7 +172,17 @@ Scanner working pattern batches related searches and reads, returns compact
 facts, and once evidence is sufficient stops immediately; do not expand the
 scan for one more confirmation.
 Use a Reviewer only when independent semantic review adds real
-value; it is not a default gate. Use Reasoning Specialist as an optional,
+value; it is not a default gate. Reviewer is independent and non-writing: check
+the original acceptance, hard invariants, and affected cross-boundary behavior,
+not only the internal diff. If critical acceptance remains unverified, report
+UNKNOWN or insufficient evidence; never call the candidate READY only because
+no blocker was found. Tie evidence gaps to accepted criteria and do not invent
+generic tests, gates, or missing scope. A bounded defect with accepted semantics
+unchanged can go to a fresh ordinary correction handoff; a decision-basis change
+returns to the Controller. Provide that repair handoff with the finding,
+invariant, affected surface, and needed validation, without review history,
+transcripts, or private working material. Reviewer does not repair. Use
+Reasoning Specialist as an optional,
 independent metacognitive challenger when a challenge may materially change
 direction. Test framing, hidden assumptions, causal models, decomposition,
 boundaries, decision basis, and premature convergence; this includes apparently
@@ -301,11 +327,12 @@ Avoid per-patch, per-read, or per-grep reasoning rounds unless new information
 could change direction. Match verification to the changed behavior and its
 concrete regression surface. Start with focused checks for the changed
 contract, generated output, and acceptance. If those pass without a failure,
-anomaly, or new broader-risk evidence, continue any remaining assigned local
-closures within the Workstream. Broaden checks only for a concrete
-compatibility or integration risk. After fixing a test failure, rerun the
-smallest acceptance-relevant range and continue the Workstream. A commit, push,
-or final report alone does not call for another test run. Do not use counts,
+anomaly, or new broader-risk evidence, the ordinary Implementer may continue
+remaining assigned local closures. Focused Implementer continues only while
+verification or repair could still change the core semantic solution. Broaden
+checks only for a concrete compatibility or integration risk. After fixing a
+test failure, rerun the smallest acceptance-relevant range. A commit, push, or
+final report alone does not call for another test run. Do not use counts,
 time, file or token limits, or a stopping state machine.
 Controller may spawn registered roles. Implementer, Focused Implementer, and
 Reviewer may each spawn only a fresh Investigator doing Scanner work. Investigator,
