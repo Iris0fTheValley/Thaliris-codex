@@ -2263,7 +2263,7 @@ def _global_agents_block(executable: Path | None = None, executable_sha256: str 
     script = _codex_home(codex_home) / HOST_RUN_SCRIPT_NAME
     quoted = str(script).replace("'", "''")
     trusted_route = f"`& '{quoted}' --root <repo> codex-bootstrap`" if os.name == "nt" else f"`'{quoted}' --root <repo> codex-bootstrap`"
-    task_route = f"`& '{quoted}' --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-contract-file-path>'`" if os.name == "nt" else f"`'{quoted}' --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-contract-file-path>'`"
+    task_route = f"`& '{quoted}' --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-file-path>'`" if os.name == "nt" else f"`'{quoted}' --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-file-path>'`"
     return f"""<!-- thaliris:global:begin -->
 ## Thaliris project startup
 
@@ -2280,7 +2280,7 @@ file in a separate tool call. Its non-mode fields are nonempty strings; set
 `execution_mode` to `delegated`, `controller-direct`, or `single-agent` according
 to the human instruction. `--authority-contract` takes a file path, not inline
 JSON. Then run this standalone direct invocation in a separate tool call, using
-the returned `task_start_receipt` and the quoted absolute contract file path:
+the returned `task_start_receipt` and the literal quoted absolute contract file path:
 {task_route}. Do not combine task-start with bootstrap or another command.
 The JSON file selects the actual human instruction, boundary, invariants,
 acceptance and execution mode.
