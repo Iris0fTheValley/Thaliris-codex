@@ -1,3 +1,4 @@
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall, legacy_file_hashes
 """Prompt contract concepts and ownership, not historical paragraph wording.
 
 No model invocation: these tests prove emitted instruction contracts and safe
@@ -219,20 +220,24 @@ def test_pre_normalization_luna_profiles_upgrade_and_remove_only_owned_bytes(
     wrong_target.write_bytes(wrong_filename_bytes)
     assert adapter._agent_profile_state(wrong_filename_bytes, wrong_name) == "user"
 
-    installed = adapter.codex_install(execution_constraint=execution_constraint)
-    assert str(agents / edited_name) in installed["manual_action_required"]
-    assert str(wrong_target) in installed["manual_action_required"]
-    for name in ("thaliris-reasoning-specialist.toml", "thaliris-reviewer.toml"):
-        assert adapter._agent_profile_state((agents / name).read_bytes(), name, execution_constraint) == "current"
-        assert f"agents/{name}" in installed["files"]
+    before = {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()}
+    installed = authorized_host_install(
+        tmp_path, pinned_test_thaliris, execution_constraint=execution_constraint,
+        _legacy_owned_bytes=legacy_file_hashes(
+            home, [f"agents/{name}" for name in set(historical) - {edited_name, wrong_name}]
+        ),
+    )
+    assert installed["ok"] is False
+    assert installed["changed"] is False
+    assert installed["manual_action_required"]
     assert (agents / edited_name).read_bytes() == edited
     assert wrong_target.read_bytes() == wrong_filename_bytes
+    assert {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()} == before
 
-    removed = adapter.codex_uninstall()
-    expected_removed = set(roles.agent_profiles()) - {edited_name, wrong_name}
-    assert all(f"agents/{name}" in removed["files"] for name in expected_removed)
-    assert not (agents / "thaliris-reasoning-specialist.toml").exists()
-    assert not (agents / "thaliris-reviewer.toml").exists()
+    removed = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
+    assert removed["ok"] is True
+    assert removed["changed"] is False
+    assert {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()} == before
     assert (agents / edited_name).read_bytes() == edited
     assert wrong_target.read_bytes() == wrong_filename_bytes
 

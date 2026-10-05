@@ -1,3 +1,4 @@
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall, legacy_file_hashes
 """Execution policy changes native bindings, never semantic authority."""
 import hashlib
 import json
@@ -265,11 +266,17 @@ def test_constraint_install_preserves_unknown_profile_bytes(tmp_path, monkeypatc
     install_profiles(home, None)
     target = home / "agents" / "thaliris-reviewer.toml"
     target.write_bytes(target.read_bytes() + b"\n# user edit")
-    before = target.read_bytes()
-    result = codex_adapter.codex_install(execution_constraint="luna-only")
-    assert str(target) in result["manual_action_required"]
-    assert target.read_bytes() == before
-    assert result["host_profile_definition_present"] == "NO"
+    before = {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris, execution_constraint="luna-only",
+        _legacy_owned_bytes=legacy_file_hashes(
+            home, [f"agents/{name}" for name in roles.agent_profiles() if name != target.name]
+        ),
+    )
+    assert result["ok"] is False
+    assert result["changed"] is False
+    assert any(str(target) in item for item in result["manual_action_required"])
+    assert {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
 
 
 def test_constrained_installation_diagnostics_and_owned_removal(tmp_path, monkeypatch, pinned_test_thaliris):
@@ -279,13 +286,13 @@ def test_constrained_installation_diagnostics_and_owned_removal(tmp_path, monkey
     home = tmp_path / "host"
     monkeypatch.setenv("CODEX_HOME", str(home))
     codex_adapter.init(root)
-    result = codex_adapter.codex_install(execution_constraint="luna-only")
+    result = authorized_host_install(tmp_path, pinned_test_thaliris, execution_constraint="luna-only")
     assert result["ok"]
     diagnostic = codex_adapter.doctor(root)
     assert diagnostic["role_registry"]["installed_execution_constraint"] == "luna-only"
     assert all(p["ownership"] == "current" and p["expected"] == p["actual"]
                for p in diagnostic["drift_evidence"]["profile_definitions"])
-    result = codex_adapter.codex_uninstall()
+    result = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
     assert all(f"agents/{name}" in result["files"] for name in roles.agent_profiles())
 
 

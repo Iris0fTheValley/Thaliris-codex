@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 from . import __version__
-from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles
+from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity
 from thaliris.core import TaskStateSchemaIncompatible, artifact_get, catalog, document_get, milestone_check, rollback, stale, task_artifact, task_get, task_promote, task_show, task_status, task_update
 
 
@@ -76,7 +76,15 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--executable", help="absolute Thaliris executable for Host hooks")
     install.add_argument("--sha256", help="exact SHA-256 pin for --executable")
     install.add_argument("--execution-constraint", choices=roles.EXECUTION_CONSTRAINTS, help="install constrained execution bindings for the same semantic roles; tasks must explicitly select the matching constraint")
-    sub.add_parser("codex-uninstall", help="remove only Thaliris-owned Host integration")
+    install.add_argument("--maintenance-contract", required=True, metavar="FILE", help="UTF-8 JSON selecting actual human Host maintenance intent and immutable candidate")
+    remove = sub.add_parser("codex-uninstall", help="remove only Thaliris-owned Host integration")
+    remove.add_argument("--maintenance-contract", required=True, metavar="FILE")
+    plan = sub.add_parser("codex-maintenance-plan", help="inspect identities and propose a Host maintenance contract without approving ownership")
+    plan.add_argument("operation", choices=("codex-install", "codex-uninstall"))
+    plan.add_argument("--executable", required=True)
+    plan.add_argument("--source-pin", required=True)
+    plan.add_argument("--human-instruction", required=True)
+    plan.add_argument("--execution-constraint", choices=roles.EXECUTION_CONSTRAINTS)
     q = sub.add_parser("codex-bootstrap", help="perform one-shot project-external Codex bootstrap")
     q.add_argument("--hook-attestation", help=argparse.SUPPRESS)
     q = sub.add_parser("catalog", help="discover bounded durable document metadata")
@@ -197,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         root = args.root.resolve()
-        if args.command not in {"audit-hook", "codex-bootstrap", "task-status", "doctor", "version", "codex-install", "codex-uninstall", "task-recover-authority"}:
+        if args.command not in {"audit-hook", "codex-bootstrap", "task-status", "doctor", "version", "codex-install", "codex-uninstall", "codex-maintenance-plan", "task-recover-authority"}:
             task_authority.check(root)
         if args.command == "audit-hook":
             try:
@@ -210,8 +218,46 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "init": out = codex_adapter.init(root, accept_managed_instruction_sha256=args.accept_managed_instruction_sha256)
         elif args.command == "bootstrap-check": out = codex_adapter.bootstrap_check(root)
-        elif args.command == "codex-install": out = codex_adapter.codex_install(executable=args.executable, executable_sha256=args.sha256, execution_constraint=args.execution_constraint)
-        elif args.command == "codex-uninstall": out = codex_adapter.codex_uninstall()
+        elif args.command in {"codex-install", "codex-uninstall"}:
+            intent = host_maintenance.contract(args.maintenance_contract, args.command, codex_adapter._codex_home())
+            executor, executor_bytes = host_maintenance.selected_runtime(intent["executor"])
+            if Path(json.loads(executor_bytes)["package_dir"]).resolve() != Path(__file__).resolve().parent:
+                raise ValueError("Host maintenance executor import origin differs from approved identity")
+            interpreter = executor.parent / ("python.exe" if sys.platform == "win32" else "python")
+            invoked = Path(sys.argv[0])
+            # pip's Windows console launcher removes its .exe suffix in the
+            # embedded __main__.py before calling this entry point.
+            if sys.platform == "win32" and executor.suffix == ".exe" and invoked.suffix != ".exe":
+                invoked = Path(str(invoked) + ".exe")
+            if Path(sys.executable).resolve() != interpreter.resolve() or invoked.resolve() != executor:
+                raise ValueError("Host maintenance must run the exact approved standalone executor")
+            if args.command == "codex-install":
+                out = codex_adapter.codex_install(executable=args.executable, executable_sha256=args.sha256, execution_constraint=args.execution_constraint, maintenance_contract=args.maintenance_contract)
+            else:
+                out = codex_adapter.codex_uninstall(maintenance_contract=args.maintenance_contract)
+        elif args.command == "codex-maintenance-plan":
+            home = codex_adapter._codex_home()
+            executable = Path(args.executable).resolve(strict=True)
+            selected = {"executable": str(executable),
+                "runtime_sha256": host_maintenance.digest(runtime_identity.manifest_bytes(executable)),
+                "source_pin": args.source_pin}
+            host_maintenance.selected_runtime(selected)
+            prior = host_maintenance._installed(home)
+            values = host_maintenance._files(home)
+            snapshot = {name: host_maintenance.digest(value) for name, value in values.items()
+                        if name not in {"AGENTS.md", "thaliris-install.json", host_maintenance.RECEIPT_NAME}}
+            global_span = host_maintenance._global_owned_bytes(values.get("AGENTS.md", b""))
+            if global_span is not None:
+                snapshot["AGENTS.md#global"] = host_maintenance.digest(global_span)
+            intent = {"format": host_maintenance.FORMAT, "operation": args.operation,
+                "codex_home": str(home), "human_instruction": args.human_instruction,
+                "executor": selected, "installed_runtime_sha256": host_maintenance.digest(prior) if prior else "ABSENT",
+                "legacy_owned_bytes": {}}
+            if args.operation == "codex-install":
+                intent.update(candidate=selected, execution_constraint=args.execution_constraint)
+            out = {"ok": True, "maintenance_contract": intent,
+                "ownership_review_snapshot": snapshot, "ownership_approved": False,
+                "host_actor_assurance": "UNKNOWN", "project_files_touched": []}
         elif args.command == "codex-bootstrap":
             try:
                 out = codex_bootstrap.bootstrap(root, args.hook_attestation) if args.hook_attestation else codex_bootstrap.bootstrap(root)

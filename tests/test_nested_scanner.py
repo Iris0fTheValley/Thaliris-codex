@@ -10,6 +10,7 @@ fixtures for other cases; raw Host wire-byte equality and other Host/Desktop
 behavior remain UNKNOWN.
 """
 from __future__ import annotations
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall, legacy_file_hashes
 
 import json
 import hashlib
@@ -520,7 +521,12 @@ def test_independent_phase_two_profile_migration_and_user_edits(tmp_path, monkey
     assert hashlib.sha256(packs).hexdigest() == "0a51833bf936b14053c08a6502a6a1d27ecd1518263e7eea5c4e43f53fa1c5f1"
     assert codex_adapter._role_pack_state(packs) == "legacy"
     (tmp_path / "docs" / "thaliris-role-packs.md").write_bytes(packs)
-    install = codex_adapter.codex_install()
+    install = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/thaliris-{role}.toml" for role in roles._PHASE_TWO_PROFILE_HASHES]
+        ),
+    )
     assert install["host_profile_definition_present"] == "YES"
     assert install["host_role_catalog_status"] == "HOST_ROLE_CATALOG_UNKNOWN"
     migrated = {f"thaliris-{role}.toml" for role in roles._PHASE_TWO_PROFILE_HASHES}

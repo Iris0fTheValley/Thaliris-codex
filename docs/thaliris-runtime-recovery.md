@@ -1,12 +1,14 @@
 # Runtime drift and administrative recovery
 
-Thaliris 0.4.2 follows Detect -> Diagnose -> Decide -> Repair/Accept -> Continue.
+Thaliris follows Detect -> Diagnose -> Decide -> Repair/Accept -> Continue.
 Runtime drift is evidence for a decision. Ordinary repository reads, source
 edits, focused tests, investigation, and repairs remain available with managed
 assurance UNKNOWN. An unexplained change denies only the affected dangerous
 control operation. A legitimate upgrade can be selected at a new isolated
 runtime path; the old manifest is archived, owned generated definitions are
 updated, and user-owned collisions are preserved for an explicit decision.
+
+Host maintenance uses [separate explicit intent and authorized byte ownership](thaliris-host-maintenance.md). Supported uninstall followed by normal immutable reinstall replaces the old-compatible-checkout recovery recipe; project admission is an independent control decision. Unknown role documentation is preserved as manual follow-up. No runtime renderer or manifest by itself supplies historical authorization.
 
 `doctor` reports concrete paths and expected/actual hashes for runtime files,
 Python bytecode, hooks, and profile definitions. A changed package or `.pyc`

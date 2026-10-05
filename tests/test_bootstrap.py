@@ -124,7 +124,8 @@ def test_initialized_workspace_does_not_init(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(bootstrap, "_invoke", lambda executable, root, command: calls.append(command) or {"ok": True, "project_definition_present": "YES"})
     result = bootstrap.bootstrap(tmp_path)
     assert result == {"ok": True, "status": "READY", "project_definition_present": "YES", "init_invoked": False, "session_restart_required": False,
-                      "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True}
+                      "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True,
+                      "preserved_manual_followup": []}
     assert calls == ["bootstrap-check"]
 
 
@@ -326,7 +327,8 @@ def test_no_restart_init_ready_calibrates_false(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(bootstrap, "_invoke", invoke)
     result = bootstrap.bootstrap(tmp_path)
     assert result == {"ok": True, "status": "READY", "init_invoked": True, "session_restart_required": False,
-                      "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True}
+                      "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True,
+                      "preserved_manual_followup": []}
 
 
 def test_untrusted_executable_stops_before_probe(monkeypatch, tmp_path: Path):

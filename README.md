@@ -12,9 +12,12 @@ pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.3,<0.5。
 
 ```sh
 python -m pip install 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44'
-python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-codex'
+python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
 thaliris version
 ```
+
+请将 adapter commit 占位符替换为独立审阅的已发布不可变版本。Host 维护使用 `codex-maintenance-plan` 和明确的 `--maintenance-contract FILE`，不依赖项目 init/task admission。原始授权安装记录证明 bytes ownership；候选内容相同不证明 ownership。未知项目 role 文档保留且不单独阻止 admission，真正控制指令冲突仍阻止。受支持的卸载和正常重装保留用户配置及恢复证据。公共流程和 legacy 批准边界见 [Host 维护](docs/thaliris-host-maintenance.md)。
+
 
 本地开发使用已审阅的 Core checkout：
 

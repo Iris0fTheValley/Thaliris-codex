@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall, attest_prior_authorized_bytes
 
 import hashlib
 import json
@@ -36,7 +37,7 @@ def test_install_manifest_pins_package_and_reports_restart(tmp_path: Path, monke
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
     exe, exe_sha = pinned_test_thaliris
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
 
     manifest = (home / runtime_identity.MANIFEST_NAME).read_bytes()
     identity = hashlib.sha256(manifest).hexdigest()
@@ -56,7 +57,7 @@ def test_install_manifest_pins_package_and_reports_restart(tmp_path: Path, monke
     package_file = exe.parent.parent / "Lib" / "site-packages" / "thaliris_codex" / "lifecycle.py"
     package_file.write_text("HOOK_ABI = 11\n", encoding="utf-8")
     assert lifecycle.host_hooks_health(home)["hooks_configured"] == "NO"
-    second = codex_adapter.codex_install()
+    second = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert second["ok"] is False
     assert second["changed"] is False
     assert (home / runtime_identity.MANIFEST_NAME).read_bytes() == manifest
@@ -65,8 +66,8 @@ def test_install_manifest_pins_package_and_reports_restart(tmp_path: Path, monke
 def test_idempotent_host_install_does_not_request_another_restart(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    first = codex_adapter.codex_install()
-    second = codex_adapter.codex_install()
+    first = authorized_host_install(tmp_path, pinned_test_thaliris)
+    second = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert first["install_status"] == "RESTART_CODEX_ONCE"
     assert second["ok"] is True
     assert second["changed"] is False
@@ -78,12 +79,14 @@ def test_install_upgrades_previous_owned_runner(tmp_path: Path, monkeypatch, pin
     executable, _ = pinned_test_thaliris
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     manifest = (home / runtime_identity.MANIFEST_NAME).read_bytes()
     runner = home / lifecycle.HOST_RUN_SCRIPT_NAME
-    runner.write_bytes(lifecycle._previous_host_run_script_bytes(executable, runtime_identity.manifest_identity(manifest)))
-    upgraded = codex_adapter.codex_install()
-    assert upgraded["ok"] is True
+    previous = lifecycle._previous_host_run_script_bytes(executable, runtime_identity.manifest_identity(manifest))
+    runner.write_bytes(previous)
+    attest_prior_authorized_bytes(home, {lifecycle.HOST_RUN_SCRIPT_NAME: previous})
+    upgraded = authorized_host_install(tmp_path, pinned_test_thaliris)
+    assert upgraded["ok"] is True, upgraded["manual_action_required"]
     assert upgraded["install_status"] == "RESTART_CODEX_ONCE"
     assert runner.read_bytes() == lifecycle.host_run_script_bytes(executable, runtime_identity.manifest_identity(manifest))
 
@@ -92,7 +95,7 @@ def test_powershell_runner_receipt_and_host_maintenance_are_direct_only(tmp_path
     executable, _ = pinned_test_thaliris
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     runner = _pin_installed_hook(monkeypatch, home, executable)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     codex_adapter.init(tmp_path)
@@ -110,9 +113,9 @@ def test_powershell_runner_receipt_and_host_maintenance_are_direct_only(tmp_path
     lifecycle.record_task_start_owner(tmp_path, started["task_id"], hashlib.sha256(b"owner").hexdigest())
     for operation in ("codex-install", "codex-uninstall"):
         payload = {**direct, "tool_input": {"command": f"& '{runner}' {operation}"}}
-        assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI) == ""
+        assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
         payload["tool_input"] = {"command": f"thaliris {operation}"}
-        assert "THALIRIS_CONTROLLER_BOUNDARY" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
+        assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
         payload["tool_input"] = {"command": f"& '{runner}' {operation}; git status"}
         assert "THALIRIS_CONTROLLER_BOUNDARY" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
     source = {**direct, "tool_input": {"command": "git status"}}
@@ -120,16 +123,16 @@ def test_powershell_runner_receipt_and_host_maintenance_are_direct_only(tmp_path
     package_code = executable.parent.parent / "Lib" / "site-packages" / "thaliris_codex" / "lifecycle.py"
     package_code.write_text("changed after install\n", encoding="utf-8")
     maintenance = {**direct, "tool_input": {"command": f"& '{runner}' codex-install"}}
-    assert "THALIRIS_CONTROLLER_BOUNDARY" in lifecycle.handle_hook(tmp_path, "PreToolUse", maintenance, lifecycle.MANAGED_HOOK_ABI)
+    assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", maintenance, lifecycle.MANAGED_HOOK_ABI)
 
 
 def test_self_invoked_uninstall_retains_inert_runner_for_direct_cleanup_or_reinstall(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     runner = home / lifecycle.HOST_RUN_SCRIPT_NAME
     monkeypatch.setenv("THALIRIS_RUN_SCRIPT", str(runner))
-    removed = codex_adapter.codex_uninstall()
+    removed = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
     assert removed["ok"] is True
     assert removed["status"] == "UNINSTALLED_INERT_RUNNER_RETAINED"
     assert removed["retained_inert_runner"] is True
@@ -137,36 +140,34 @@ def test_self_invoked_uninstall_retains_inert_runner_for_direct_cleanup_or_reins
     assert not (home / runtime_identity.MANIFEST_NAME).exists()
     assert removed["host_hook_registration_present"] == "NO"
     monkeypatch.delenv("THALIRIS_RUN_SCRIPT")
-    cleaned = codex_adapter.codex_uninstall()
+    cleaned = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
     assert cleaned["ok"] is True
     assert not runner.exists()
 
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     monkeypatch.setenv("THALIRIS_RUN_SCRIPT", str(runner))
-    codex_adapter.codex_uninstall()
+    authorized_host_uninstall(tmp_path, pinned_test_thaliris)
     monkeypatch.delenv("THALIRIS_RUN_SCRIPT")
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     assert (home / runtime_identity.MANIFEST_NAME).exists()
 
 
-def test_previous_runner_without_self_marker_is_retained_until_direct_cleanup(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
+def test_previous_runner_without_receipt_ownership_is_preserved(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     runner = home / lifecycle.HOST_RUN_SCRIPT_NAME
     manifest = (home / runtime_identity.MANIFEST_NAME).read_bytes()
     record = runtime_identity.validate_manifest_record(manifest)
     old_runner = lifecycle._previous_host_run_script_bytes(Path(record["executable"]), runtime_identity.manifest_identity(manifest))
     runner.write_bytes(old_runner)
     monkeypatch.delenv("THALIRIS_RUN_SCRIPT", raising=False)
-    removed = codex_adapter.codex_uninstall()
-    assert removed["ok"] is True
-    assert removed["retained_inert_runner"] is True
+    removed = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
+    assert removed["ok"] is False
+    assert removed["changed"] is False
+    assert any("unowned Host control file" in item for item in removed["manual_action_required"])
     assert runner.read_bytes() == old_runner
-    assert not (home / runtime_identity.MANIFEST_NAME).exists()
-    cleaned = codex_adapter.codex_uninstall()
-    assert cleaned["ok"] is True
-    assert not runner.exists()
+    assert (home / runtime_identity.MANIFEST_NAME).read_bytes() == manifest
 
 
 def test_separate_host_checkout_stays_available_when_project_is_active(tmp_path: Path) -> None:
@@ -193,10 +194,11 @@ def test_install_rejects_user_manifest_conflict(tmp_path: Path, monkeypatch, pin
     manifest_path = home / runtime_identity.MANIFEST_NAME
     manifest_path.write_text('{"user":"owned"}\n', encoding="utf-8")
 
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
 
     assert result["ok"] is False
-    assert result["host_hook_registration_present"] == "NO"
+    assert result["changed"] is False
+    assert result["manual_action_required"]
     assert manifest_path.read_text(encoding="utf-8") == '{"user":"owned"}\n'
 
 
@@ -249,11 +251,11 @@ def test_venv_inputs_and_bytecode_caches_are_pinned(tmp_path: Path, pinned_test_
         runtime_identity.validate_manifest(manifest, exe, runtime_identity.manifest_identity(manifest))
 
 
-def test_drifted_old_runtime_can_be_replaced_at_new_path_and_uninstalled(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
+def test_drifted_old_runtime_blocks_replacement_before_any_host_write(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     exe, _ = pinned_test_thaliris
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     prior = (home / runtime_identity.MANIFEST_NAME).read_bytes()
     (exe.parent.parent / "Lib" / "site-packages" / "thaliris_codex" / "cli.py").write_text("drifted\n", encoding="utf-8")
     import shutil
@@ -262,28 +264,22 @@ def test_drifted_old_runtime_can_be_replaced_at_new_path_and_uninstalled(tmp_pat
     new_exe = new_venv / "Scripts" / exe.name
     digest = hashlib.sha256(new_exe.read_bytes()).hexdigest()
     monkeypatch.setattr(codex_adapter, "_host_install_executable", lambda *_: (new_exe, digest, None))
-    replacement = codex_adapter.codex_install()
-    assert replacement["ok"] is True
-    audit_paths = list(home.glob("thaliris-install-audit-*.json"))
-    assert len(audit_paths) == 1
-    audit = json.loads(audit_paths[0].read_text(encoding="utf-8"))
-    import base64
-    assert base64.b64decode(audit["prior_manifest_base64"]) == prior
-    assert audit["observed_runtime_sha256"] != runtime_identity.manifest_identity(prior)
-    (new_venv / "pyvenv.cfg").write_text("more drift\n", encoding="utf-8")
-    result = codex_adapter.codex_uninstall()
-    assert result["ok"] is True
-    assert not (home / runtime_identity.MANIFEST_NAME).exists()
-    assert not (home / lifecycle.HOST_RUN_SCRIPT_NAME).exists()
-    assert len(list(home.glob("thaliris-install-audit-*.json"))) >= 2
+    before = {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    replacement = authorized_host_install(tmp_path, pinned_test_thaliris)
+    assert replacement["ok"] is False
+    assert replacement["changed"] is False
+    assert replacement["manual_action_required"]
+    assert {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
+    assert (home / runtime_identity.MANIFEST_NAME).read_bytes() == prior
+    assert list(home.glob("thaliris-install-audit-*.json")) == []
 
 
-def test_missing_old_runtime_allows_new_path_replacement(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
+def test_missing_old_runtime_blocks_replacement_before_any_host_write(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     import shutil
     exe, _ = pinned_test_thaliris
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    assert codex_adapter.codex_install()["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris)["ok"] is True
     prior = (home / runtime_identity.MANIFEST_NAME).read_bytes()
     new_venv = tmp_path / "new-runtime"
     shutil.copytree(exe.parent.parent, new_venv)
@@ -291,11 +287,14 @@ def test_missing_old_runtime_allows_new_path_replacement(tmp_path: Path, monkeyp
     new_exe = new_venv / "Scripts" / exe.name
     digest = hashlib.sha256(new_exe.read_bytes()).hexdigest()
     monkeypatch.setattr(codex_adapter, "_host_install_executable", lambda *_: (new_exe, digest, None))
-    result = codex_adapter.codex_install()
-    assert result["ok"] is True
-    assert (home / runtime_identity.MANIFEST_NAME).read_bytes() != prior
-    audit = json.loads(next(home.glob("thaliris-install-audit-*.json")).read_text(encoding="utf-8"))
-    assert audit["observed_runtime_sha256"] == "UNAVAILABLE"
+    before = {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
+    assert result["ok"] is False
+    assert result["changed"] is False
+    assert result["manual_action_required"]
+    assert {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
+    assert (home / runtime_identity.MANIFEST_NAME).read_bytes() == prior
+    assert list(home.glob("thaliris-install-audit-*.json")) == []
 
 
 def test_isolation_rejects_system_site_and_executable_pth(pinned_test_thaliris) -> None:

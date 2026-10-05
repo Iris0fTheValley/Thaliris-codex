@@ -106,14 +106,14 @@ _OBVIOUS_WRITE = re.compile(
 _COMMAND_SEPARATOR = re.compile(r"(?:\r?\n|&&|\|\||\||&|;)")
 _CONTEXT_OPERATIONS = frozenset({
     "task-recover-authority",
-    "init", "codex-bootstrap", "codex-install", "codex-uninstall", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
+    "init", "codex-bootstrap", "codex-install", "codex-uninstall", "codex-maintenance-plan", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
     "task-status", "task-get", "artifact-get", "catalog", "document-get",
     "task-artifact", "task-close", "task-promote", "recover-pending-spawn", "rollback", "version",
 })
 _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "task-recover-authority",
-    "codex-bootstrap", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
+    "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
     "recover-pending-spawn", "task-abandon", "version",
 })
@@ -870,26 +870,56 @@ def _context_arguments(command: str) -> str | None:
             except (OSError, RuntimeError):
                 pinned = False
     if not (canonical or pinned):
-        return None
+        # A standalone immutable maintenance executor is selected by actual
+        # human intent, independently of this workspace and its old runtime.
+        # This is governance with actor UNKNOWN, never positive Root proof.
+        from . import host_maintenance
+        arguments = match.group(2) or ""
+        try:
+            tokens = shlex.split(arguments, posix=False)
+            selected_contracts = [tokens[i + 1].strip("\"'") for i, token in enumerate(tokens[:-1])
+                                  if token == "--maintenance-contract"]
+            operations = [token for token in tokens if token in {"codex-install", "codex-uninstall"}]
+            if len(selected_contracts) != 1 or len(operations) != 1:
+                return None
+            intent = host_maintenance.contract(selected_contracts[0], operations[0], _host_home_path())
+            approved_executor, _ = host_maintenance.selected_runtime(intent["executor"])
+            if Path(executable).resolve(strict=True) != approved_executor:
+                return None
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+            return None
     return match.group(2) or ""
 
 
 def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
-    """Admit Host-only install operations through an exact installed route."""
+    """Admit exact Host intent without transferring project authority."""
+    from . import host_maintenance
     command = _bash_command(payload)
-    if command is None or _context_call(payload)[0] not in {"codex-install", "codex-uninstall"}:
-        return False
-    trusted_executable = _trusted_thaliris_executable()
-    manifest_name = os.environ.get("THALIRIS_INSTALL_MANIFEST")
-    identity = os.environ.get(THALIRIS_RUNTIME_SHA256_ENV)
-    if trusted_executable is None or not manifest_name or not identity:
+    operation = _context_call(payload)[0]
+    if command is None or operation not in {"codex-install", "codex-uninstall"}:
         return False
     try:
-        manifest = Path(manifest_name)
-        if manifest.is_symlink() or not manifest.is_file():
+        filename = _direct_context_option(payload, {"--maintenance-contract"}, digest_only=False)
+        intent = host_maintenance.contract(filename, operation, _host_home_path(), actor=payload)
+        selected_executor, _ = host_maintenance.selected_runtime(intent["executor"])
+        prior = host_maintenance._installed(_host_home_path())
+        if intent.get("installed_runtime_sha256") != (host_maintenance.digest(prior) if prior else "ABSENT"):
             return False
-        runtime_identity.validate_manifest(manifest.read_bytes(), trusted_executable, identity)
-    except (OSError, RuntimeError, ValueError, TypeError):
+        if operation == "codex-install":
+            candidate, manifest = host_maintenance.selected_runtime(intent["candidate"])
+            explicit = _direct_context_option(payload, {"--executable"}, digest_only=False)
+            sha = _direct_context_option(payload, {"--sha256"})
+            constraint = _direct_context_option(payload, {"--execution-constraint"}, digest_only=False)
+            if explicit is not None and Path(explicit).resolve() != candidate:
+                return False
+            if sha is not None and sha != json.loads(manifest)["executable_sha256"]:
+                return False
+            if constraint != intent.get("execution_constraint"):
+                return False
+            ownership = host_maintenance.ownership(_host_home_path(), prior, intent)
+            if ownership.get("execution_constraint") == "luna-only" and constraint != "luna-only":
+                return False
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
         return False
     command = command.lstrip()
     if command.startswith("& "):
@@ -902,7 +932,8 @@ def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
         selected = Path(token).resolve(strict=True)
     except (OSError, RuntimeError):
         return False
-    return selected in {path for path in (_trusted_installed_runner(), trusted_executable) if path is not None}
+    return selected == selected_executor or (
+        selected == _trusted_installed_runner() and selected_executor == _trusted_thaliris_executable())
 
 
 def is_managed_handler(value: object, event: str) -> bool:
@@ -1221,7 +1252,7 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
                 if _context_operation(payload) == "task-recover-authority":
                     if _controller_actor_assurance(payload) == "CHILD":
                         return _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
-                elif not (_controller_actor_assurance(payload) == "UNKNOWN" and _context_operation(payload) in {"task-status", "doctor"}):
+                elif _context_operation(payload) not in {"codex-install", "codex-uninstall"} and not (_controller_actor_assurance(payload) == "UNKNOWN" and _context_operation(payload) in {"task-status", "doctor"}):
                     task_authority.check(root)
             except (OSError, ValueError, KeyError, TypeError):
                 return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: preserve the external authority and task evidence; a Controller must resolve this conflict.")
@@ -2939,7 +2970,21 @@ def _control_state_target(payload: dict[str, Any]) -> str | None:
         return None
     material = json.dumps(tool_input, ensure_ascii=False, sort_keys=True)
     match = _CONTROL_STATE_TARGET.search(material)
-    return match.group(0).replace("\\", "/") if match is not None else None
+    if match is not None:
+        return match.group(0).replace("\\", "/")
+    # Host ownership records are control state too. This is an obvious-path
+    # guard on a shared OS, not a sandbox or proof of unknown actor identity.
+    from . import host_maintenance
+    normalized = material.replace("\\\\", "/").replace("\\", "/").casefold()
+    home = _host_home_path()
+    paths = [home / name for name in (runtime_identity.MANIFEST_NAME,
+        host_maintenance.RECEIPT_NAME, "AGENTS.md", "hooks.json", "config.toml",
+        HOST_HOOK_SCRIPT_NAME, HOST_RUN_SCRIPT_NAME, host_preflight.NAME)]
+    for path in paths:
+        if path.as_posix().casefold() in normalized:
+            return path.as_posix()
+    agents = (home / "agents").as_posix().casefold() + "/"
+    return agents if agents in normalized else None
 
 
 def _obvious_write_attempt(payload: dict[str, Any]) -> bool:
@@ -3572,6 +3617,11 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             return ""
     if _offline_administration_requested(payload):
         return _permission_deny("THALIRIS_OFFLINE_ADMINISTRATION_REQUIRES_DISCONNECTED_INTEGRATION: automated actors have no offline recovery grant while managed hooks are present.")
+    operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
+    if operation in {"codex-install", "codex-uninstall"}:
+        if _controller_actor_assurance(payload) == "CHILD" or not _trusted_host_maintenance_route(payload):
+            return _permission_deny("THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED: exact Host operation and approved immutable identity are required.")
+        return ""
     state_status, _task_id = managed_task_state(root)
     operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
     if operation == "task-recover-authority":

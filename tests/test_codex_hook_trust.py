@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall
 
 import hashlib
 import json
@@ -194,7 +195,7 @@ def test_host_disabled_state_survives_trust_and_does_not_report_ready(tmp_path: 
         "expected_count": 7, "changed": True, "config_path": str(home / "config.toml"),
     })
 
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
 
     assert result["host_hook_trust_status"] == "TRUSTED"
     assert result["host_hook_trusted_count"] == 7
@@ -300,7 +301,7 @@ def test_app_server_failure_fails_closed_without_ready_claim(tmp_path: Path, mon
 
     monkeypatch.setattr(codex_adapter, "_install_host_hook_trust", fail)
 
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
 
     assert result["host_hook_registration_present"] == "YES"
     assert result["host_hook_trust_status"] == "HOST_HOOK_TRUST_INSTALL_FAILED"

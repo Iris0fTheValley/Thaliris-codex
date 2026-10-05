@@ -62,16 +62,9 @@ path.
 
 ## Supported source and installation closure
 
-Source normalization does not install into an ACTIVE parent's trusted runtime/security
-baseline. After task closure, use a separate checkout/session and the reviewed adapter
-installation workflow. Run exact installed identity-checked codex-install with the
-existing constraint (add --execution-constraint luna-only only for that installation).
-It updates only the managed global span and recognized generated native profiles; user
-edits require explicit conflict handling. Use installed runner codex-bootstrap for
-project synchronization; if a managed span is user-owned, init's supported
---accept-managed-instruction-sha256 accepts only its exact reviewed hash. Do not shell
-overwrite installed prompts or anchors. Restart into a fresh Host session when needed
-and observe admission/catalog status; disk equality is not activation proof.
+Host install, upgrade and uninstall follow [the public maintenance contract](../../docs/thaliris-host-maintenance.md): actual human intent selects the exact Host operation and immutable executor/candidate, independently of project generation and task admission. Prior authorized installation receipts establish ownership; candidate rendering, matching markers and manifests do not. Unknown bytes are preserved. Legacy migration requires independent installation evidence or specific exact-byte human approval. Supported cleanup and normal reinstall preserve user configuration and recovery evidence. All identity/isolation/ABI/ownership/control checks precede Host writes, including profiles.
+
+Project bootstrap preserves unknown role documentation as manual follow-up; unknown authority/security/activation control blocks remain fail-closed. An exact project managed span can be approved separately with init's --accept-managed-instruction-sha256. A Host maintenance grant does not approve it. Restart when required and observe native admission/catalog status; disk equality and Host hook trust are distinct from activation proof.
 
 Ordinary closure owns broader regression/build/docs/generated sync, installation and
 Git after Focused semantic convergence. Installation/smoke exposing a semantic defect

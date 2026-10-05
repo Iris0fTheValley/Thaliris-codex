@@ -123,8 +123,9 @@ def _bridge_fields(payload: dict[str, object]) -> dict[str, object]:
     content = payload.get("controller_bridge_content")
     digest = payload.get("controller_bridge_sha256")
     if isinstance(content, str) and isinstance(digest, str) and hashlib.sha256(content.encode("utf-8")).hexdigest() == digest:
-        return {"task_start_receipt": digest}
-    return {}
+        return {"task_start_receipt": digest,
+                "preserved_manual_followup": payload.get("preserved_manual_followup", [])}
+    return {"preserved_manual_followup": payload.get("preserved_manual_followup", [])}
 
 
 def _definition_recovery_fields(payload: dict[str, object]) -> dict[str, object]:

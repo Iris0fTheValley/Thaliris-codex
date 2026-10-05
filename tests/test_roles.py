@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall, legacy_file_hashes
 
 from tests.support.history import historical_blob
 
@@ -169,13 +170,18 @@ def test_ba84553_profiles_migrate_by_exact_filename_and_preserve_edits(tmp_path:
     edited = historical[edited_name] + b"\nuser edit\n"
     (agents / edited_name).write_bytes(edited)
 
-    result = codex_adapter.codex_install()
+    before = {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()}
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/{name}" for name in set(tracked) - {edited_name}]
+        ),
+    )
 
     assert (agents / edited_name).read_bytes() == edited
-    assert str(agents / edited_name) in result["manual_action_required"]
-    for name in set(tracked) - {edited_name}:
-        assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "current"
-        assert f"agents/{name}" in result["files"]
+    assert any(str(agents / edited_name) in item for item in result["manual_action_required"])
+    assert result["changed"] is False
+    assert {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()} == before
 
 
 def test_1f98dae_profiles_migrate_by_exact_filename_and_preserve_edits(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
@@ -225,16 +231,18 @@ def test_1f98dae_profiles_migrate_by_exact_filename_and_preserve_edits(tmp_path:
     edited = historical[edited_name] + b"\nuser edit\n"
     (agents / edited_name).write_bytes(edited)
 
-    result = codex_adapter.codex_install()
+    before = {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()}
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/{name}" for name in set(tracked) - {edited_name}]
+        ),
+    )
 
     assert (agents / edited_name).read_bytes() == edited
-    assert str(agents / edited_name) in result["manual_action_required"]
-    for name in changed - {edited_name}:
-        assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "current"
-        assert f"agents/{name}" in result["files"]
-    for name in set(tracked) - changed:
-        assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "current"
-        assert f"agents/{name}" not in result["files"]
+    assert any(str(agents / edited_name) in item for item in result["manual_action_required"])
+    assert result["changed"] is False
+    assert {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()} == before
 
 
 def test_40fd5f2_focused_profiles_upgrade_only_exact_historical_bytes(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
@@ -260,7 +268,12 @@ def test_40fd5f2_focused_profiles_upgrade_only_exact_historical_bytes(tmp_path: 
     for name, value in historical.items():
         (agents / name).write_bytes(value)
 
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/{name}" for name in expected]
+        ),
+    )
     assert result["manual_action_required"] == []
     for name in expected:
         assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "current"
@@ -271,9 +284,9 @@ def test_40fd5f2_focused_profiles_upgrade_only_exact_historical_bytes(tmp_path: 
     edited_name = "thaliris-focused-implementer.toml"
     edited = historical[edited_name] + b"\nuser edit\n"
     (agents / edited_name).write_bytes(edited)
-    guarded = codex_adapter.codex_install()
+    guarded = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert (agents / edited_name).read_bytes() == edited
-    assert str(agents / edited_name) in guarded["manual_action_required"]
+    assert any(str(agents / edited_name) in item for item in guarded["manual_action_required"])
 
 
 def test_fd4fba36_profiles_upgrade_exact_historical_set_and_preserve_unknown_bytes(
@@ -325,7 +338,12 @@ def test_fd4fba36_profiles_upgrade_exact_historical_set_and_preserve_unknown_byt
     for name, value in (historical | focused).items():
         (agents / name).write_bytes(value)
 
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/{name}" for name in (set(expected) | set(focused))]
+        ),
+    )
 
     assert result["manual_action_required"] == []
     assert len(list(agents.glob("thaliris-*.toml"))) == 11
@@ -340,10 +358,10 @@ def test_fd4fba36_profiles_upgrade_exact_historical_set_and_preserve_unknown_byt
     edited_name = "thaliris-reviewer.toml"
     edited = historical[edited_name] + b"\nuser edit\n"
     (agents / edited_name).write_bytes(edited)
-    guarded = codex_adapter.codex_install()
+    guarded = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert (agents / edited_name).read_bytes() == edited
     assert codex_adapter._agent_profile_state(edited, edited_name) == "user"
-    assert str(agents / edited_name) in guarded["manual_action_required"]
+    assert any(str(agents / edited_name) in item for item in guarded["manual_action_required"])
 
 
 def test_8a3fe930_changed_profiles_upgrade_exact_bytes_and_preserve_edits(
@@ -375,12 +393,17 @@ def test_8a3fe930_changed_profiles_upgrade_exact_bytes_and_preserve_edits(
     edited = historical[edited_name] + b"\nuser edit\n"
     (agents / edited_name).write_bytes(edited)
 
-    result = codex_adapter.codex_install()
+    before = {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()}
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/{name}" for name in set(expected) - {edited_name}]
+        ),
+    )
     assert (agents / edited_name).read_bytes() == edited
-    assert str(agents / edited_name) in result["manual_action_required"]
-    for name in set(expected) - {edited_name}:
-        assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "current"
-        assert f"agents/{name}" in result["files"]
+    assert any(str(agents / edited_name) in item for item in result["manual_action_required"])
+    assert result["changed"] is False
+    assert {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()} == before
 
 
 def test_210782b1_all_profiles_migrate_and_unknown_modifications_stay_manual(
@@ -423,19 +446,20 @@ def test_210782b1_all_profiles_migrate_and_unknown_modifications_stay_manual(
     edited = historical[edited_name] + b"\nunknown modification\n"
     (agents / edited_name).write_bytes(edited)
 
-    result = codex_adapter.codex_install()
+    before = {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()}
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/{name}" for name in set(expected) - {edited_name}]
+        ),
+    )
 
     assert (agents / edited_name).read_bytes() == edited
     assert codex_adapter._agent_profile_state(edited, edited_name) == "user"
-    assert str(agents / edited_name) in result["manual_action_required"]
+    assert any(str(agents / edited_name) in item for item in result["manual_action_required"])
     assert f"agents/{edited_name}" not in result["files"]
-    assert {
-        item.removeprefix("agents/")
-        for item in result["files"]
-        if item.startswith("agents/")
-    } == set(expected) - {edited_name}
-    for name in set(expected) - {edited_name}:
-        assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "current"
+    assert result["changed"] is False
+    assert {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()} == before
 
 
 def test_ec1ad7b_investigator_generated_outputs_remain_upgradeable() -> None:
@@ -578,14 +602,18 @@ def test_phase_two_profiles_migrate_while_edited_profile_is_preserved(tmp_path: 
     edited = (agents / edited_name).read_bytes() + b"\nuser edit\n"
     (agents / edited_name).write_bytes(edited)
 
-    result = codex_adapter.codex_install()
+    before = {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()}
+    result = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes=legacy_file_hashes(
+            host_home, [f"agents/thaliris-{role}.toml" for role in roles_to_migrate[:-1]]
+        ),
+    )
 
     assert (agents / edited_name).read_bytes() == edited
-    assert str(agents / edited_name) in result["manual_action_required"]
-    for role in roles_to_migrate[:-1]:
-        name = f"thaliris-{role}.toml"
-        assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "current"
-        assert f"agents/{name}" in result["files"]
+    assert any(str(agents / edited_name) in item for item in result["manual_action_required"])
+    assert result["changed"] is False
+    assert {path.name: path.read_bytes() for path in agents.iterdir() if path.is_file()} == before
 
     init_result = codex_adapter.init(root)
     assert init_result["agent_profile_changed"] is False
@@ -754,7 +782,7 @@ def test_modified_registry_document_is_preserved_as_user_owned(tmp_path: Path, m
 
     assert registry_document.read_bytes() == user_owned
     assert "docs/thaliris-role-registry.md" not in result["files"]
-    assert "docs/thaliris-role-registry.md" in result["manual_action_required"]
+    assert "docs/thaliris-role-registry.md" in result["preserved_manual_followup"]
 
 
 def test_current_registry_document_generation_remains_stable(tmp_path: Path) -> None:
@@ -792,7 +820,7 @@ def test_formal_seventh_role_requires_only_spec_and_binding(tmp_path: Path, monk
     host_home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(host_home))
     root = _initialized_repo(tmp_path)
-    install = codex_adapter.codex_install()
+    install = authorized_host_install(tmp_path, pinned_test_thaliris)
 
     profile = host_home / "agents" / "thaliris-formal-sentinel.toml"
     assert profile.is_file()

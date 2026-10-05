@@ -12,9 +12,12 @@ Use an isolated Python 3.11+ environment. Install reviewed Core before the adapt
 
 ```sh
 python -m pip install 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44'
-python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-Codex'
+python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
 thaliris version
 ```
+
+Replace the adapter commit placeholder with the independently reviewed published revision. Host maintenance uses `codex-maintenance-plan` and an explicit `--maintenance-contract FILE`, independently of project init/task admission. Prior authorized installation receipts establish byte ownership; candidate equality does not. Unknown project role documentation is preserved without blocking admission, while unknown control instructions remain blocking. Supported uninstall and normal reinstall preserve user configuration and recovery evidence. See [Host maintenance](docs/thaliris-host-maintenance.md) for the public sequence and legacy approval boundary.
+
 
 For local development install `../Thaliris[test]`, then this repository with `--no-deps -e '.[test]'`, and run `pytest`. A real Host installation needs both wheels in a dedicated environment with system site packages disabled; executable or path-extending editable `.pth` files are rejected. The entire environment, including shared Core, remains pinned by the runtime manifest. Installing packages does not prove Host enablement, authorization or health.
 

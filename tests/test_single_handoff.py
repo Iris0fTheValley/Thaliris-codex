@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall, attest_prior_authorized_bytes
 
 import tomllib
 
@@ -179,7 +180,7 @@ def test_host_profiles_added_after_session_start_are_reported(tmp_path: Path, mo
     host_home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(host_home))
     codex_adapter.audit_hook(tmp_path, "SessionStart", {"session_id": "host-late-session", "source": "startup", "cwd": str(tmp_path)})
-    installed = codex_adapter.codex_install()
+    installed = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert installed["changed"] is True
     session_hash = hashlib.sha256(b"host-late-session").hexdigest()
     expected = sorted(str(host_home.resolve() / "agents" / name) for name in codex_adapter._AGENT_PROFILES)
@@ -209,7 +210,7 @@ def test_task_start_blocks_host_role_added_after_current_session_start(tmp_path:
     monkeypatch.setenv("CODEX_HOME", str(host_home))
     codex_adapter.audit_hook(tmp_path, "SessionStart", {"session_id": "late-host-session", "source": "startup", "cwd": str(tmp_path)})
     init = codex_adapter.init(tmp_path)
-    codex_adapter.codex_install()
+    authorized_host_install(tmp_path, pinned_test_thaliris)
     digest = init["controller_bridge_sha256"]
     pre = {"session_id": "late-host-session", "turn_id": "turn", "tool_name": "Bash", "tool_input": {"command": f"thaliris task-start goal --controller-bridge-sha256 {digest}"}}
     rewritten = json.loads(codex_adapter.audit_hook(tmp_path, "PreToolUse", pre, lifecycle_module.MANAGED_HOOK_ABI))
@@ -227,7 +228,7 @@ def test_codex_install_is_idempotent_and_preserves_non_owned_collisions(tmp_path
     hooks_path = home / "hooks.json"
     hooks_path.parent.mkdir(parents=True)
     hooks_path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [user_handler]}]}}), encoding="utf-8")
-    first = codex_adapter.codex_install()
+    first = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert first["ok"] is True
     assert first["changed"] is True
     assert {f"agents/{name}" for name in codex_adapter._AGENT_PROFILES} <= set(first["files"])
@@ -238,15 +239,17 @@ def test_codex_install_is_idempotent_and_preserves_non_owned_collisions(tmp_path
     installed_hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
     assert user_handler in installed_hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
     assert codex_adapter._project_definition_facts(repo(tmp_path / "project"))["host_hook_registration_present"] == "YES"
-    second = codex_adapter.codex_install()
+    second = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert second["changed"] is False
     assert second["host_setup_requires_session_start"] is False
     collision = home / "agents" / "thaliris-implementer.toml"
     collision.write_text("user-owned = true\n", encoding="utf-8")
-    third = codex_adapter.codex_install()
+    before_collision = {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    third = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert third["ok"] is False
-    assert third["host_integration_ready"] == "NO"
-    assert str(collision) in third["manual_action_required"]
+    assert third["changed"] is False
+    assert any(str(collision) in item for item in third["manual_action_required"])
+    assert {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before_collision
     assert collision.read_text(encoding="utf-8") == "user-owned = true\n"
 
 
@@ -259,11 +262,11 @@ def test_codex_install_updates_and_uninstall_removes_only_global_owned_span(tmp_
     global_agents = home / "AGENTS.md"
     global_agents.write_bytes(original)
 
-    first = codex_adapter.codex_install()
+    first = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert first["ok"] is True
     assert first["global_instruction_ready"] == "YES"
     assert "AGENTS.md" in first["files"]
-    assert first["controller_bridge_sha256"] == hashlib.sha256(first["controller_bridge_content"].encode()).hexdigest()
+    assert first["project_files_touched"] == []
     expected = codex_adapter._global_agents_block(executable, digest)
     assert global_agents.read_bytes() == expected + original
     assert expected.count(b"--root <repo> codex-bootstrap") == 1
@@ -281,18 +284,19 @@ def test_codex_install_updates_and_uninstall_removes_only_global_owned_span(tmp_
     assert "focused-test pass" not in normalized_expected
     assert "smallest relevant tests" not in normalized_expected
 
-    second = codex_adapter.codex_install()
+    second = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert second["changed"] is False
     assert global_agents.read_bytes() == expected + original
 
     old_owned = b"<!-- thaliris:global:begin -->\nold startup\n<!-- thaliris:global:end -->\n"
     global_agents.write_bytes(b"before\r\n" + old_owned + b"after\r\n\xff")
-    refreshed = codex_adapter.codex_install()
+    attest_prior_authorized_bytes(home, {"AGENTS.md#global": old_owned})
+    refreshed = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert refreshed["changed"] is True
     assert refreshed["host_setup_requires_session_start"] is True
     assert global_agents.read_bytes() == b"before\r\n" + expected + b"after\r\n\xff"
 
-    removed = codex_adapter.codex_uninstall()
+    removed = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
     assert "AGENTS.md" in removed["files"]
     assert global_agents.read_bytes() == b"before\r\nafter\r\n\xff"
 
@@ -332,9 +336,14 @@ Host instruction activation or a loaded current-session hook.
     user_prefix = b"# User rules\r\nKeep prefix.\r\n"
     user_suffix = b"Keep suffix.\r\n\xff"
     global_agents = home / "AGENTS.md"
-    global_agents.write_bytes(user_prefix + previous_official + user_suffix)
+    prior_bytes = user_prefix + previous_official + user_suffix
+    global_agents.write_bytes(prior_bytes)
+    start, end = codex_adapter._global_agents_span(prior_bytes)
+    legacy_owned_bytes = {"AGENTS.md#global": hashlib.sha256(prior_bytes[start:end]).hexdigest()}
 
-    installed = codex_adapter.codex_install()
+    installed = authorized_host_install(
+        tmp_path, pinned_test_thaliris, _legacy_owned_bytes=legacy_owned_bytes
+    )
 
     assert installed["ok"] is True
     assert global_agents.read_bytes() == (
@@ -345,10 +354,10 @@ Host instruction activation or a loaded current-session hook.
 def test_codex_uninstall_removes_new_global_instruction_file(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    codex_adapter.codex_install()
+    authorized_host_install(tmp_path, pinned_test_thaliris)
     global_agents = home / "AGENTS.md"
     assert global_agents.read_bytes() == codex_adapter._global_agents_block(*pinned_test_thaliris)
-    removed = codex_adapter.codex_uninstall()
+    removed = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
     assert "AGENTS.md" in removed["files"]
     assert not global_agents.exists()
 
@@ -365,14 +374,14 @@ def test_codex_install_rejects_ambiguous_global_markers(tmp_path: Path, monkeypa
     monkeypatch.setenv("CODEX_HOME", str(home))
     global_agents = home / "AGENTS.md"
     global_agents.write_bytes(original)
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
     assert result["ok"] is False
-    assert result["global_instruction_ready"] == "NO"
-    assert str(global_agents) in result["manual_action_required"]
+    assert result["ok"] is False
+    assert result["changed"] is False
+    assert result["manual_action_required"]
     assert global_agents.read_bytes() == original
-    removed = codex_adapter.codex_uninstall()
-    assert removed["ok"] is False
-    assert str(global_agents) in removed["manual_action_required"]
+    removed = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
+    assert removed["changed"] is False
     assert global_agents.read_bytes() == original
 
 
@@ -390,7 +399,10 @@ def test_codex_install_migrates_exact_legacy_host_hook_and_uninstall_preserves_u
     original = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [legacy_handler, user_handler]}]}}
     hooks_path.write_text(json.dumps(original), encoding="utf-8")
 
-    installed = codex_adapter.codex_install()
+    installed = authorized_host_install(
+        tmp_path, pinned_test_thaliris,
+        _legacy_owned_bytes={"hooks.json": hashlib.sha256(hooks_path.read_bytes()).hexdigest()},
+    )
 
     assert installed["host_hook_registration_present"] == "YES"
     merged = json.loads(hooks_path.read_text(encoding="utf-8"))
@@ -401,7 +413,7 @@ def test_codex_install_migrates_exact_legacy_host_hook_and_uninstall_preserves_u
 
     user_profile = home / "agents" / "thaliris-investigator.toml"
     user_profile.write_text("user-owned = true\n", encoding="utf-8")
-    removed = codex_adapter.codex_uninstall()
+    removed = authorized_host_uninstall(tmp_path, pinned_test_thaliris)
 
     assert removed["changed"] is True
     assert removed["project_files_touched"] == []
@@ -422,10 +434,13 @@ def test_codex_install_user_hook_collision_is_manual_and_untouched(tmp_path: Pat
     original_hooks = {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "keep", "timeout": 60}]}]}}
     hooks_path.write_text(json.dumps(original_hooks), encoding="utf-8")
 
-    result = codex_adapter.codex_install()
+    before = {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
 
-    assert result["host_hook_registration_present"] == "NO"
-    assert str(script) in result["manual_action_required"]
+    assert result["ok"] is False
+    assert result["changed"] is False
+    assert any(str(script) in item for item in result["manual_action_required"])
+    assert {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
     assert script.read_text(encoding="utf-8") == "user-owned script\n"
     assert json.loads(hooks_path.read_text(encoding="utf-8")) == original_hooks
 
@@ -434,7 +449,7 @@ def test_codex_install_rejects_changed_runtime_at_same_path(tmp_path: Path, monk
     executable, old_digest = pinned_test_thaliris
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    codex_adapter.codex_install()
+    authorized_host_install(tmp_path, pinned_test_thaliris)
     executable.write_bytes(b"updated executable at the same path")
     new_digest = hashlib.sha256(executable.read_bytes()).hexdigest()
     monkeypatch.setattr(
@@ -443,34 +458,26 @@ def test_codex_install_rejects_changed_runtime_at_same_path(tmp_path: Path, monk
         lambda _home, _path, _sha: (executable, new_digest, None),
     )
 
-    result = codex_adapter.codex_install()
+    before = {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
 
-    assert result["changed"] is False
-    assert result["host_hook_registration_present"] == "NO"
     assert result["ok"] is False
-    assert any("runtime changed" in item for item in result["manual_action_required"])
-    registrations = json.loads((home / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    commands = [
-        handler["command"]
-        for group in registrations["PreToolUse"]
-        for handler in group.get("hooks", [])
-        if lifecycle_module._host_hook_command_is_managed(handler, "PreToolUse", home)
-    ]
-    assert len(commands) == 1
-    pinned = lifecycle_module._pinned_host_payload(commands[0])
-    assert pinned is not None and pinned["sha"] == old_digest
-    assert pinned["sha"] != new_digest
-    assert (home / "AGENTS.md").read_bytes() == codex_adapter._global_agents_block(executable, old_digest)
+    assert result["changed"] is False
+    assert result["manual_action_required"]
+    assert {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
+    assert hashlib.sha256(executable.read_bytes()).hexdigest() == new_digest
 
 
 def test_codex_install_migrates_exact_old_trampoline_bytes(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    codex_adapter.codex_install()
+    authorized_host_install(tmp_path, pinned_test_thaliris)
     script = home / lifecycle_module.HOST_HOOK_SCRIPT_NAME
-    script.write_bytes(lifecycle_module._legacy_host_hook_script_bytes())
+    old_script = lifecycle_module._legacy_host_hook_script_bytes()
+    script.write_bytes(old_script)
+    attest_prior_authorized_bytes(home, {lifecycle_module.HOST_HOOK_SCRIPT_NAME: old_script})
 
-    result = codex_adapter.codex_install()
+    result = authorized_host_install(tmp_path, pinned_test_thaliris)
 
     assert result["changed"] is True
     assert result["manual_action_required"] == []
@@ -480,7 +487,7 @@ def test_codex_install_migrates_exact_old_trampoline_bytes(tmp_path: Path, monke
 def test_project_init_after_host_install_uses_only_activation_marker(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    codex_adapter.codex_install()
+    authorized_host_install(tmp_path, pinned_test_thaliris)
     root = repo(tmp_path / "zero-state-project")
 
     facts = codex_adapter.bootstrap_check(root)
@@ -1058,7 +1065,8 @@ def test_8a3fe930_managed_block_and_role_pack_upgrade_only_exact_bytes(tmp_path:
     guarded = codex_adapter.init(root)
     assert instruction.read_bytes() == edited_block + b"\nuser text\n"
     assert role_pack.read_bytes() == edited_pack
-    assert {"AGENTS.md", "docs/thaliris-role-packs.md"} <= set(guarded["manual_action_required"])
+    assert guarded["manual_action_required"] == ["AGENTS.md"]
+    assert guarded["preserved_manual_followup"] == ["docs/thaliris-role-packs.md"]
 
 
 def hook_payload(**values: object) -> dict[str, object]:
@@ -2306,7 +2314,11 @@ def test_invalid_task_state_denies_only_explicit_managed_mutations(tmp_path: Pat
     ):
         denied = json.loads(handle_hook(root, "PreToolUse", payload))
         assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
-        expected_reason = "CONTROL_STATE_DIRECT_WRITE" if lifecycle_module._control_state_target(payload) is not None else "INVALID_STATE"
+        operation = lifecycle_module._context_call(payload)[0]
+        if operation in {"codex-install", "codex-uninstall"}:
+            expected_reason = "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED"
+        else:
+            expected_reason = "CONTROL_STATE_DIRECT_WRITE" if lifecycle_module._control_state_target(payload) is not None else "INVALID_STATE"
         assert expected_reason in denied["hookSpecificOutput"]["permissionDecisionReason"]
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": "thaliris init"},
@@ -2322,7 +2334,9 @@ def test_invalid_task_state_denies_only_explicit_managed_mutations(tmp_path: Pat
             tool_name="Bash", tool_input={"command": command},
         )))
         assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "INVALID_STATE" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+        expected = ("THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" if "codex-install" in command
+                    else "INVALID_STATE")
+        assert expected in denied["hookSpecificOutput"]["permissionDecisionReason"]
     for payload in (
         hook_payload(tool_name="Bash", tool_input={"command": "Get-Content C:/Users/example/.codex/sessions/rollout.jsonl"}),
         hook_payload(tool_name="thaliris-completely-unknown-mutate", tool_input={"command": "opaque"}),
@@ -2406,7 +2420,9 @@ def test_invalid_v1_active_state_admits_init_then_exact_recovery(tmp_path: Path,
     ):
         denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(tool_name="Bash", tool_input={"command": command})))
         assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "INVALID_STATE" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+        expected = ("THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" if "codex-install" in command
+                    else "INVALID_STATE")
+        assert expected in denied["hookSpecificOutput"]["permissionDecisionReason"]
 
     digest = hashlib.sha256(old_bytes).hexdigest()
     bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]

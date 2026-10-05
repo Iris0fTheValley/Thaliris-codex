@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.host_maintenance_test_support import authorized_host_install, authorized_host_uninstall
 
 import hashlib
 import json
@@ -217,16 +218,19 @@ def test_manifest_diff_treats_new_bytecode_as_execution_input(pinned_test_thalir
 def test_drifted_runtime_never_probed_or_imported_during_install(tmp_path, monkeypatch, pinned_test_thaliris):
     exe, digest = pinned_test_thaliris
     home = tmp_path / "home"
-    assert codex_adapter.codex_install(home, exe, digest)["ok"] is True
+    assert authorized_host_install(tmp_path, pinned_test_thaliris, home, exe, digest)["ok"] is True
     prior = (home / runtime_identity.MANIFEST_NAME).read_bytes()
     (exe.parent.parent / "Lib/site-packages/thaliris_codex/cli.py").write_text("unverified runtime")
     def forbidden_probe(*_args):
         raise AssertionError("changed runtime reached executable/import probe")
     monkeypatch.setattr(codex_adapter, "_host_install_executable", forbidden_probe)
-    result = codex_adapter.codex_install(home, exe, digest)
+    before = {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    result = authorized_host_install(tmp_path, pinned_test_thaliris, home, exe, digest)
     assert result["ok"] is False
+    assert result["changed"] is False
     assert (home / runtime_identity.MANIFEST_NAME).read_bytes() == prior
-    assert any("installed_runtime_changed_in_place" in item and "cli.py" in item for item in result["manual_action_required"])
+    assert result["manual_action_required"]
+    assert {path.relative_to(home).as_posix(): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize("unsafe", ["directory", "symlink", "broken_symlink", "ancestor_symlink", "ancestor_junction"])
@@ -267,7 +271,7 @@ def test_unsafe_manifest_never_reaches_runtime_probe(tmp_path, monkeypatch, pinn
         raise AssertionError("unsafe manifest reached executable/import probe")
 
     monkeypatch.setattr(codex_adapter, "_host_install_executable", forbidden_probe)
-    result = codex_adapter.codex_install(home, exe, digest)
+    result = authorized_host_install(tmp_path, pinned_test_thaliris, home, exe, digest)
     assert result["ok"] is False
     assert any("installed_runtime_manifest_unavailable" in item for item in result["manual_action_required"])
     if unsafe.startswith("ancestor_"):

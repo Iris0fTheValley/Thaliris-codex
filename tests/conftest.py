@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,13 @@ def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "cli.py").write_text("def main(): pass\n", encoding="utf-8")
     (package / "lifecycle.py").write_text("HOOK_ABI = 10\n", encoding="utf-8")
+    commit = "1" * 40
+    dist_info = venv / "Lib" / "site-packages" / "thaliris_codex-0.4.3.dist-info"
+    dist_info.mkdir()
+    (dist_info / "direct_url.json").write_text(json.dumps({
+        "url": "https://example.test/approved-adapter",
+        "vcs_info": {"vcs": "git", "commit_id": commit},
+    }), encoding="utf-8")
     executable.write_bytes(b"test-only direct Thaliris executable identity")
     digest = hashlib.sha256(executable.read_bytes()).hexdigest()
     monkeypatch.setattr(
@@ -56,4 +64,13 @@ def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ],
     )
     monkeypatch.setattr(codex_app_server, "remove_owned_hook_trust", lambda _home, keys: len(keys))
+    from thaliris_codex import host_maintenance, runtime_identity
+    selection = {
+        "executable": str(executable),
+        "runtime_sha256": host_maintenance.digest(runtime_identity.manifest_bytes(executable)),
+        "source_pin": "git+https://example.test/approved-adapter@" + commit,
+    }
+    (tmp_path / ".test-host-runtime-selection.json").write_text(
+        json.dumps(selection, sort_keys=True), encoding="utf-8"
+    )
     return executable, digest
