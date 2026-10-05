@@ -16,6 +16,13 @@ identities. Installation renders with the approved candidate executor; an old
 trusted executor can launch that independently selected candidate. The caller
 must execute the selected installed package, not development source via PYTHONPATH.
 
+On Windows Python 3.11, the standard venv bootstrap can install `setuptools`
+with an executable `distutils-precedence.pth`, which this runtime correctly
+rejects. If that bootstrap-only package is present, remove it after both wheels
+are installed with `python -m pip uninstall -y setuptools`; then run
+`python -m pip check` and verify no executable or path-extending `.pth` remains
+before generating a maintenance plan. Do not edit `.pth` files by hand.
+
 `codex-maintenance-plan` is read-only. It reports the exact candidate runtime
 identity and an intent object from the supplied actual human instruction. Its
 ownership snapshot is inspection evidence only: it never approves existing files.
@@ -25,7 +32,7 @@ For example, in PowerShell, after installing the immutable candidate wheels:
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $exe = (Get-Command thaliris).Source
 $plan = (& $exe codex-maintenance-plan codex-install --executable $exe --source-pin 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>' --human-instruction 'Install the reviewed Thaliris Host integration requested by the user.' | ConvertFrom-Json)
-$plan.maintenance_contract | ConvertTo-Json -Depth 16 | Set-Content -Encoding utf8 .\host-install-intent.json
+[IO.File]::WriteAllText((Join-Path (Get-Location) 'host-install-intent.json'), ($plan.maintenance_contract | ConvertTo-Json -Depth 16), [Text.UTF8Encoding]::new($false))
 & $exe codex-install --maintenance-contract (Resolve-Path .\host-install-intent.json)
 ```
 

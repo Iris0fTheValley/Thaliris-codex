@@ -38,7 +38,7 @@ pytest
 POSIX shell 中，先设置 THALIRIS_CORE_SOURCE=../Thaliris，再运行 pytest。
 CI 将该变量指向 shared-core checkout。
 
-安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。正式 Host 安装应将两个 wheel 安装进禁用 system site packages 的专用环境；editable .pth 路径不会通过运行时 pin 验证。整个环境的文件（含共享 Core）被纳入 manifest。
+安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。正式 Host 安装应将两个 wheel 安装进禁用 system site packages 的专用环境；含可执行内容或扩展导入路径的 `.pth` 不会通过运行时 pin 验证。在 Windows Python 3.11 中，如果标准 venv bootstrap 附带 `setuptools` 与 `distutils-precedence.pth`，可在安装两个 wheel 后移除仅用于 bootstrap 的包（`python -m pip uninstall -y setuptools`），运行 `python -m pip check` 并确认没有可执行或扩展路径的 `.pth`。整个环境的文件（含共享 Core）被纳入 manifest。
 
 [共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 基准结果](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
 
