@@ -1,7 +1,7 @@
 <!-- thaliris-role-registry:v1 -->
 # Thaliris Role Registry
 
-Generated from `thaliris_codex.roles.ROLE_REGISTRY`. Role prompts are canonical in `roles.py`; project routing and mechanical design are documented separately. `thaliris-role-packs.md` is generated from the same role source.
+This file is generated from `thaliris_codex.roles.ROLE_REGISTRY`; design and routing guidance remains hand-maintained in `thaliris-role-packs.md`.
 
 | Role | Default model | Default reasoning | Native profile | Repo writes | Delegation | Controller-state mutation | Install metadata |
 | --- | --- | --- | --- | --- | --- | --- | --- |

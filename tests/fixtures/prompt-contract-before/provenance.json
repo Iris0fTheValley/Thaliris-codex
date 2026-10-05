@@ -1,0 +1,26 @@
+{
+  "revision": "6396e138a0ccde3e4e34e961912fa627c30c7ff1",
+  "source_blobs": {
+    "src/thaliris_codex/roles.py": "2caba6cbf03b3ec60ff72a0d142edcbe60876335",
+    "src/thaliris_codex/codex_adapter.py": "70e2071d36efdfbc211408aa8aefc368e5c1069b",
+    "AGENTS.md": "57f978faaf3ec54bd0d6c726f194559cff0f199a",
+    "docs/thaliris-role-packs.md": "0fc56aba90855a98d98504b7215d42f06a9c4f3a",
+    "docs/thaliris-role-registry.md": "043b7a43028f7f4699ad6a378da5971c6582c31a"
+  },
+  "profiles": {
+    "thaliris-investigator.toml": "d34b8571689c0ffc5e68cd5fb316ef1b26d41dfa8e2e363e34bf8b465ecca544",
+    "thaliris-curator.toml": "591e347124439005370b416f094c4f1fccf5d6b9283111fa334cc35a00cfc96c",
+    "thaliris-reasoning-specialist.toml": "196dd48254f6a70efc107a6e8102fe0c213f340f1c3121c81ced631eadfdd6ec",
+    "thaliris-implementer.toml": "12d444bd5e6e4692b9273c4d27e0a455dbae51bc111df93698a36af20917089d",
+    "thaliris-focused-implementer.toml": "7d782db39b9bc717d66829e601f2d98e37b04dc60cbb8f88ae1236e5fcf5614c",
+    "thaliris-verifier.toml": "fc1d73fec897f250125e3031d8c02ef0e035411467ed0126f62df193e8345188",
+    "thaliris-reviewer.toml": "a68a71a887329db70b7a0c4a1678265bf50bf8559d2e448a424c927e6d5e88da",
+    "thaliris-reasoning-specialist-astra-medium.toml": "31639f9b001b0b8ba88c6733e6c881f98b817513257c1921b67790c832f37b00",
+    "thaliris-reasoning-specialist-xhigh.toml": "476a79f410a5f68bbae0a8c4257ac69873523f73cb8d4de6fb3de8725a638817",
+    "thaliris-focused-implementer-astra-medium.toml": "b4e4f862e020beb7741a150df71ec34fda7b668d3f24b3833bb88c17a497316a",
+    "thaliris-focused-implementer-xhigh.toml": "bc47660b4eae25733cc6a7542e3757226d0f61a59b21510f5b165af11db2f719"
+  },
+  "managed_sha256": "5dcbf66972efa6bc2b7888eee060a87c448ea7ee6991eae93d98ce8298dc7cd9",
+  "role_packs_sha256": "0f8db6dc0f89c5ae6d82a84de8e38b7e63bca877cdf0e20fa1fe452ae5dd82c8",
+  "role_registry_sha256": "04d6b201ff2329e8e203808a041d7243335eecebedcdbcb9094aee2dd4067014"
+}

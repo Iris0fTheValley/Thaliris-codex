@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tomllib
+
 from tests.support.history import historical_blob
 
 import ast
@@ -11,7 +13,7 @@ import subprocess
 import pytest
 
 from thaliris import core
-from thaliris_codex import cli, codex_adapter
+from thaliris_codex import cli, codex_adapter, roles
 from thaliris_codex import runtime_identity
 from thaliris_codex.lifecycle import handle_hook, hook_spec
 import thaliris_codex.lifecycle as lifecycle_module
@@ -270,28 +272,14 @@ def test_codex_install_updates_and_uninstall_removes_only_global_owned_span(tmp_
     assert b"task_start_receipt" in expected and b"--bootstrap-receipt" in expected
     assert b"--controller-bridge-sha256" not in expected
     assert b"bootstrap-check" not in expected and b" --root <repo> init" not in expected
-    assert b"Get-FileHash" not in expected and b"read-only work" in expected and b"Host Root identity remains UNKNOWN" in expected
-    assert b"Choose one model/profile for the current Workstream" in expected
-    assert b"Standard Implementer on Luna is the default" in expected
-    assert b"A Scanner batches related searches and reads" in expected
-    assert b"stops as soon as evidence is\nsufficient" in expected
-    assert b"do not expand a scan for one more confirmation" in expected
-    assert b"Focused Implementer directly read known, decision-critical sources" in expected
-    assert b"independent working set" in expected
-    assert b"Targeted" in expected and b"reopening of relevant originals is useful" in expected
-    assert b"current-task user" in expected and b"authorization" in expected
-    assert b"small local searches may be direct" in expected
-    assert b"completed Investigator discovery is selected for a later semantic Workstream" in expected
-    assert b"covered and\nuncovered scope" in expected
-    assert b"directly reopen decision-critical originals, call chains, diffs, and\ntests" in expected
-    assert b"do not reconstruct the covered broad inventory" in expected
-    assert b"genuinely uncovered decision-changing evidence gap" in expected
-    normalized_expected = " ".join(expected.decode().split())
-    assert "Continue core implementation across local checkpoints only while the next step could still change the core semantic solution" in normalized_expected
-    assert "Focused Implementer owns semantic convergence of its implementation candidate" in normalized_expected
-    assert "Continue only verification or repair that could still change the core semantic solution" in normalized_expected
-    assert b"every explicit user goal is addressed, explicitly deferred, or has a\ndecision-changing blocker" in expected
-    assert b"semantic instruction, not a mechanical\nchecklist or state machine" in expected
+    assert b"Get-FileHash" not in expected
+    normalized_expected = " ".join(expected.decode().lower().split())
+    for concept in ("read-only", "host root identity remains unknown", "managed children",
+                    "authority", "task-recover-state", "task-recover-authority",
+                    "fences", "global integration", "project router"):
+        assert concept in normalized_expected
+    assert "focused-test pass" not in normalized_expected
+    assert "smallest relevant tests" not in normalized_expected
 
     second = codex_adapter.codex_install()
     assert second["changed"] is False
@@ -674,8 +662,8 @@ def test_explicit_managed_instruction_migration_replaces_only_confirmed_span(tmp
     prefix = "# User-owned project notes\n\n"
     suffix = "\n\n## User-owned footer\nKeep this text.\n"
     stale = codex_adapter.render_managed().replace(
-        "On READY or DEFINITION_READY_ACTOR_UNKNOWN,",
-        "On READY, use stale bootstrap advice instead",
+        codex_adapter.MANAGED_END,
+        "User-owned stale routing advice\n" + codex_adapter.MANAGED_END,
         1,
     )
     path.write_text(prefix + stale.removesuffix("\n") + suffix, encoding="utf-8")
@@ -2440,111 +2428,6 @@ def test_invalid_v1_active_state_admits_init_then_exact_recovery(tmp_path: Path,
     assert current["schema_version"] == core._STATE_SCHEMA_VERSION
 
 
-def test_role_profiles_keep_routing_and_model_choice_with_the_controller(tmp_path: Path) -> None:
-    del tmp_path
-    for name, (model, effort, role) in codex_adapter._AGENT_PROFILES.items():
-        profile = codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode()
-        assert "sole task-specific input" in profile
-        assert "distilled result" in profile
-        assert "another native Codex child session" not in profile
-        assert "Never select your own model or reasoning effort" not in profile
-        assert "Facts unknown route to Investigator" not in profile
-        assert "model choice follows the current semantic slice" not in profile
-        assert "Only the Controller decides task direction" in profile
-        assert "sandbox_mode" not in profile
-        for removed in ("context prepare --role", "REVALIDATION_REQUIRED", "MECHANICAL or LOCAL_SEMANTIC"):
-            assert removed not in profile
-    assert "sole task-specific semantic router" in codex_adapter.MANAGED
-    assert "never calls Core" in codex_adapter.MANAGED
-    assert codex_adapter._ROLE_MODEL_DEFAULTS == {
-        "controller": (None, None),
-        "investigator": ("gpt-6-luna", "xhigh"),
-        "curator": ("gpt-6-luna", "xhigh"),
-        "reasoning-specialist": ("gpt-6.1-sol", "high"),
-        "implementer": ("gpt-6-luna", "xhigh"),
-        "focused-implementer": ("gpt-6.1-sol", "high"),
-        "verifier": ("gpt-6-luna", "xhigh"),
-        "reviewer": ("gpt-6.1-sol", "high"),
-    }
-    assert set(codex_adapter._AGENT_PROFILES) == {
-        "thaliris-investigator.toml", "thaliris-curator.toml",
-        "thaliris-reasoning-specialist.toml", "thaliris-implementer.toml",
-        "thaliris-verifier.toml", "thaliris-focused-implementer.toml",
-        "thaliris-reviewer.toml", "thaliris-focused-implementer-xhigh.toml", "thaliris-reasoning-specialist-xhigh.toml",
-        "thaliris-focused-implementer-astra-medium.toml", "thaliris-reasoning-specialist-astra-medium.toml",
-    }
-    assert "Controller has no fixed model, reasoning effort, or native" in codex_adapter.MANAGED
-    assert "Host/user selection applies" in codex_adapter.MANAGED
-    assert "Decisions, invariants, and\nacceptance are contract; recommendations/advice are not." in codex_adapter.MANAGED
-    assert "installed pinned `thaliris-run.cmd` command named by the global startup block" in " ".join(codex_adapter.MANAGED.split())
-    assert "Do not choose `bootstrap-check` or `init` for normal startup" in codex_adapter.MANAGED
-    assert "task_start_receipt" in codex_adapter.MANAGED
-    assert "standalone direct `task-start --bootstrap-receipt <receipt> --authority-contract FILE_PATH` call described by the global startup block" in " ".join(codex_adapter.MANAGED.split())
-    assert "managed child inside an ACTIVE task" in codex_adapter.MANAGED
-    assert "do not run project bootstrap, task-start, or task-abandon" in codex_adapter.MANAGED
-    assert "report blocked work honestly" in codex_adapter.MANAGED
-    assert "whether ACTIVE or degraded, it selects the minimum necessary fresh roles" in codex_adapter.MANAGED
-    assert "Roles are capabilities, not mandatory workflow stages" in codex_adapter.MANAGED
-    assert "Controller -> fresh\nImplementer -> done" in codex_adapter.MANAGED
-    assert "degraded mode does not define a separate role\nsequence" in codex_adapter.MANAGED
-    assert "For divisible work, Root routes by semantic Workstream" in codex_adapter.MANAGED
-    normalized_managed = " ".join(codex_adapter.MANAGED.split())
-    assert "A semantic checkpoint is not necessarily a scheduling checkpoint." in normalized_managed
-    assert "Root routes workstreams. Executors close local loops inside them." in normalized_managed
-    assert "not by token, file, or task-count\nthresholds" in codex_adapter.MANAGED
-    assert "Choose one model/profile for the current Workstream from its work\nshape, not as a ladder." in codex_adapter.MANAGED
-    assert "Astra medium and\nxhigh remain exceptional profiles of" in codex_adapter.MANAGED
-    assert "current-task user\nauthorization" in codex_adapter.MANAGED
-    assert "Importance, file count, cross-module\nscope, number of local closures, or ordinary alternatives alone do not determine\nthe choice." in codex_adapter.MANAGED
-    assert "Before choosing an opportunistic discovered slice" in codex_adapter.MANAGED
-    managed = " ".join(codex_adapter.MANAGED.split())
-    assert "Use Reasoning Specialist when an independent challenge may materially change direction" in managed
-    assert "Default bindings above remain unchanged without an explicit constraint" in managed
-    assert "codex-install --execution-constraint luna-only" in managed
-    assert "mutable config and children cannot change this policy" in managed
-    assert "framing appears coherent or an outcome is unexpected" in managed
-    assert "difficulty alone is not a trigger" in managed
-    assert "Automatic routing stops at Sol" in managed
-    assert "Saved Host registration alone does not prove\ncurrent-session activation" in codex_adapter.MANAGED
-    assert "NEW_ROLE_CATALOG_IDENTITY_NOT_ACTIVE" in codex_adapter.MANAGED
-    assert "Before another semantic correction Workstream, distinguish a local implementation" in codex_adapter.MANAGED
-    assert "overturns an accepted invariant" in codex_adapter.MANAGED
-    assert "depends on an unverified external capability" in codex_adapter.MANAGED
-    assert "makes feasibility uncertain" in codex_adapter.MANAGED
-    assert "changes a Controller boundary or contract" in codex_adapter.MANAGED
-    assert "Missing factual information routes to the Investigator role" in managed
-    assert "When an independent challenge could materially change direction, route the selected framing and evidence to a fresh Reasoning Specialist" in managed
-    assert "accepted design is unchanged and the defect is outside the active Workstream, Root may route a fresh Implementer Workstream" in managed
-    assert "Do not use it for broad fact gathering, implementation, routine review, or ordinary hard-problem solving" in managed
-    assert "Do not use counters, thresholds, risk scores, classifiers, or a state machine" in managed
-    assert "check and synchronize both the repository-managed" in codex_adapter.MANAGED
-    implementer = codex_adapter._agent_profile(
-        "thaliris-implementer", "implementer", "gpt-5.6-luna", "xhigh"
-    ).decode()
-    assert "If an assigned correction cannot" in implementer
-    assert "unverified external fact, an invalidating accepted invariant" in implementer
-    assert "do not expand scope" in implementer
-    assert "decision-changing unknown to the Controller" in implementer
-    assert "The native child profiles are Investigator" in codex_adapter.ROLE_PACKS
-    assert "Controller-decided boundaries/contracts" in " ".join(codex_adapter.ROLE_PACKS.split())
-    assert "recommendations/advice are not contract" in " ".join(codex_adapter.ROLE_PACKS.split())
-    assert "Do not silently drop, guess, or freeze an unknown" in codex_adapter.ROLE_PACKS
-    # Git may materialize this LF-owned document as CRLF when core.autocrlf is
-    # enabled; keep the ownership check exact after normalizing line endings.
-    role_packs = Path("docs/thaliris-role-packs.md").read_bytes()
-    role_packs = role_packs.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    assert role_packs == codex_adapter.ROLE_PACKS.encode("utf-8")
-    assert "established, revised, invalidated, or materially clarified reusable" in " ".join(codex_adapter.ROLE_PACKS.split())
-    assert "the selected candidates, their facts and supporting evidence, exact relevant prior memory" in " ".join(codex_adapter.ROLE_PACKS.split())
-    assert "only after Reviewer PASS" not in codex_adapter.ROLE_PACKS
-    assert "read-only compatibility role, not recommended" in codex_adapter.ROLE_PACKS
-    assert "workspace anomaly as an observation" in codex_adapter.ROLE_PACKS
-    assert "exact independent historical evidence" in codex_adapter.ROLE_PACKS
-    verifier = codex_adapter._agent_profile(
-        "thaliris-verifier", "verifier", "gpt-5.6-luna", "xhigh"
-    ).decode()
-    assert "current HEAD must not establish its own historical authority" in verifier
-    assert "Verifier does not replace independent review" in verifier
 
 
 def test_host_capability_record_requires_sessionmeta_for_live_implementer_activation() -> None:
@@ -3088,3 +2971,25 @@ def test_exact_historical_role_pack_migrates_and_unknown_bytes_are_preserved(tmp
     assert codex_adapter._role_pack_state(packs.read_bytes()) == "user"
     codex_adapter.init(root)
     assert packs.read_bytes() == legacy + b"\nuser edit\n"
+
+
+def test_role_profiles_keep_routing_and_model_choice_with_the_controller() -> None:
+    # Public ingress/binding facts remain mechanical contracts. Prompt ownership
+    # and semantic concepts are tested separately in test_prompt_contract.py.
+    assert codex_adapter._ROLE_MODEL_DEFAULTS == {
+        "controller": (None, None),
+        "investigator": ("gpt-6-luna", "xhigh"),
+        "curator": ("gpt-6-luna", "xhigh"),
+        "reasoning-specialist": ("gpt-6.1-sol", "high"),
+        "implementer": ("gpt-6-luna", "xhigh"),
+        "focused-implementer": ("gpt-6.1-sol", "high"),
+        "verifier": ("gpt-6-luna", "xhigh"),
+        "reviewer": ("gpt-6.1-sol", "high"),
+    }
+    for name, (model, effort, role) in codex_adapter._AGENT_PROFILES.items():
+        parsed = tomllib.loads(codex_adapter._agent_profile(name[:-5], role, model, effort).decode())
+        assert parsed["developer_instructions"] == roles.profile_instructions(role, name[:-5])
+        assert "sandbox_mode" not in parsed
+        assert "sole task-specific input" in parsed["developer_instructions"]
+    assert Path("docs/thaliris-role-packs.md").read_text(encoding="utf-8") == codex_adapter.render_role_packs()
+    assert Path("docs/thaliris-role-registry.md").read_bytes() == roles.render_registry_document()

@@ -166,46 +166,39 @@ def test_authoritative_prose_uses_role_names_or_explicit_native_child_context() 
     assert "Do not delegate to another child" not in generated
     assert "another native Codex child session" not in generated
     assert "Shared Child Result" not in generated
-    assert "For every task,\nwhether ACTIVE or degraded, it selects the minimum necessary fresh roles." in generated
-    assert "Roles are capabilities, not mandatory workflow stages." in generated
-    assert "Controller -> fresh\nImplementer -> done" in generated
-    assert "Use the Investigator role for missing facts, large working sets, broad scans," in generated
-    assert "Use a Reviewer only when independent semantic review adds real\nvalue; it is not a default gate." in generated
-    assert "apply the same minimum-role\nrouting policy defined above" in generated
-    assert "degraded mode does not define a separate role\nsequence" in generated
-    assert "Decision-changing investigation belongs to the Investigator role. Bounded local reading\nneeded for implementation may stay inside Implementer or Focused Implementer." in generated
-    assert "Repository investigation belongs to fresh Investigator sessions" not in generated
-    assert "fresh serial Investigator, Implementer, and Reviewer sessions" not in generated
-    assert "belong to fresh\nthose roles" not in generated
-    assert "Fresh Investigator, Curator, Reasoning Specialist, Implementer, Focused Implementer, Verifier, and Reviewer sessions use" in codex_adapter.render_managed()
-    assert "and receive their tasks plus selected information" in generated
+    project = codex_adapter.render_managed()
+    normalized_project = " ".join(project.split())
+    assert "The Controller is the sole task-specific semantic router." in normalized_project
+    assert "In delegated mode, Controller owns direction, scope, acceptance, context selection" in normalized_project
+    assert "Controller-direct permits Controller execution with useful fresh auxiliary roles" in normalized_project
+    assert "single-agent permits ordinary execution without children." in normalized_project
+    assert "Choose the minimum necessary fresh role for the Workstream's work shape" in normalized_project
+    assert "Provide a decision-complete handoff:" in normalized_project
+    assert "Ordinary Implementer may finish assigned deterministic execution and Git closure in the same Workstream." in normalized_project
+    assert "Focused Implementer returns at semantic convergence:" in normalized_project
+    assert "Fresh role sessions use `fork_turns=\"none\"` and only the authorized parent's native" in normalized_project
+    assert "Controller may spawn registered roles; Implementer, Focused Implementer and Reviewer" in normalized_project
 
 
-def test_routing_guidance_permits_the_bounded_implementer_only_path() -> None:
+def test_routing_guidance_assigns_stable_direction_to_ordinary_implementer() -> None:
     root = Path(__file__).resolve().parents[1]
     protocol = (root / "docs" / "thaliris-routing-protocol.md").read_text(encoding="utf-8")
     role_packs = (root / "docs" / "thaliris-role-packs.md").read_text(encoding="utf-8")
     normalized_protocol = " ".join(protocol.split())
-    assert "For every task, the Controller selects the minimum necessary fresh semantic\nroles" in protocol
-    assert "Roles are capabilities, not mandatory workflow stages." in protocol
-    assert "policy is identical for ACTIVE and degraded work" in protocol
-    assert "Controller -> fresh Implementer -> done" in protocol
-    assert "Reviewer is conditional, not a mechanical post-implementation gate" in protocol
-    assert "Curator and Reasoning Specialist are optional" in protocol
-    assert "For divisible work, Root routes by semantic Workstream" in protocol
-    assert "a semantic checkpoint is not necessarily a scheduling checkpoint" in normalized_protocol.lower()
-    assert "root routes workstreams. executors close local loops inside them" in normalized_protocol.lower()
-    assert "not by token, file, or task-count thresholds" in normalized_protocol
-    assert "Standard Implementer on Luna is the default for a stable problem structure and direction" in normalized_protocol
-    assert "Before choosing an opportunistic discovered slice" in normalized_protocol
-    assert "Choose one model/profile for the current Workstream from its work" in normalized_protocol
-    assert "Decision-changing investigation belongs to the\nInvestigator role" in protocol
-    assert "needed for implementation may stay inside Implementer or Focused Implementer" in protocol
-    assert "bounded local reading, implementation, and deterministic verification" in role_packs.replace("\n", " ")
-    assert "an Investigator is needed only when missing facts could change" in role_packs
-    assert "Work only within the assigned semantic Workstream" in role_packs
-    assert "distilled state, its commit reference, and verification evidence" in role_packs
-    assert "not a mechanical post-implementation gate" in role_packs
+    normalized_role_packs = " ".join(role_packs.split())
+    assert "Roles are capabilities, not mandatory stages." in normalized_protocol
+    assert "Choose one profile for the Workstream's work shape" in normalized_protocol
+    assert "Investigator gathers broad facts without architecture decisions." in normalized_protocol
+    assert "Stable accepted direction and deterministic convergence use ordinary Implementer." in normalized_protocol
+    assert "Coupled invariants or nonlocal constraints needing sustained reasoning use Focused Implementer." in normalized_protocol
+    assert "Controller routes Workstreams by semantic dependencies, decision coupling" in normalized_protocol
+    assert "a semantic checkpoint is not necessarily a scheduling checkpoint." in normalized_protocol
+    assert "Ordinary Implementer may finish assigned verification, deterministic fixes" in normalized_protocol
+    assert "Focused Implementer owns the full reasoning" in normalized_protocol
+    assert "No blocker found is not verified acceptance." in normalized_protocol
+    assert "Own implementation methods within the accepted Workstream." in normalized_role_packs
+    assert "Implement the stable accepted direction through deterministic convergence." in normalized_role_packs
+    assert "ordinary in-scope failures in the same session" in normalized_role_packs
 
 
 def test_nested_scanner_probe_guidance_is_scoped_and_linked() -> None:
@@ -213,40 +206,36 @@ def test_nested_scanner_probe_guidance_is_scoped_and_linked() -> None:
     protocol = (root / "docs" / "thaliris-routing-protocol.md").read_text(encoding="utf-8")
     role_packs = (root / "docs" / "thaliris-role-packs.md").read_text(encoding="utf-8")
     rendered = codex_adapter.ROLE_PACKS
+    adapter_protocol = (root / "adapter" / "codex" / "README.md").read_text(encoding="utf-8")
     artifact = root / "docs" / "codex-nested-scanner-live-20260925.md"
 
     assert artifact.is_file()
+    normalized = " ".join(adapter_protocol.split())
+    assert "One Codex Desktop probe on CLI `0.155.0-alpha.9.2`" in normalized
+    assert "matching lifecycle child hashes in SubagentStart/PreToolUse" in normalized
+    assert "the Scanner result and the Focused Implementer's continuation" in normalized
+    assert "does not establish native child `Completed`" in normalized
+    assert "raw Host wire-byte equality" in normalized
+    artifact_text = artifact.read_text(encoding="utf-8")
+    assert "native_terminal_status: null" in artifact_text
+    assert "byte-for-byte equality of raw Host tool wire input" in artifact_text
     for document in (protocol, role_packs, rendered):
-        normalized = " ".join(document.split())
-        assert "One live managed Codex CLI `0.155.0-alpha.9.2` probe" in normalized
-        assert "exact reservation" in normalized
-        assert "bound Scanner `PreToolUse` acceptance" in normalized
-        assert "result returned" in normalized
-        assert (
-            "Focused parent continued" in normalized
-            or "Focused Implementer parent continued" in normalized
-        )
-        assert "codex-nested-scanner-live-20260925.md" in normalized
-        assert "Raw Host wire-byte equality" in normalized
-        assert "native child `Completed`/`task-close` completion" in normalized
-        assert "grandchild hook identity behavior remains UNKNOWN" not in normalized
+        assert "codex-nested-scanner-live-20260925.md" not in document
 
 
 def test_nested_scanner_artifact_links_render_as_relative_markdown() -> None:
     root = Path(__file__).resolve().parents[1]
     source = (root / "src" / "thaliris_codex" / "codex_adapter.py").read_text(encoding="utf-8")
     role_packs = (root / "docs" / "thaliris-role-packs.md").read_text(encoding="utf-8")
+    adapter_protocol = (root / "adapter" / "codex" / "README.md").read_text(encoding="utf-8")
 
-    project_link = "[durable probe evidence](docs/codex-nested-scanner-live-20260925.md)"
-    role_pack_link = "[durable probe evidence](codex-nested-scanner-live-20260925.md)"
+    adapter_link = "[2026-09-25 nested Scanner probe record](../../docs/codex-nested-scanner-live-20260925.md)"
 
-    assert project_link in source
-    assert project_link in codex_adapter.render_managed()
-    assert role_pack_link in source
-    assert role_pack_link in role_packs
+    assert adapter_link in adapter_protocol
+    assert (root / "adapter" / "codex" / "../../docs/codex-nested-scanner-live-20260925.md").resolve().is_file()
+    assert "codex-nested-scanner-live-20260925.md" not in source
+    assert "codex-nested-scanner-live-20260925.md" not in role_packs
     assert codex_adapter.render_role_packs() == role_packs
-    assert "[durable probe evidence]\n" not in source
-    assert "[durable probe evidence]\n" not in role_packs
 
 
 def test_lifecycle_policy_denials_name_role_sessions_or_native_codex_sessions() -> None:

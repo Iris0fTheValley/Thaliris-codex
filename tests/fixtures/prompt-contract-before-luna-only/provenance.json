@@ -1,0 +1,13 @@
+{
+  "revision": "6396e138a0ccde3e4e34e961912fa627c30c7ff1",
+  "execution_constraint": "luna-only",
+  "source_blobs": {
+    "src/thaliris_codex/roles.py": "2caba6cbf03b3ec60ff72a0d142edcbe60876335",
+    "src/thaliris_codex/codex_adapter.py": "70e2071d36efdfbc211408aa8aefc368e5c1069b"
+  },
+  "profiles": {
+    "thaliris-focused-implementer.toml": "2cf93560defdfab4d77c853b3c9e29371894c0279acee84f0cfb345d0a92f3e8",
+    "thaliris-reasoning-specialist.toml": "2e676eb0320e3db6dc66d6b088e5bd576bc68a8a906dbade0dd45723cd9a501e",
+    "thaliris-reviewer.toml": "db03a68d46eb5057da6f72e04fea9dec3a1c48c0e2e32b0d2581272bb63343ae"
+  }
+}

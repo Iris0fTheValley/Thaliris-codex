@@ -39,232 +39,29 @@ Core stores this optional non-empty string as immutable intent. The adapter acce
 
 This feature requires thaliris>=0.4.3. Development tests must install the Core checkout used for this fix; the older monolithic wheel does not satisfy the split-package boundary.
 
-## Shared Thaliris Core
+## Runtime prompt layers
 
-Thaliris is a Git-native mechanical context and lifecycle layer. It does not
-run agents and does not decide what is relevant, correct, or sufficient to
-finish a task.
+Global instructions own startup, authority/security and recovery. The project router
+owns Controller direction/scope/acceptance, role selection and Workstream closure.
+Native generated role prompts own execution style, delegation and endpoints. Each
+invariant has one normal runtime authority; rationale and mechanical design live in
+[Codex protocol](adapter/codex/README.md) and [Core prompt design](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md).
 
-> Models own semantics. The mechanical layer executes model decisions.
+Controller supplies decision-complete selected handoffs; implementation methods belong
+to the executor. Ordinary Implementer owns stable direction and deterministic convergence.
+Focused Implementer owns the full reasoning, implementation, runtime-feedback and revision
+loop for coupled invariants; once focused evidence supports core semantics and remaining
+tasks cannot change the decision basis, it returns FINAL and releases that context.
+Fresh ordinary Implementer handles remaining regression, build/sync, deterministic defects,
+installation and Git closure. Shared execution guidance does not extend the Focused endpoint.
+Reviewer is fresh independent and non-writing; READY requires evidence supporting critical
+acceptance, not absence of blockers. Core/lifecycle observations do not decide acceptance.
 
-For runtime drift and offline recovery, see [Runtime drift and recovery](docs/thaliris-runtime-recovery.md).
-
-Persistent human task intent, reconnect recovery, and explicit Controller-direct and single-agent modes are described in [Task authority](docs/thaliris-task-authority.md).
-
-## Production flow
-
-```text
-Controller
-    │ explicit task + selected information
-    ▼
-selected role session
-    ├── private working set
-    ├── optional detailed Artifact
-    └── distilled result
-            │
-            ▼
-        Controller
-            └── decides the next handoff
-```
-
-The authorized parent's native spawn message is each role session's only task-specific
-semantic input. `SubagentStart` validates authorization, identity, role, and
-session and binds lifecycle and handoff metadata. It does not construct a context
-packet or return task-specific `additionalContext`.
-
-There is no production path from task state through a role projection into a
-role session, and no hidden model auditor that corrects or blocks the Controller.
-
-## Responsibilities
-
-The Controller owns routing, context selection, interpretation, acceptance,
-and completion. For ACTIVE and degraded work, it selects the minimum necessary
-fresh roles; roles divide cognitive load rather than define mandatory stages.
-The current design separates the main loads: the Controller preserves the goal
-and selects context; Investigator carries large working sets, repository scans,
-and fact compression; Implementer owns implementation; Reviewer independently
-challenges the result. Complex implementation may use a more focused,
-higher-capability execution binding, while implementation decisions stay with
-the executor. Reasoning Specialist is reserved for reframing the problem when
-the problem definition, abstraction, or assumptions are themselves unclear.
-Durable-knowledge admission belongs to the Controller. During normal task work,
-Root notices reusable knowledge in user input, its own decisions, Investigator
-evidence, Executor results, Reviewer findings, and Specialist challenges. This
-remains private working-context awareness; it creates no candidate register,
-saved admission state, counter, score, threshold, extra checkpoint, or
-interruption of an active Workstream. Executors return their normal result and
-do not track candidates, spawn Curator, maintain durable INDEX navigation, or
-add a separate memory-governance section to FINAL.
-
-Near the task's natural end, as part of ordinary closure before `task-close`,
-the Controller decides whether evidence established, revised, invalidated, or
-materially clarified reusable project knowledge and whether a concise, sourced
-memory entry would improve, constrain, or accelerate future decisions or
-recovery. This is not limited to facts a future agent would otherwise need to
-reinvestigate. With selected candidates, Root supplies a fresh Curator with the
-facts and supporting evidence, exact relevant prior memory and INDEX navigation,
-and canonical sources needed to reconcile them. With no candidates or no future value, it skips Curator; small ordinary
-tasks can skip it entirely. Task size or architecture work alone never makes
-Curator mandatory.
-
-Existing docs, source, instructions, tests, commits, and rollouts are neither
-automatic exclusions nor reasons by themselves to create memory. Use them as
-evidence and avoid duplicating canonical text. Memory can act as a future-Agent
-recovery entrance by linking or summarizing easy-to-locate canonical material,
-or by compressing a decision basis spread across code, Host, history, or design.
-Curator reconciles selected candidates with the supplied sources and can report
-that existing knowledge is sufficient and no write is needed. When adding,
-revising, merging, splitting, narrowing, superseding, or deleting selected
-memory, Curator also judges whether relevant INDEX navigation needs an update
-and updates it when needed. The ordinary Implementer keeps product and protocol
-documentation and the README aligned with verified behavior in the assigned
-Workstream. Focused Implementer synchronizes those documents only when needed
-to establish core semantics; after its endpoint, deterministic documentation
-synchronization belongs to a fresh ordinary Implementer Workstream when
-assigned. Compatibility or specialized profiles may exist without becoming
-mandatory workflow stages.
-
-Both Implementer and Focused Implementer execute implementation work. Keep the
-working set focused. Investigator may carry a large private working set and
-compress broad scans, call sites, and residual references into facts, locations,
-evidence, and unknowns. Executors use that evidence while retaining implementation
-decisions. Reasoning Specialist reframes ill-defined problems. Verifier is a
-read-only compatibility role and is not recommended as a workflow stage.
-Focused Implementer owns semantic convergence of its candidate and continues
-only verification or repair that could still change the core semantic solution.
-It returns FINAL when hard invariants hold, decision-changing unknowns are
-resolved, focused evidence demonstrates core semantics, and no remaining work
-is likely to materially change the causal model, accepted architecture,
-contract, scope, acceptance, or direction. A focused-test PASS alone is not
-sufficient. After this endpoint, ordinary regression, lint, build, generated
-or documentation synchronization, mechanical compatibility, small deterministic
-fixes, installation, and Git closure belong to a fresh ordinary Implementer
-Workstream when assigned. Semantic defects exposed by installation or smoke
-feedback remain with Focused Implementer while they could change the core
-solution.
-
-Controller has no fixed model, effort, or native profile; Host/user selection
-applies. Investigator, Curator, and standard Implementer default to
-`gpt-6-luna/xhigh`; Focused Implementer, Reasoning Specialist, and Reviewer to
-`gpt-6.1-sol/high`; compatibility Verifier to `gpt-6-luna/xhigh`.
-Only Controller may select static Astra medium or xhigh profiles before spawn,
-and only with current-task user authorization. Automatic routing stops at Sol,
-including cross-surface uncertainty. Those profiles map to the same stable
-role IDs. Per-spawn
-model/effort overrides are denied.
-
-Role sessions keep intermediate work private and normally return only a
-distilled conclusion, key findings, decision-changing unknowns, contradictions,
-verification, and optional Artifact pointers.
-
-Core provides identities, revisions and compare-and-swap, locking, atomic
-writes and rollback, hashes, provenance, supersession history, objective file
-freshness observations, mechanical verification and task-surface observations,
-Artifact addressing, and explicit retrieval.
-
-Core does not decide relevance, importance, correctness, role applicability,
-task completion, or whether changed evidence invalidates a model conclusion.
-
-The Codex adapter provides fresh spawn isolation, `fork_turns="none"`, an
-authorized bounded depth-two native Codex child lifecycle, handoff hashes, SubagentStart/Stop identity,
-bounded missing-stop reconciliation, and native blocking waits. An automatic
-long-wait normalization occurs only when a pending reservation or managed native Codex child
-exists and a current-session effective maximum is mechanically verified;
-otherwise the requested timeout is preserved without automatic expansion.
-The Controller is carried by the Host/user-selected root session; child-profile
-model and effort choices belong to adapter role bindings.
-
-Only Implementer, Focused Implementer, and Reviewer may delegate one fresh
-Investigator/Scanner. There is one active top-level role session and at most
-one nested Scanner; its result belongs to its requesting parent. Exact parent
-agent/session/turn/role identity is required, with missing/conflicting fields
-denied. One live managed Codex CLI `0.155.0-alpha.9.2` probe verified the exact
-reservation, Start, and bound Scanner PreToolUse acceptance for a depth-two
-Scanner; the Scanner result returned and the Focused parent continued. See the
-[durable probe evidence](docs/codex-nested-scanner-live-20260925.md). That
-evidence covers only this CLI build and probe; raw Host wire-byte equality,
-other Host builds, and other Desktop scenarios remain UNKNOWN. A separate
-Codex Desktop probe on 2026-09-28 observed `list_agents` return an exact child
-name and native `completed` status; end-to-end Desktop `task-close` remains
-unobserved. Task-close requires the latest Controller-direct handoff's matching
-Start, Stop, and native `Completed` observation, with no pending or active
-descendants.
-
-## Task ledger
-
-The task ledger is a revisioned mechanical record. The Controller supplies records with identity, kind, text, producer, status, source references, and optional supersession. Kind and status are descriptive labels; Core validates schema, identity, and reference integrity without assigning workflow meaning. task-close checks task identity, revision, basic state consistency, and authorized adapter lifecycle. It does not decide whether tests are sufficient or the task is semantically complete.
-
-## Artifacts, memory, and milestones
-
-Artifacts store an ID, producer, repo-relative path, content hash, created
-revision, optional source references, and optional supersession. Core never
-reads an Artifact body for automatic propagation. The Controller explicitly
-retrieves it and selects any material for a later handoff.
-
-Durable navigation uses `catalog` and explicit exact-path `document-get` only.
-The root INDEX maps are model-maintained semantic navigation, not bare file
-listings. Their concise descriptions say what linked knowledge covers, when it
-is useful to read, and current versus historical applicability where useful;
-Root uses them to select exact recovery documents, with currently relevant
-knowledge discoverable first. Models choose natural paths, hierarchy, and
-wording without a fixed schema or taxonomy. Core never interprets, generates,
-or rebuilds INDEX content; it performs only mechanical path, CAS, size, link,
-and atomic-write checks. Legacy semantic metadata is opaque compatibility data,
-never search, display, or routing authority.
-SessionStart only points to the two root INDEX paths; it does not inject their
-contents. Before starting managed work, the Controller explicitly reads the
-root navigation and creates a minimal thin INDEX first if one is missing.
-Navigation is not reread automatically during the task unless the map changed,
-is insufficient, freshness is invalid, or resume/compact requires recovery.
-
-Milestones are ordinary documents. Curator is an optional knowledge-enhancement
-role, not a mandatory task stage. `task-promote` stores what the Controller
-explicitly selected without an epistemic qualification gate. When a
-`task-promote` call changes durable navigation, the Controller provides its
-optional `index_update` in the same call. Curator maintains relevant memory
-navigation during curation. Core checks paths, CAS, size, links, and atomic
-commit; it does not generate INDEX content.
-If Codex explicitly reports a native spawn failure before `SubagentStart`, the
-Controller may call `thaliris recover-pending-spawn HANDOFF_ID` for that exact
-handoff; Core never infers failure from a missing event, timeout, or retry.
-
-## Verification and task surface
-
-Freshness reports only FRESH, PARTIAL, RECORDED, CHANGED, MISSING, or UNKNOWN file facts. Verification records the command or tool, outcome, candidate identity, observed files, timestamp, and result hash. Task surface records the starting HEAD, dirty baseline, current state, and delta. Both are mechanical observations; neither establishes correctness, ownership, or semantic completion.
-
-## Persistent task authority
-
-The Controller's explicit task-start selects the actual human intent, scope, invariants, acceptance, and execution mode (delegated, controller-direct, or single-agent), and records the task anchor outside the repository. Host actor identity may remain UNKNOWN; prompt fields, session equality, PID, environment, and SessionSource do not prove human identity. Ordinary turn, network, Hook, session, or daemon interruptions do not require a new Root proof to continue the same task. Human revocation, task closure, Controller abandonment, or replacement ends that authority.
-
-task-recover-authority accepts only the exact external authority hash and a reason. It archives conflicts, restores recorded bytes, and fences known old children. It cannot bless changed security configuration as a new baseline, and it does not prove an old process has terminated. Changing the goal, scope, acceptance, execution mode, removing fences, or establishing a new security baseline requires a new superior human decision; a child cannot authorize those changes.
-
-## Commands
-
-On READY, write the UTF-8 JSON authority contract in a separate step, then pass its absolute path in a separate task-start invocation.
-
-For substantive work in a Git repository, run the installed
-`thaliris-run.cmd --root <repo> codex-bootstrap` first. If it returns READY,
-pass its bootstrap receipt to `thaliris-run.cmd --root <repo> task-start "goal" --bootstrap-receipt <receipt> --authority-contract <absolute-path-to-contract.json>`
-in the same session; the current Host Hook supplies the one-shot task-start
-attestation.
-
-```text
-thaliris init
-thaliris-run.cmd --root <repo> task-start "goal" --bootstrap-receipt <receipt> --authority-contract <absolute-path-to-contract.json>
-thaliris task-status
-thaliris task-get OBJECT_ID
-thaliris task-update --role controller --base-revision N --input update.json
-thaliris task-artifact --base-revision N --id A-001 --path path/to/file.md --summary "..."
-thaliris catalog
-thaliris document-get .agent-memory/model-chosen/a.md .milestones/current/status.md
-thaliris task-promote --role controller --base-revision N --input promotion.json
-thaliris task-close --base-revision N
-thaliris task-recover-authority --expected-authority-sha256 <hash> --reason "recover interrupted work"
-thaliris recover-pending-spawn HANDOFF_ID
-thaliris stale
-thaliris rollback BACKUP_ID
-thaliris doctor
-```
+`thaliris_codex.roles` is canonical for native profile generation. Exact historical hashes
+preserve safe upgrades; user-edited bytes and project profile shadows retain fail-closed
+behavior. [Profile document](docs/thaliris-role-packs.md) is generated. Source changes do
+not prove activation in a running Host and are not installed during an ACTIVE parent task.
+ABCD results below remain historical; this prompt normalization has no benchmark claim.
 
 ## ABCD benchmark results
 
