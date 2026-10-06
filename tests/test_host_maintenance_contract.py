@@ -418,6 +418,91 @@ def test_generation_crash_replays_original_contract(operation, surface, tmp_path
         assert all(maintenance.owned(receipt, n, (home / n).read_bytes()) for n in receipt["owned_bytes"] if n != "AGENTS.md#global")
 
 
+@pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
+@pytest.mark.parametrize("surface", ["COMMIT", "ARCHIVE"])
+def test_legacy_prior_generation_crash_replays_with_exact_receipt(
+    operation, surface, tmp_path, monkeypatch, pinned_test_thaliris
+):
+    """A pre-location prior stays receipt-authorized through interrupted recovery."""
+    import shutil
+    from thaliris_codex import host_transition
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    legacy_exe, _ = pinned_test_thaliris
+    initial_contract = intent(tmp_path, home, legacy_exe)
+    assert adapter.codex_install(maintenance_contract=initial_contract)["ok"]
+    prior = (home / runtime_identity.MANIFEST_NAME).read_bytes()
+    prior_record = runtime_identity.validate_manifest_record(prior)
+    assert runtime_identity.LOCATION_NAME not in prior_record["files"]
+    prior_receipt = (home / maintenance.RECEIPT_NAME).read_bytes()
+
+    candidate_venv = tmp_path / "independently-selected-candidate"
+    shutil.copytree(legacy_exe.parent.parent, candidate_venv)
+    candidate = candidate_venv / "Scripts" / legacy_exe.name
+    candidate.write_bytes(b"independently selected next-generation launcher")
+    (candidate_venv / "Lib/site-packages/thaliris_codex/cli.py").write_text(
+        "# next-generation candidate\n", encoding="utf-8"
+    )
+
+    original_binding = runtime_identity._assert_launcher_binding
+
+    def binding(path):
+        if Path(path).resolve() == legacy_exe.resolve():
+            raise ValueError("Windows console launcher interpreter binding is unavailable")
+        return original_binding(path)
+
+    monkeypatch.setattr(runtime_identity, "_assert_launcher_binding", binding)
+    with pytest.raises(ValueError, match="interpreter binding is unavailable"):
+        runtime_identity.validate_manifest(prior, legacy_exe, maintenance.digest(prior))
+    assert runtime_identity.validate_existing_manifest(
+        prior, legacy_exe, maintenance.digest(prior)
+    ) == prior_record
+    candidate_manifest = runtime_identity.manifest_bytes(candidate)
+    runtime_identity.validate_manifest(candidate_manifest, candidate, maintenance.digest(candidate_manifest))
+
+    monkeypatch.setattr(
+        adapter,
+        "_host_install_executable",
+        lambda _home, path, sha: (Path(path).resolve(), sha, None),
+    )
+    path = intent(tmp_path, home, candidate, operation)
+    approved_before = maintenance._files(home)
+    assert maintenance.validate_ownership(prior_receipt, prior, {})["runtime_sha256"] == maintenance.digest(prior)
+
+    original_write = adapter._atomic_host_write
+
+    def crash(target, contents):
+        relative = target.relative_to(home).as_posix() if target.is_relative_to(home) else ""
+        interrupted = relative == host_transition.NAME if surface == "COMMIT" else (
+            relative.startswith("thaliris-host-generations/")
+        )
+        if interrupted:
+            raise SimulatedProcessExit()
+        original_write(target, contents)
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", crash)
+    invoke = adapter.codex_install if operation == "codex-install" else adapter.codex_uninstall
+    with pytest.raises(SimulatedProcessExit):
+        invoke(maintenance_contract=path)
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", original_write)
+    journal, before, _after = host_transition.load(home, maintenance.contract(path, operation, home))
+    assert journal["phase"] == ("PREPARED" if surface == "COMMIT" else "COMMITTED")
+    assert {name: contents for name, contents in before.items() if contents is not None} == approved_before
+    assert before[maintenance.RECEIPT_NAME] == prior_receipt
+
+    result = invoke(maintenance_contract=path)
+    assert result["ok"], result
+    assert not host_transition.pending(home)
+    if operation == "codex-install":
+        installed = maintenance._installed(home)
+        assert installed == runtime_identity.manifest_bytes(candidate)
+    else:
+        assert not (home / runtime_identity.MANIFEST_NAME).exists()
+        assert not (home / maintenance.RECEIPT_NAME).exists()
+
+
 def test_partial_transition_drift_is_never_blessed(tmp_path, monkeypatch, pinned_test_thaliris):
     from thaliris_codex import host_transition
     home = tmp_path / "home"

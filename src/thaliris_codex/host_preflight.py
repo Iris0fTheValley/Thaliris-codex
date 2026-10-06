@@ -118,6 +118,26 @@ function AssertRuntime($bytes,$exe,$identity) {
   foreach ($name in $expected.Keys) { if (-not $seen.ContainsKey($name)) { $diff.Add(@{path=$name;expected=$expected[$name];actual='ABSENT';surface='runtime'}) } }
   if ($diff.Count) { throw ($diff|ConvertTo-Json -Depth 8 -Compress) }
   if ((FileHash $exe) -cne $m.executable_sha256) { throw 'launcher manifest hash mismatch' }
+  $location=Join-Path $venv 'thaliris-runtime-location.json'
+  if (Test-Path -LiteralPath $location) {
+    SafePath $location
+    if (-not $expected.ContainsKey('thaliris-runtime-location.json')) { throw 'runtime location anchor is not pinned' }
+    $anchor=Get-Content -LiteralPath $location -Raw -Encoding UTF8|ConvertFrom-Json
+    $interpreter=Join-Path ([IO.Path]::GetDirectoryName($exe)) 'python.exe'
+    $keys=@($anchor.PSObject.Properties.Name|Sort-Object)
+    if (($keys -join ',') -cne 'executable,format,interpreter,venv_dir' -or $anchor.format -cne 'thaliris-runtime-location-v1' -or $anchor.venv_dir -ine $venv -or $anchor.executable -ine $exe -or $anchor.interpreter -ine $interpreter) { throw 'runtime location changed: installed venv may not be relocated' }
+  }
+  if ([IO.Path]::GetExtension($exe) -ieq '.exe') {
+    # pip/distlib appends one UTF-8 interpreter line immediately before its ZIP.
+    # Successful dispatch via a surviving old interpreter is still relocation.
+    $data=[Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($exe))
+    $bindings=[regex]::Matches($data,'#!(?:"([^"\r\n]+)"|([^"\r\n]+))\r?\nPK\x03\x04')
+    if ($bindings.Count -ne 1) { throw 'Windows console launcher interpreter binding unavailable' }
+    $bound=$bindings[0].Groups[1].Value;if (-not $bound) { $bound=$bindings[0].Groups[2].Value }
+    $interpreter=Join-Path ([IO.Path]::GetDirectoryName($exe)) 'python.exe'
+    if (-not [IO.Path]::IsPathRooted($bound) -or $bound -ine $interpreter) { throw 'runtime launcher location changed: interpreter must be in same final directory' }
+    SafePath $interpreter
+  }
   $config=Get-Content -LiteralPath (Join-Path $venv 'pyvenv.cfg') -Raw
   if ($config -notmatch '(?im)^\s*include-system-site-packages\s*=\s*false\s*$') { throw 'system site packages enabled' }
   foreach ($pth in (Get-ChildItem -LiteralPath $venv -Recurse -Force -Filter '*.pth' -File)) {

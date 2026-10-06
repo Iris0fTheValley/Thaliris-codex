@@ -25,6 +25,30 @@ removal or `.pth` editing is part of normal installation. If setup fails, keep
 the failed directory as evidence and choose a new directory after correcting the
 reported input; an existing runtime directory is never modified by setup.
 
+Runtime location is a lifecycle identity invariant. Create the venv directly at
+its final physical directory before installing either package. On Windows setup
+observes that directory with `GetFinalPathNameByHandleW`; a redirected input is
+rejected before venv/package creation. For packaged Codex the final base is
+`%USERPROFILE%\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\Thaliris\runtimes`.
+Do not copy, move or rename an installed venv. Its pinned location anchor and
+pip launcher's absolute interpreter binding must agree with the final directory.
+Rehashing or rebasing a relocated candidate cannot make it valid, including when
+the original interpreter survives and the copied launcher can still execute.
+
+Setup invokes the normal public `thaliris.exe runtime-check` from the final path
+and checks its actual interpreter, prefix and package origin. Selection repeats
+this side-effect-free smoke after byte/isolation/provenance checks and before
+maintenance contract generation or Host mutation. Child environments set
+`PYTHONDONTWRITEBYTECODE=1`; retain that setting in the shell used for planning and
+maintenance. Preparation, executor/candidate selection and installation use the
+same final directory. Old owned manifests remain readable for diagnosis and
+ownership; a newly selected executor/candidate must have the setup location
+anchor and support `runtime-check`. Prior-generation verification preserves the
+original safety and exact-file checks without inventing new runnable/location
+assurance or withdrawing its independent receipt ownership.
+Preserve an invalid relocated candidate and recreate in a fresh final directory,
+without patching its launcher or substituting `python -m` for the public entry.
+
 `codex-maintenance-plan` is read-only. It reports the exact candidate runtime
 identity and an intent object from the supplied actual human instruction. Its
 ownership snapshot is inspection evidence only: it never approves existing files.
@@ -136,6 +160,19 @@ Codex home、已批准的不可变执行器和候选运行时身份，以及当�
 先按 [README 正常安装](../README.md) 使用包内 runtime installer：创建不含
 ensurepip 的专用环境，通过独立 bootstrap 的 pip 安装已选择的包，pip、setuptools
 及构建工具留在 runtime 之外；无需手工删除包或修改 `.pth`，隔离检查仍无例外。
+先确定最终物理目录，再直接在该目录创建 venv 和安装包。Windows setup 使用
+`GetFinalPathNameByHandleW` 观察目录；发生重定向时，在创建 venv 或安装包前停止并
+报告应选择的物理路径。打包版 Codex 直接使用 LocalCache 下的最终 runtime base。
+位置 anchor 与 pip launcher 的绝对 interpreter binding 必须一致，禁止复制、移动
+或重命名已安装 venv；重算 manifest 不能批准 relocation，旧 interpreter 仍存在且
+复制后的 console 能启动时也必须拒绝。保留失败候选，另选最终目录重新创建。
+setup 和维护选择使用普通最终路径 `thaliris.exe runtime-check` 验证实际 interpreter、
+prefix 与 package origin，并在生成维护 contract 前通过。子进程设置
+`PYTHONDONTWRITEBYTECODE=1`，执行 plan/维护的 shell 也须保留此设置。
+准备、contract 的 executor/candidate 与最终安装绑定同一目录；旧授权 manifest
+仍可用于诊断与 ownership，新选择的 executor/candidate 必须有 setup 位置 anchor
+并支持 `runtime-check`。旧 generation 保留原有安全与准确文件校验，不赋予新的
+位置或 runnable assurance，也不撤销其独立 receipt 所证明的 ownership。
 再用 `codex-maintenance-plan` 检查
 身份并生成维护意图。源码必须指定完整不可变 commit，或已校验 artifact SHA-256。
 plan 的现有文件 hash 只是审阅材料，不自动批准 ownership。安装前先完成全部

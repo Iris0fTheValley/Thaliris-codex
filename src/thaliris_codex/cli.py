@@ -65,6 +65,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_global_arguments(p)
     sub = p.add_subparsers(dest="command", required=True)
+    sub.add_parser("runtime-check", help="report this public console's interpreter and package origin without mutation")
     q = sub.add_parser("init")
     q.add_argument(
         "--accept-managed-instruction-sha256",
@@ -205,6 +206,17 @@ def main(argv: list[str] | None = None) -> int:
     args = None
     try:
         args = _parser().parse_args(argv)
+        if args.command == "runtime-check":
+            invoked = Path(sys.argv[0])
+            if sys.platform == "win32" and invoked.suffix != ".exe":
+                invoked = Path(str(invoked) + ".exe")
+            out = {"ok": True, "executable": str(invoked.resolve(strict=True)),
+                   "interpreter": str(Path(sys.executable).resolve(strict=True)),
+                   "venv_dir": str(Path(sys.prefix).resolve(strict=True)),
+                   "package_dir": str(Path(__file__).resolve(strict=True).parent),
+                   "bytecode_disabled": sys.dont_write_bytecode}
+            print(json.dumps(out, sort_keys=True, separators=(",", ":")))
+            return 0
         root = args.root.resolve()
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):

@@ -164,7 +164,9 @@ def load(home, intent):
         raise ValueError("Host transition prior identity differs from original approval")
     if prior is not None:
         prior_record = runtime_identity.validate_manifest_record(prior)
-        runtime_identity.validate_manifest(prior, Path(prior_record["executable"]), maintenance.digest(prior))
+        runtime_identity.validate_existing_manifest(
+            prior, Path(prior_record["executable"]), maintenance.digest(prior)
+        )
     # Validate historical receipt structure independently of effective files.
     old_receipt = before.get(maintenance.RECEIPT_NAME)
     ownership = maintenance.validate_ownership(old_receipt, prior, intent)

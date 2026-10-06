@@ -65,6 +65,11 @@ def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(codex_app_server, "remove_owned_hook_trust", lambda _home, keys: len(keys))
     from thaliris_codex import host_maintenance, runtime_identity
+    # These files deliberately are not native console launchers. Real pip,
+    # final-path and relocation evidence lives in test_runtime_setup.py.
+    monkeypatch.setattr(runtime_identity, "_assert_launcher_binding", lambda _exe: None)
+    monkeypatch.setattr(runtime_identity, "_assert_location", lambda _exe, **_kwargs: None)
+    monkeypatch.setattr(runtime_identity, "console_smoke", lambda _exe, _contents: {"ok": True})
     selection = {
         "executable": str(executable),
         "runtime_sha256": host_maintenance.digest(runtime_identity.manifest_bytes(executable)),

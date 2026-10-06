@@ -9,7 +9,8 @@ Codex 的 Host 适配器，依赖共享 [Thaliris Core](https://github.com/Iris0
 pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.3,<0.5。
 
 Windows Python 3.11+ 的正常安装先创建临时 bootstrap 环境，再使用包内的
-runtime installer。请独立选择已审阅的 adapter 完整 commit 和新的 runtime 目录：
+runtime installer。请独立选择已审阅的 adapter 完整 commit 和新的最终物理 runtime
+目录；打包版 Codex 直接使用其 LocalCache runtime base：
 
 ```powershell
 py -3.11 -m venv .thaliris-bootstrap
@@ -17,7 +18,8 @@ $bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
 $adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
 & $bootstrap -m pip install --no-deps $adapterSource
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --runtime "$env:LOCALAPPDATA\Thaliris\runtime-<reviewed-revision>" --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44' --adapter-source $adapterSource | ConvertFrom-Json)
+$finalRuntime = "$env:USERPROFILE\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\Thaliris\runtimes\codex-<reviewed-revision>"
+$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --runtime $finalRuntime --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44' --adapter-source $adapterSource | ConvertFrom-Json)
 if (-not $runtime.ok) { throw $runtime.error }
 $exe = $runtime.executable
 & $exe version
@@ -25,6 +27,14 @@ $exe = $runtime.executable
 
 请将 adapter commit 占位符替换为独立审阅的已发布不可变版本。Host 维护使用 `codex-maintenance-plan` 和明确的 `--maintenance-contract FILE`，不依赖项目 init/task admission。原始授权安装记录证明 bytes ownership；候选内容相同不证明 ownership。未知项目 role 文档保留且不单独阻止 admission，真正控制指令冲突仍阻止。受支持的卸载和正常重装保留用户配置及恢复证据。公共流程和 legacy 批准边界见 [Host 维护](docs/thaliris-host-maintenance.md)。
 
+
+setup 在创建 venv、安装包之前，通过 OS handle 观察最终物理目录；输入发生重定向时
+停止并报告应选择的路径。位置 anchor 与 Windows launcher 内嵌的 interpreter 必须
+绑定同一目录。setup 使用普通最终路径 `thaliris.exe runtime-check`，禁用 bytecode
+写入并验证实际 interpreter；维护选择在生成 contract 前重复该无副作用检查。
+准备、contract 和最终 Host 安装使用同一目录。禁止复制、移动或重命名已安装 venv；
+旧 interpreter 仍存在时，重算 manifest 也不能批准 relocation。保留失败候选，
+另选正确最终目录重新创建。
 
 本地开发使用已审阅的 Core checkout：
 

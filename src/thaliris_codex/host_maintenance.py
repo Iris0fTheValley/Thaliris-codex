@@ -41,6 +41,7 @@ def selected_runtime(value: object) -> tuple[Path, bytes]:
         raise ValueError("maintenance source pin must name an immutable commit or artifact SHA-256")
     exe = Path(value["executable"])
     contents = runtime_identity.manifest_bytes(exe)
+    runtime_identity._assert_location(exe.resolve(strict=True), required=True)
     runtime = runtime_identity.validate_manifest(contents, exe, value["runtime_sha256"])
     # pip's installed direct_url.json independently carries the fetched wheel
     # digest or resolved immutable VCS commit. A plausible label is not enough.
@@ -59,6 +60,9 @@ def selected_runtime(value: object) -> tuple[Path, bytes]:
         url = source.removeprefix("git+").split("@" + match.group(1), 1)[0] if match else None
         if match is None or vcs.get("vcs") != "git" or vcs.get("commit_id") != match.group(1) or direct.get("url") != url:
             raise ValueError("approved source pin differs from installed immutable VCS provenance")
+    # Execute only after isolation, exact bytes and independent installed
+    # provenance are checked. Rehashing a relocated venv supplies no admission.
+    runtime_identity.console_smoke(exe.resolve(strict=True), contents)
     return exe.resolve(strict=True), contents
 
 
@@ -190,7 +194,7 @@ def _installed(home: Path) -> bytes | None:
         return None
     contents = path.read_bytes()
     record = runtime_identity.validate_manifest_record(contents)
-    runtime_identity.validate_manifest(contents, Path(record["executable"]), digest(contents))
+    runtime_identity.validate_existing_manifest(contents, Path(record["executable"]), digest(contents))
     return contents
 
 

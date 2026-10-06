@@ -4,6 +4,8 @@ Run this module from a disposable bootstrap Python with pip installed. pip's
 --python route installs into a venv created without ensurepip. Build tools stay
 in the bootstrap/build environment, never in the pinned runtime. Nothing in an
 existing runtime or Codex home is removed or modified.
+Create directly at the final physical directory; installed venvs are never
+relocated. The public final-path console must pass before setup returns success.
 """
 from __future__ import annotations
 
@@ -39,20 +41,25 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
     if sys.version_info < (3, 11):
         raise ValueError("Host runtime setup requires Python 3.11+")
     sources = [_source(core_source), _source(adapter_source)]
-    target = directory.absolute()
+    target = Path(os.path.abspath(directory))
     if target.exists():
         raise ValueError("runtime destination already exists; select a new directory")
     for parent in target.parents:
         if runtime_identity._is_link(parent):
             raise ValueError("runtime destination contains a link")
+    # Observe the directory through an OS handle before installing anything.
+    # Store-app redirection is not resolved by spelling an absolute path.
+    target.mkdir(parents=True)
+    final = runtime_identity.physical_directory(target)
+    if os.path.normcase(str(final)) != os.path.normcase(str(target)):
+        raise ValueError(f"runtime destination is redirected; select final physical directory: {final}")
+    target = final
+    (target / runtime_identity.LOCATION_NAME).write_bytes(runtime_identity.location_bytes(target))
     # Copies are intentional: a system Python symlink is outside the venv's
     # independently pinned file topology.
     venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
     interpreter = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    environment = os.environ.copy()
-    for name in ("PYTHONPATH", "PYTHONHOME", "PIP_TARGET", "PIP_PREFIX", "PIP_USER"):
-        environment.pop(name, None)
-    environment.update(PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1")
+    environment = runtime_identity.child_environment()
     subprocess.run([sys.executable, "-I", "-B", "-m", "pip", "--isolated", "--python", str(interpreter),
                     "install", "--no-deps", "--no-compile", *sources],
                    env=environment, check=True, stdout=sys.stderr)
@@ -67,8 +74,10 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
                    env=environment, check=True, stdout=sys.stderr)
     if runtime_identity.manifest_bytes(executable) != contents:
         raise ValueError("new runtime changed during verification")
+    smoke = runtime_identity.console_smoke(executable, contents)
     return {"ok": True, "executable": str(executable),
             "runtime_sha256": runtime_identity.manifest_identity(contents),
+            "runtime_dir": str(target), "console_smoke": smoke,
             "host_installed": False, "project_files_touched": []}
 
 

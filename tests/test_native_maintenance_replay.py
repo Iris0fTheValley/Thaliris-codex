@@ -5,34 +5,27 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
-import venv
 
 import pytest
 import thaliris
 from thaliris import core
 
-from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, host_transition, lifecycle, runtime_identity
+from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, host_transition, lifecycle, runtime_identity, runtime_setup
 from tests.test_host_maintenance_contract import intent, snapshot
+from tests.test_runtime_setup import source_wheel
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="real Windows native preflight")
 
 
 @pytest.fixture(scope="module")
 def replay_runtime(tmp_path_factory):
-    target = tmp_path_factory.mktemp("native-replay-runtime") / "venv"
-    venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
-    packages = target / "Lib/site-packages"
-    shutil.copytree(Path(lifecycle.__file__).parent, packages / "thaliris_codex", ignore=shutil.ignore_patterns("__pycache__"))
-    shutil.copytree(Path(thaliris.__file__).parent, packages / "thaliris", ignore=shutil.ignore_patterns("__pycache__"))
-    metadata = packages / "thaliris_codex-0.4.3.dist-info"
-    metadata.mkdir()
-    (metadata / "direct_url.json").write_text(json.dumps({"url": "https://example.test/approved-adapter",
-        "vcs_info": {"vcs": "git", "commit_id": "1" * 40}}))
-    exe = target / "Scripts/replay.cmd"
-    exe.write_bytes(b'@echo off\r\n"%~dp0python.exe" -I -B -m thaliris_codex.cli %*\r\n')
-    return exe
+    source = tmp_path_factory.mktemp("native-replay-source")
+    core_source = source_wheel(source, "thaliris", Path(thaliris.__file__).parent)
+    adapter_source = source_wheel(source, "thaliris_codex", Path(lifecycle.__file__).parent, entry=True)
+    target = source / "venv"
+    result = runtime_setup.create(target, core_source, adapter_source)
+    return Path(result["executable"])
 
 
 @pytest.fixture
@@ -46,12 +39,28 @@ def pending_native(tmp_path, monkeypatch, pinned_test_thaliris, replay_runtime):
     core.task_start(project, "Isolated native maintenance replay fixture", None, None)
     monkeypatch.setenv("CODEX_HOME", str(home))
 
+    def make_intent(exe, operation="codex-install"):
+        path = intent(tmp_path, home, exe, operation)
+        value = json.loads(path.read_text(encoding="utf-8"))
+        contents = runtime_identity.manifest_bytes(exe)
+        metadata = json.loads((exe.parent.parent / "Lib/site-packages/thaliris_codex-0.4.3.dist-info/direct_url.json").read_bytes())
+        if "vcs_info" in metadata:
+            source_pin = "git+" + metadata["url"] + "@" + metadata["vcs_info"]["commit_id"]
+        else:
+            source_pin = "sha256:" + metadata["archive_info"]["hashes"]["sha256"]
+        selected = {"executable": str(exe), "runtime_sha256": maintenance.digest(contents), "source_pin": source_pin}
+        value["executor"] = selected
+        if operation == "codex-install":
+            value["candidate"] = selected
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
     def prepare(*, distinct=False, operation="codex-install", prepared=False):
         old_exe = pinned_test_thaliris[0] if distinct else replay_runtime
         monkeypatch.setattr(adapter, "_host_install_executable", lambda *_a: (old_exe, maintenance.digest(old_exe.read_bytes()), None))
-        assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, old_exe))["ok"]
+        assert adapter.codex_install(maintenance_contract=make_intent(old_exe))["ok"]
         old_manifest = (home / runtime_identity.MANIFEST_NAME).read_bytes()
-        path = intent(tmp_path, home, replay_runtime, operation)
+        path = make_intent(replay_runtime, operation)
         monkeypatch.setattr(adapter, "_host_install_executable", lambda *_a: (replay_runtime, maintenance.digest(replay_runtime.read_bytes()), None))
         if operation == "codex-install":
             monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *_a: {"status": "FAILED"})
@@ -116,7 +125,10 @@ def test_native_replay_input_drift_fails_closed(pending_native, defect):
         value = json.loads(path.read_bytes()); value["human_instruction"] += " changed"
         path.write_text(json.dumps(value))
     elif defect == "other_executor":
-        payload["tool_input"]["cmd"] = payload["tool_input"]["cmd"].replace("replay.cmd", "unapproved.cmd")
+        selected = Path(json.loads(path.read_bytes())["executor"]["executable"])
+        payload["tool_input"]["cmd"] = payload["tool_input"]["cmd"].replace(
+            str(selected), str(selected.with_name("unapproved.exe"))
+        )
     elif defect == "missing_contract":
         path.unlink()
     elif defect == "executable":
