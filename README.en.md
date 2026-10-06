@@ -10,8 +10,11 @@ pyproject.toml declares Python >=3.11 and thaliris>=0.4.3,<0.5.
 
 On Windows with Python 3.11+, create a disposable bootstrap environment and use
 the packaged runtime installer. Select the independently reviewed full adapter
-commit and a new final physical runtime directory. For packaged Codex, use its
-LocalCache runtime base directly:
+commit. When `--runtime` is omitted, setup discovers the current Codex Host's
+package family and resolves its existing LocalCache directory to the physical
+path before creating a candidate. A bootstrap launched outside Codex resolves
+only a unique registration of the exact `OpenAI.Codex` package; missing or
+ambiguous discovery fails closed. No Store internal path needs to be entered.
 
 ```powershell
 py -3.11 -m venv .thaliris-bootstrap
@@ -19,26 +22,31 @@ $bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
 $adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
 & $bootstrap -m pip install --no-deps $adapterSource
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$finalRuntime = "$env:USERPROFILE\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\Thaliris\runtimes\codex-<reviewed-revision>"
-$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --runtime $finalRuntime --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44' --adapter-source $adapterSource | ConvertFrom-Json)
+$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44' --adapter-source $adapterSource | ConvertFrom-Json)
 if (-not $runtime.ok) { throw $runtime.error }
 $exe = $runtime.executable
 & $exe version
 ```
 
+For an intentional custom location, pass `--runtime 'D:\chosen\runtime'`; that path is still checked for final physical identity. The default creates a new uniquely named runtime under the discovered Host base.
+
 Replace the adapter commit placeholder with the independently reviewed published revision. Host maintenance uses `codex-maintenance-plan` and an explicit `--maintenance-contract FILE`, independently of project init/task admission. Prior authorized installation receipts establish byte ownership; candidate equality does not. Unknown project role documentation is preserved without blocking admission, while unknown control instructions remain blocking. Supported uninstall and normal reinstall preserve user configuration and recovery evidence. See [Host maintenance](docs/thaliris-host-maintenance.md) for the public sequence and legacy approval boundary.
 
 
-Setup observes the final Windows directory through an OS handle before creating
-the venv or installing packages. A redirected input stops with the physical path
-to select. The runtime location anchor and Windows launcher's embedded interpreter
-must agree with that directory. Setup executes the ordinary final-path
+Setup resolves the automatic Host LocalCache base through an OS handle before
+creating a candidate directory, then observes the final runtime directory before
+creating the venv or installing packages. An explicitly redirected `--runtime`
+stops with the physical path to select; setup removes only the empty leaf created
+by that attempt. Preexisting or nonempty directories remain untouched. The runtime
+location anchor and Windows launcher's embedded interpreter must agree with that
+directory. Setup executes the ordinary final-path
 `thaliris.exe runtime-check` with bytecode writes disabled, and maintenance
 selection repeats that side-effect-free check before producing a contract.
 Preparation, the contract and Host installation use the same final directory.
 Never copy, move or rename an installed venv; recomputing a manifest cannot approve
-relocation, even when the old interpreter still exists. Preserve a failed candidate
-and create a new runtime directly at the correct final location.
+relocation, even when the old interpreter still exists. Preserve any candidate that
+fails after the redirect check, and create a new runtime directly at the correct
+final location.
 
 For local development install `../Thaliris[test]`, then this repository with `--no-deps -e '.[test]'`, and run `pytest`. The installer creates the dedicated runtime without ensurepip and installs both selected packages through the bootstrap's pip. pip, setuptools and build dependencies stay outside the runtime; no manual `.pth` repair is required. System site packages stay disabled and executable or path-extending `.pth` files remain rejected without exceptions. Verified local wheels are also accepted as `absolute-wheel-path#sha256=<reviewed-digest>`. The entire environment, including shared Core, remains pinned by the runtime manifest. Keep the pinned directory immutable; use a new directory for upgrades. Installing packages does not prove Host enablement, authorization or health.
 

@@ -21,15 +21,20 @@ PYTHONPATH.
 
 The bootstrap environment may contain Python 3.11's normal setuptools `.pth`;
 it is outside the pinned runtime and is never copied into it. No manual package
-removal or `.pth` editing is part of normal installation. If setup fails, keep
-the failed directory as evidence and choose a new directory after correcting the
-reported input; an existing runtime directory is never modified by setup.
+removal or `.pth` editing is part of normal installation. If setup fails after
+the redirect check, keep the candidate as evidence and choose a new directory
+after correcting the reported input. A redirected empty leaf created by that
+attempt is removed; preexisting and nonempty directories are preserved.
 
-Runtime location is a lifecycle identity invariant. Create the venv directly at
-its final physical directory before installing either package. On Windows setup
-observes that directory with `GetFinalPathNameByHandleW`; a redirected input is
-rejected before venv/package creation. For packaged Codex the final base is
-`%USERPROFILE%\AppData\Local\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\Thaliris\runtimes`.
+Runtime location is a lifecycle identity invariant. With no `--runtime` override,
+setup discovers the current Codex Host's package family, resolves its existing
+LocalCache with `GetFinalPathNameByHandleW`, and creates a new uniquely named
+candidate beneath that physical base. A bootstrap launched outside Codex queries
+only the exact `OpenAI.Codex` package registration and rejects missing or
+ambiguous results. No Store internal path is part of the normal install steps.
+An explicit `--runtime` remains supported and is checked for final physical identity.
+Create the venv directly at that final directory before installing either package;
+a redirected explicit path is rejected before venv/package creation.
 Do not copy, move or rename an installed venv. Its pinned location anchor and
 pip launcher's absolute interpreter binding must agree with the final directory.
 Rehashing or rebasing a relocated candidate cannot make it valid, including when
@@ -160,12 +165,16 @@ Codex home、已批准的不可变执行器和候选运行时身份，以及当�
 先按 [README 正常安装](../README.md) 使用包内 runtime installer：创建不含
 ensurepip 的专用环境，通过独立 bootstrap 的 pip 安装已选择的包，pip、setuptools
 及构建工具留在 runtime 之外；无需手工删除包或修改 `.pth`，隔离检查仍无例外。
-先确定最终物理目录，再直接在该目录创建 venv 和安装包。Windows setup 使用
-`GetFinalPathNameByHandleW` 观察目录；发生重定向时，在创建 venv 或安装包前停止并
-报告应选择的物理路径。打包版 Codex 直接使用 LocalCache 下的最终 runtime base。
-位置 anchor 与 pip launcher 的绝对 interpreter binding 必须一致，禁止复制、移动
-或重命名已安装 venv；重算 manifest 不能批准 relocation，旧 interpreter 仍存在且
-复制后的 console 能启动时也必须拒绝。保留失败候选，另选最终目录重新创建。
+省略 `--runtime` 时，setup 会发现当前 Codex Host 的 package family，通过
+`GetFinalPathNameByHandleW` 解析已有 LocalCache 的物理路径，并在该 base 下创建
+新的唯一候选目录。外部启动的 bootstrap 只查询准确的 `OpenAI.Codex` package，
+缺失或不唯一时会 fail closed。正常流程无需填写 Store LocalCache 内部路径；
+确需自定义位置时可传 `--runtime PATH`，显式路径仍须通过最终物理身份检查。
+显式路径发生重定向时，在创建 venv 或安装包前报告物理路径，并且只清理由本次
+尝试创建的空 leaf；预先存在或非空目录保持原样。位置 anchor 与 pip launcher 的
+绝对 interpreter binding 必须一致，禁止复制、移动或重命名已安装 venv；重算
+manifest 不能批准 relocation，旧 interpreter 仍存在且复制后的 console 能启动时
+也必须拒绝。通过重定向检查后出现失败时保留候选，另选最终目录重新创建。
 setup 和维护选择使用普通最终路径 `thaliris.exe runtime-check` 验证实际 interpreter、
 prefix 与 package origin，并在生成维护 contract 前通过。子进程设置
 `PYTHONDONTWRITEBYTECODE=1`，执行 plan/维护的 shell 也须保留此设置。

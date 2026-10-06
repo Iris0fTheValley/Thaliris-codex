@@ -207,7 +207,169 @@ def test_redirected_destination_stops_before_venv_or_package_install(tmp_path, m
     with pytest.raises(ValueError, match="select final physical directory"):
         runtime_setup.create(target, core, adapter)
     assert calls == []
+    assert not target.exists()
+
+
+def test_redirected_destination_cleanup_preserves_nonempty_attempt_directory(tmp_path, monkeypatch):
+    import thaliris
+    import thaliris_codex
+    core = source_wheel(tmp_path, "thaliris", Path(thaliris.__file__).parent)
+    adapter = source_wheel(tmp_path, "thaliris_codex", Path(thaliris_codex.__file__).parent, entry=True)
+    target = tmp_path / "requested-runtime"
+    actual = tmp_path / "physical-runtime"
+    marker = target / "created-after-probe"
+
+    def redirected(path):
+        marker.write_text("preserve", encoding="utf-8")
+        return actual
+
+    monkeypatch.setattr(runtime_identity, "physical_directory", redirected)
+    with pytest.raises(ValueError, match="select final physical directory"):
+        runtime_setup.create(target, core, adapter)
+    assert marker.read_text(encoding="utf-8") == "preserve"
+
+
+def test_redirected_destination_cleanup_preserves_replacement_directory(tmp_path, monkeypatch):
+    target = tmp_path / "requested-runtime"
+    displaced = tmp_path / "original-attempt-directory"
+    actual = tmp_path / "physical-runtime"
+
+    def replace_then_redirect(path):
+        path.rename(displaced)
+        path.mkdir()
+        return actual
+
+    monkeypatch.setattr(runtime_identity, "physical_directory", replace_then_redirect)
+    with pytest.raises(ValueError, match="select final physical directory"):
+        runtime_setup.create(target, "git+https://example.test/core@" + "a" * 40,
+                             "git+https://example.test/adapter@" + "b" * 40)
+    assert target.is_dir()
+    assert displaced.is_dir()
     assert not list(target.iterdir())
+
+
+def test_redirected_destination_does_not_touch_preexisting_target(tmp_path, monkeypatch):
+    target = tmp_path / "preexisting-runtime"
+    target.mkdir()
+    sentinel = target / "user-owned.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    probed = []
+    monkeypatch.setattr(runtime_identity, "physical_directory", lambda path: probed.append(path))
+
+    with pytest.raises(ValueError, match="already exists"):
+        runtime_setup.create(target, "git+https://example.test/core@" + "a" * 40,
+                             "git+https://example.test/adapter@" + "b" * 40)
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert probed == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Codex package LocalCache discovery")
+def test_default_runtime_resolves_current_host_cache_before_creating_candidate(tmp_path, monkeypatch):
+    family = "OpenAI.Codex_2p2nqsd0c76g0"
+    app_data = tmp_path / "AppData" / "Local"
+    logical_cache = app_data / "Packages" / family / "LocalCache" / "Local"
+    logical_cache.mkdir(parents=True)
+    physical_cache = tmp_path / "physical-local-cache"
+    physical_cache.mkdir()
+    monkeypatch.setenv(runtime_setup._HOST_PACKAGE_FAMILY_ENV, family)
+    monkeypatch.setenv("LOCALAPPDATA", str(app_data))
+    observed = []
+
+    def resolve(path):
+        observed.append(path)
+        assert path == logical_cache
+        assert path.is_dir()
+        return physical_cache
+
+    monkeypatch.setattr(runtime_identity, "physical_directory", resolve)
+    target = runtime_setup.default_runtime_directory(
+        "git+https://example.test/adapter@" + "c" * 40)
+    assert observed == [logical_cache]
+    assert target.parent == physical_cache / "Thaliris" / "runtimes"
+    assert target.name.startswith("codex-")
+    assert not target.exists()
+    assert not target.parent.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows AppX package discovery")
+def test_default_runtime_external_terminal_selects_only_exact_codex_package(tmp_path, monkeypatch):
+    monkeypatch.delenv(runtime_setup._HOST_PACKAGE_FAMILY_ENV, raising=False)
+    app_data = tmp_path / "AppData" / "Local"
+    logical_cache = app_data / "Packages" / "OpenAI.Codex_2p2nqsd0c76g0" / "LocalCache" / "Local"
+    logical_cache.mkdir(parents=True)
+    physical_cache = tmp_path / "physical-local-cache"
+    physical_cache.mkdir()
+    monkeypatch.setenv("LOCALAPPDATA", str(app_data))
+    calls = []
+
+    def registered_package(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, "OpenAI.Codex_2p2nqsd0c76g0", "")
+
+    monkeypatch.setattr(runtime_setup.subprocess, "run", registered_package)
+    monkeypatch.setattr(runtime_identity, "physical_directory", lambda path: physical_cache)
+    target = runtime_setup.default_runtime_directory(
+        "git+https://example.test/adapter@" + "d" * 40)
+    assert target.parent == physical_cache / "Thaliris" / "runtimes"
+    assert len(calls) == 1
+    assert "Get-AppxPackage -Name 'OpenAI.Codex'" in calls[0][0][-1]
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Codex package discovery")
+@pytest.mark.parametrize("package_result", [
+    subprocess.CompletedProcess([], 2, "", ""),
+    subprocess.CompletedProcess([], 0, "OpenAI.Codex_2p2nqsd0c76g0\nOpenAI.Codex_3p3nqsd0c76g0", ""),
+])
+def test_default_runtime_fails_closed_without_unique_host_registration(tmp_path, monkeypatch, package_result):
+    monkeypatch.delenv(runtime_setup._HOST_PACKAGE_FAMILY_ENV, raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(runtime_setup.subprocess, "run", lambda *args, **kwargs: package_result)
+    observed = []
+    monkeypatch.setattr(runtime_identity, "physical_directory", lambda path: observed.append(path))
+    with pytest.raises(ValueError, match="unique current Codex Host package"):
+        runtime_setup.default_runtime_directory("git+https://example.test/adapter@" + "e" * 40)
+    assert observed == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Codex package discovery")
+def test_default_runtime_fails_closed_on_invalid_host_package_context(tmp_path, monkeypatch):
+    monkeypatch.setenv(runtime_setup._HOST_PACKAGE_FAMILY_ENV, "Other.Package_2p2nqsd0c76g0")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(runtime_setup.subprocess, "run", lambda *args, **kwargs: pytest.fail("must not enumerate packages"))
+    observed = []
+    monkeypatch.setattr(runtime_identity, "physical_directory", lambda path: observed.append(path))
+    with pytest.raises(ValueError, match="package context is invalid"):
+        runtime_setup.default_runtime_directory("git+https://example.test/adapter@" + "f" * 40)
+    assert observed == []
+
+
+def test_runtime_setup_cli_defaults_to_discovery_but_keeps_explicit_override(tmp_path, monkeypatch, capsys):
+    automatic = tmp_path / "host" / "runtime"
+    explicit = tmp_path / "custom" / "runtime"
+    default_calls = []
+    created = []
+    monkeypatch.setattr(runtime_setup, "default_runtime_directory",
+                        lambda source: default_calls.append(source) or automatic)
+    monkeypatch.setattr(runtime_setup, "create",
+                        lambda path, core, adapter: created.append((path, core, adapter)) or {"ok": True})
+    sources = ["git+https://example.test/core@" + "a" * 40,
+               "git+https://example.test/adapter@" + "b" * 40]
+
+    monkeypatch.setattr(runtime_setup.sys, "argv", ["runtime_setup", "--core-source", sources[0],
+                                                      "--adapter-source", sources[1]])
+    assert runtime_setup.main() == 0
+    capsys.readouterr()
+    assert created[-1][0] == automatic
+    assert default_calls == [sources[1]]
+
+    monkeypatch.setattr(runtime_setup.sys, "argv", ["runtime_setup", "--runtime", str(explicit),
+                                                      "--core-source", sources[0],
+                                                      "--adapter-source", sources[1]])
+    assert runtime_setup.main() == 0
+    capsys.readouterr()
+    assert created[-1][0] == explicit
+    assert default_calls == [sources[1]]
 
 
 def test_prior_owned_generation_without_location_or_probe_can_upgrade(tmp_path, monkeypatch):

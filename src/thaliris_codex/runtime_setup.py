@@ -10,15 +10,71 @@ relocated. The public final-path console must pass before setup returns success.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import uuid
 import venv
 
 from . import runtime_identity
+
+_HOST_PACKAGE_FAMILY_ENV = "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY"
+_HOST_PACKAGE_FAMILY = re.compile(r"OpenAI\.Codex_[A-Za-z0-9]{13}")
+
+
+def _host_package_family() -> str:
+    """Use the current Host's package context, or its exact registered identity."""
+    family = os.environ.get(_HOST_PACKAGE_FAMILY_ENV)
+    if family:
+        if not _HOST_PACKAGE_FAMILY.fullmatch(family):
+            raise ValueError("current Codex Host package context is invalid")
+        return family
+    if os.name != "nt":
+        raise ValueError("current Codex Host package context is unavailable; pass --runtime explicitly")
+
+    # A bootstrap started from an external terminal has no Host-injected
+    # environment. Resolve only the exact stable Codex package identity for the
+    # current user and reject missing or ambiguous registrations.
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        "$packages=@(Get-AppxPackage -Name 'OpenAI.Codex'); "
+        "if ($packages.Count -ne 1 -or $packages[0].Name -cne 'OpenAI.Codex') { exit 2 }; "
+        "[Console]::Out.Write($packages[0].PackageFamilyName)"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+            env=runtime_identity.child_environment(), capture_output=True, text=True,
+            timeout=15, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("unable to discover the current Codex Host package; pass --runtime explicitly") from exc
+    family = result.stdout.strip() if result.returncode == 0 else ""
+    if not _HOST_PACKAGE_FAMILY.fullmatch(family):
+        raise ValueError("a unique current Codex Host package was not found; pass --runtime explicitly")
+    return family
+
+
+def default_runtime_directory(adapter_source: str) -> Path:
+    """Choose a new final runtime under the current Host's physical LocalCache."""
+    if os.name != "nt":
+        raise ValueError("automatic runtime discovery is supported for the Windows Codex Host; pass --runtime explicitly")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        raise ValueError("Windows LocalAppData is unavailable; pass --runtime explicitly")
+    family = _host_package_family()
+    logical_base = Path(local_app_data) / "Packages" / family / "LocalCache" / "Local"
+    try:
+        physical_base = runtime_identity.physical_directory(logical_base)
+    except (OSError, ValueError) as exc:
+        raise ValueError("current Codex Host LocalCache is unavailable; pass --runtime explicitly") from exc
+    source_identity = hashlib.sha256(_source(adapter_source).encode("utf-8")).hexdigest()[:12]
+    leaf = f"codex-{source_identity}-{uuid.uuid4().hex[:12]}"
+    return physical_base / "Thaliris" / "runtimes" / leaf
 
 
 def _source(value: str) -> str:
@@ -37,6 +93,28 @@ def _source(value: str) -> str:
     raise ValueError("select a full immutable HTTPS Git commit or wheel#sha256=DIGEST")
 
 
+def _directory_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        info = path.stat(follow_symlinks=False)
+    except OSError:
+        return None
+    if not info.st_ino:
+        return None
+    return info.st_dev, info.st_ino
+
+
+def _remove_created_empty_directory(path: Path, identity: tuple[int, int] | None) -> None:
+    """Remove only the same leaf this attempt created, and only while empty."""
+    if identity is None:
+        return
+    try:
+        if _directory_identity(path) == identity:
+            path.rmdir()
+    except OSError:
+        # A changed or nonempty directory is preserved for inspection.
+        pass
+
+
 def create(directory: Path, core_source: str, adapter_source: str) -> dict:
     if sys.version_info < (3, 11):
         raise ValueError("Host runtime setup requires Python 3.11+")
@@ -48,10 +126,14 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
         if runtime_identity._is_link(parent):
             raise ValueError("runtime destination contains a link")
     # Observe the directory through an OS handle before installing anything.
-    # Store-app redirection is not resolved by spelling an absolute path.
+    # Store-app redirection is not resolved by spelling an absolute path. If
+    # this attempt created the redirected leaf, remove it only while it remains
+    # empty so the reported physical destination can be selected immediately.
     target.mkdir(parents=True)
+    created_identity = _directory_identity(target)
     final = runtime_identity.physical_directory(target)
     if os.path.normcase(str(final)) != os.path.normcase(str(target)):
+        _remove_created_empty_directory(target, created_identity)
         raise ValueError(f"runtime destination is redirected; select final physical directory: {final}")
     target = final
     (target / runtime_identity.LOCATION_NAME).write_bytes(runtime_identity.location_bytes(target))
@@ -83,12 +165,13 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime", type=Path, required=True)
+    parser.add_argument("--runtime", type=Path, help="explicit runtime directory; defaults to the current Codex Host")
     parser.add_argument("--core-source", required=True)
     parser.add_argument("--adapter-source", required=True)
     args = parser.parse_args()
     try:
-        result = create(args.runtime, args.core_source, args.adapter_source)
+        directory = args.runtime or default_runtime_directory(args.adapter_source)
+        result = create(directory, args.core_source, args.adapter_source)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(json.dumps({"ok": False, "error": str(exc), "host_installed": False}))
         return 1
