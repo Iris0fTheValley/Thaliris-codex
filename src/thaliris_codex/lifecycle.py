@@ -306,7 +306,7 @@ def _v041_host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
 
 def host_hook_script_bytes() -> bytes:
     """Render the Host trampoline with a pre-Python runtime file check."""
-    encoded = host_preflight.encoded_entry()
+    entry = host_preflight.command_entry()
     return (
         "@echo off\r\n"
         "setlocal DisableDelayedExpansion\r\n"
@@ -324,7 +324,7 @@ def host_hook_script_bytes() -> bytes:
         f"set \"{THALIRIS_RUNTIME_SHA256_ENV}=%~3\"\r\n"
         f"set \"THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}\"\r\n"
         f'set "THALIRIS_PREFLIGHT=%~dp0{HOST_PREFLIGHT_SCRIPT_NAME}"\r\n'
-        f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {encoded}\r\n"
+        f'powershell.exe -NoProfile -NonInteractive -Command "{entry}"\r\n'
         "if errorlevel 1 goto thaliris_identity_rejected\r\n"
         "shift\r\n"
         "shift\r\n"
@@ -347,7 +347,7 @@ def host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
         raise ValueError("invalid installed runtime identity")
     if any(character in str(executable) for character in ('"', "%", "!", "`", "\r", "\n")):
         raise ValueError("runtime path is unsafe for cmd")
-    encoded = host_preflight.encoded_entry()
+    entry = host_preflight.command_entry()
     return (
         "@echo off\r\n"
         "setlocal DisableDelayedExpansion\r\n"
@@ -357,7 +357,7 @@ def host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
         f"set \"THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}\"\r\n"
         "set \"THALIRIS_RUN_SCRIPT=%~f0\"\r\n"
         f'set "THALIRIS_PREFLIGHT=%~dp0{HOST_PREFLIGHT_SCRIPT_NAME}"\r\n'
-        f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {encoded}\r\n"
+        f'powershell.exe -NoProfile -NonInteractive -Command "{entry}"\r\n'
         "if errorlevel 1 goto thaliris_identity_rejected\r\n"
         "set \"PYTHONPATH=\"\r\n"
         "set \"PYTHONHOME=\"\r\n"
@@ -504,8 +504,9 @@ def _pinned_host_source(script: Path, executable: Path, executable_sha256: str,
         "& $p.script $p.executable $p.sha $p.runtime $p.event $p.abi; exit $LASTEXITCODE"
         "} catch {"
         "$env:THALIRIS_HOOK_EVENT=$p.event;$env:THALIRIS_EXECUTABLE=$p.executable;"
-        + "\n" + host_preflight.degraded_source()
-        + "\nDegraded ('hook trampoline changed; expected='+$expected+' actual='+$actual);exit 0}"
+        "$env:THALIRIS_INSTALL_MANIFEST=Join-Path ([IO.Path]::GetDirectoryName($p.script)) 'thaliris-install.json';"
+        + "\n" + host_preflight.recovery_source()
+        + "\nexit 0}"
 
     )
     return source
@@ -902,7 +903,13 @@ def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
         filename = _direct_context_option(payload, {"--maintenance-contract"}, digest_only=False)
         intent = host_maintenance.contract(filename, operation, _host_home_path(), actor=payload)
         selected_executor, _ = host_maintenance.selected_runtime(intent["executor"])
-        prior = host_maintenance._installed(_host_home_path())
+        from . import host_transition
+        transition = None
+        if host_transition.pending(_host_home_path()):
+            transition, before, _after = host_transition.load(_host_home_path(), intent)
+            prior = before.get(runtime_identity.MANIFEST_NAME)
+        else:
+            prior = host_maintenance._installed(_host_home_path())
         if intent.get("installed_runtime_sha256") != (host_maintenance.digest(prior) if prior else "ABSENT"):
             return False
         if operation == "codex-install":
@@ -916,7 +923,8 @@ def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
                 return False
             if constraint != intent.get("execution_constraint"):
                 return False
-            ownership = host_maintenance.ownership(_host_home_path(), prior, intent)
+            ownership = (host_maintenance.validate_ownership(before.get(host_maintenance.RECEIPT_NAME), prior, intent)
+                         if transition is not None else host_maintenance.ownership(_host_home_path(), prior, intent))
             if ownership.get("execution_constraint") == "luna-only" and constraint != "luna-only":
                 return False
     except (OSError, RuntimeError, ValueError, TypeError, KeyError):
@@ -934,6 +942,40 @@ def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
         return False
     return selected == selected_executor or (
         selected == _trusted_installed_runner() and selected_executor == _trusted_thaliris_executable())
+
+
+def maintenance_replay_check(root: Path, payload: object, filename: str) -> str:
+    """Read-only native replay admission after platform executor verification.
+
+    No pending journal, absent actor field or matching session proves Root.
+    This route preserves existing actor fences and checks original Host intent.
+    It deliberately returns an explicit result, never an empty fail-open hook.
+    """
+    try:
+        if not isinstance(payload, dict) or any(payload.get(key) is not None for key in ("agent_id", "agent_type")) or any(
+                payload.get(key) is True for key in ("readonly", "fenced")):
+            raise ValueError("HOST_MAINTENANCE_ACTOR_DENIED")
+        root = _hook_repository_root(root, payload)
+        anchor = task_authority.read(root)
+        _read_abandoned_child_fence(root)
+        _read_abandoned_agent_hashes(root)
+        _read_abandoned_spawn_provenance(root)
+        if (anchor is not None and _session_id_hash(payload) in anchor["fenced_sessions"] or
+                _session_fenced(root, _session_id_hash(payload)) or
+                _session_id_hash(payload) in _read_abandoned_owner_hashes(root)):
+            raise ValueError("THALIRIS_ABANDONED_ACTOR")
+        # An unreadable known ledger is not a new maintenance grant.
+        state_path = core._safe_without_final_symlink(root, "/".join((".context", "state.json")))
+        if state_path.exists() and not state_path.is_file() or managed_task_state(root)[0] == "INVALID_STATE":
+            raise ValueError("THALIRIS_MANAGED_STATE_UNAVAILABLE")
+        selected = _direct_context_option(payload, {"--maintenance-contract"}, digest_only=False)
+        from . import host_transition
+        if selected is None or Path(selected).resolve() != Path(filename).resolve() or not host_transition.pending(_host_home_path()) or not _trusted_host_maintenance_route(payload):
+            raise ValueError("HOST_TRANSITION_PENDING: exact original maintenance intent required")
+        return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+            "additionalContext": "Exact original Host maintenance replay checked; Host Root identity remains UNKNOWN."}}, separators=(",", ":"))
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        return _permission_deny("THALIRIS_HOST_MAINTENANCE_REPLAY_DENIED")
 
 
 def is_managed_handler(value: object, event: str) -> bool:
@@ -2978,12 +3020,15 @@ def _control_state_target(payload: dict[str, Any]) -> str | None:
     normalized = material.replace("\\\\", "/").replace("\\", "/").casefold()
     home = _host_home_path()
     paths = [home / name for name in (runtime_identity.MANIFEST_NAME,
-        host_maintenance.RECEIPT_NAME, "AGENTS.md", "hooks.json", "config.toml",
+        host_maintenance.RECEIPT_NAME, "thaliris-host-transition.json", "thaliris-host-maintenance.lock", "AGENTS.md", "hooks.json", "config.toml",
         HOST_HOOK_SCRIPT_NAME, HOST_RUN_SCRIPT_NAME, host_preflight.NAME)]
     for path in paths:
         if path.as_posix().casefold() in normalized:
             return path.as_posix()
     agents = (home / "agents").as_posix().casefold() + "/"
+    generations = (home / "thaliris-host-generations").as_posix().casefold() + "/"
+    if generations in normalized:
+        return generations
     return agents if agents in normalized else None
 
 

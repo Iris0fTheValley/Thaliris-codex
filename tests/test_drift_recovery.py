@@ -273,7 +273,8 @@ def test_unsafe_manifest_never_reaches_runtime_probe(tmp_path, monkeypatch, pinn
     monkeypatch.setattr(codex_adapter, "_host_install_executable", forbidden_probe)
     result = authorized_host_install(tmp_path, pinned_test_thaliris, home, exe, digest)
     assert result["ok"] is False
-    assert any("installed_runtime_manifest_unavailable" in item for item in result["manual_action_required"])
+    assert any("installed_runtime_manifest_unavailable" in item or "unsafe Host maintenance path" in item
+               for item in result["manual_action_required"])
     if unsafe.startswith("ancestor_"):
         assert not home.exists()
     elif unsafe == "directory":

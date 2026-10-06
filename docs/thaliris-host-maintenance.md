@@ -7,21 +7,23 @@ Known children, readonly actors and fenced sessions remain denied. An actor with
 missing native identity remains UNKNOWN; the intent is shared-OS governance,
 not mechanical authentication of a human or positive Controller proof.
 
-Install both reviewed wheels in a new dedicated Python 3.11+ environment, with
-system site packages disabled and no executable/path-extending `.pth` files.
+Use the [normal packaged runtime setup](../README.en.md) to install both reviewed
+packages in a new dedicated Python 3.11+ environment. The installer creates it
+without ensurepip and uses the separate bootstrap's pip; setuptools and build
+tools never enter the runtime. System site packages stay disabled and no
+executable/path-extending `.pth` files are accepted.
 Use full immutable Git commit refs or verified artifact SHA-256 pins. Do not
 upgrade packages in the already pinned runtime directory. The current installed
-runtime, the maintenance executor and the approved candidate are separate
-identities. Installation renders with the approved candidate executor; an old
-trusted executor can launch that independently selected candidate. The caller
-must execute the selected installed package, not development source via PYTHONPATH.
+runtime and the approved candidate are separate identities. The approved
+candidate package must execute installation and render its own generation. The
+caller must execute the selected installed package, not development source via
+PYTHONPATH.
 
-On Windows Python 3.11, the standard venv bootstrap can install `setuptools`
-with an executable `distutils-precedence.pth`, which this runtime correctly
-rejects. If that bootstrap-only package is present, remove it after both wheels
-are installed with `python -m pip uninstall -y setuptools`; then run
-`python -m pip check` and verify no executable or path-extending `.pth` remains
-before generating a maintenance plan. Do not edit `.pth` files by hand.
+The bootstrap environment may contain Python 3.11's normal setuptools `.pth`;
+it is outside the pinned runtime and is never copied into it. No manual package
+removal or `.pth` editing is part of normal installation. If setup fails, keep
+the failed directory as evidence and choose a new directory after correcting the
+reported input; an existing runtime directory is never modified by setup.
 
 `codex-maintenance-plan` is read-only. It reports the exact candidate runtime
 identity and an intent object from the supplied actual human instruction. Its
@@ -30,7 +32,7 @@ For example, in PowerShell, after installing the immutable candidate wheels:
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$exe = (Get-Command thaliris).Source
+$exe = $runtime.executable # returned by the packaged runtime setup
 $plan = (& $exe codex-maintenance-plan codex-install --executable $exe --source-pin 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>' --human-instruction 'Install the reviewed Thaliris Host integration requested by the user.' | ConvertFrom-Json)
 [IO.File]::WriteAllText((Join-Path (Get-Location) 'host-install-intent.json'), ($plan.maintenance_contract | ConvertTo-Json -Depth 16), [Text.UTF8Encoding]::new($false))
 & $exe codex-install --maintenance-contract (Resolve-Path .\host-install-intent.json)
@@ -54,6 +56,39 @@ runtime manifest and the authorized maintenance contract. It records exact
 profile/script bytes, the global instruction span and generated hook entries.
 Later candidates can replace these authorized bytes without embedding the next
 generation's outputs in an old historical hash table.
+
+The upgrade surface includes candidate profiles and profiles recorded by the
+prior authorized receipt. A retired profile is deleted only when its exact old
+bytes still match that receipt. An edited retired profile blocks upgrade before
+writes; uninstall preserves edited profiles. Unrelated profiles are preserved.
+
+Disk definitions change as one recoverable generation. Before the first managed
+write, `thaliris-host-transition.json` durably records exact before/after bytes
+and the original maintenance contract identity. The receipt is written last;
+the journal then commits only after all effective disk bytes match the planned
+generation. Native trust registration/removal is an idempotent post-commit step,
+so the previous trusted generation remains recoverable before disk commit.
+While a journal exists, normal runner/bootstrap admission is blocked and loaded
+catalog/activation remains UNKNOWN. The native preflight admits a direct replay
+by the original approved executor with the **same original maintenance contract
+file** after interruption. It checks that immutable executor before importing
+its policy, forwards the original native actor payload, and preserves child,
+readonly, fenced and abandoned-actor denials. Literal recovery policy in the
+loaded hook also handles entrypoints removed during uninstall; unknown bytes
+and unverifiable receipts remain denied. A journal is never a maintenance grant
+and an absent actor field never proves Root. PREPARED
+transitions mechanically restore the previous generation and replan; COMMITTED
+transitions finish native trust and archive exact generations. No partial
+generation is accepted as new ownership. Edited bytes, changed runtime identity,
+unsafe paths or a different contract stop recovery and preserve evidence.
+Native replay requires the original approved executor's replay-check entrypoint
+and a loaded hook containing this literal policy. An earlier executor or already
+loaded hook without that capability cannot be replaced implicitly through an
+unfinished journal; its recovery boundary needs a separate Controller decision.
+The operating-system lock releases on process exit, and a later invocation can
+continue without deleting a stale lock or blessing arbitrary hashes. Native
+trust failure reports incomplete installation explicitly; it does not roll back
+user configuration. Trust modifies only the Host-returned exact handler keys.
 
 Candidate renderer equality, HEAD, matching markers, a reproducible old renderer
 or a runtime manifest alone establish no prior authorization or byte ownership.
@@ -98,12 +133,25 @@ Codex home、已批准的不可变执行器和候选运行时身份，以及当�
 已知子角色、只读角色和被 fence 的身份仍被拒绝；缺少身份的 actor 仍为 UNKNOWN。
 这是共享操作系统上的治理声明，不是人类认证或 Controller 身份证明。
 
-先把两个已审阅 wheel 安装到新的独立环境，再用 `codex-maintenance-plan` 检查
+先按 [README 正常安装](../README.md) 使用包内 runtime installer：创建不含
+ensurepip 的专用环境，通过独立 bootstrap 的 pip 安装已选择的包，pip、setuptools
+及构建工具留在 runtime 之外；无需手工删除包或修改 `.pth`，隔离检查仍无例外。
+再用 `codex-maintenance-plan` 检查
 身份并生成维护意图。源码必须指定完整不可变 commit，或已校验 artifact SHA-256。
 plan 的现有文件 hash 只是审阅材料，不自动批准 ownership。安装前先完成全部
 运行时、隔离、路径、ABI、旧安装 drift、ownership 与控制冲突检查，之后才写入。
 新安装记录绑定原始授权和准确 bytes，未来升级不依赖旧版本预先知道新输出。
 候选 renderer、HEAD、marker、旧 renderer 可复现和 manifest 都不能证明原始授权。
+
+升级处理 candidate profiles 与旧授权 receipt-owned profiles 的并集。N+1 删除的
+角色仅在旧 bytes 精确匹配 receipt 时删除；已编辑的 retired profile 在写入前阻止
+升级，卸载则保留。无关 profiles 保留。首次写入前持久记录准确前后 generations
+及原始维护意图身份；receipt 最后写入，全部磁盘内容校验后才 commit，然后处理
+原生 trust。journal 存在期间正常 runner/bootstrap admission 被阻止。
+中断后用已批准的独立 executor 重放同一个原始维护 contract 文件：PREPARED
+先机械回滚再重新规划，COMMITTED 继续 trust 并归档 generations。无需旧 checkout、
+手工删锁或随意批准 hash；进程退出会释放 OS lock。输入 drift、未知 bytes 或不同
+contract 保留证据并停止。trust 未完成会明确报告，用户配置不作为回滚目标。
 
 旧安装没有授权 ownership receipt 时，需要用户针对确切的 Thaliris bytes 作出
 具体批准；不明文件逐字节保留。正常恢复使用受支持的卸载，再正常安装，保留用户

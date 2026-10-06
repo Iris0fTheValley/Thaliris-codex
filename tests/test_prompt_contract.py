@@ -146,6 +146,7 @@ def test_profile_styles_remain_specific_without_extending_endpoint():
 
 
 def test_generated_sources_equal_derived_outputs():
+    assert Path("AGENTS.md").read_text(encoding="utf-8") == adapter.render_managed()
     assert Path("docs/thaliris-role-packs.md").read_text(encoding="utf-8") == adapter.render_role_packs()
     for name, (model, effort, role) in roles.agent_profiles().items():
         path = Path(".codex/agents") / name
@@ -153,6 +154,41 @@ def test_generated_sources_equal_derived_outputs():
             assert path.read_bytes() == adapter._agent_profile(name[:-5], role, model, effort)
         parsed = tomllib.loads(adapter._agent_profile(name[:-5], role, model, effort).decode())
         assert parsed["developer_instructions"] == roles.profile_instructions(role, name[:-5])
+
+
+def test_precision_and_operational_acceptance_are_controller_owned():
+    project = adapter.render_managed()
+    concepts(project, ("stable narrative base language", "precision-bearing original terms"),
+             ("quotations", "distinctions", "user formulations", "materially"),
+             ("blur", "broaden", "narrow", "expand"),
+             ("forced monolingual", "random language switching", "bilingual repetition"),
+             ("output language requirements", "compression and handoff"),
+             ("operational artifact", "source", "revision", "provenance", "before delegation"),
+             ("later workstream", "operational acceptance"),
+             ("project/package", "fixtures", "isolated smoke", "packed artifacts", "project-local"),
+             ("effective live", "global instructions", "profiles", "hooks", "trust", "separate"))
+    assert normalized(project).count("stable narrative base language") == 1
+    assert "stable narrative base language" not in adapter._global_agents_block().decode()
+    for role in roles.native_role_definitions():
+        assert "stable narrative base language" not in role.instructions
+
+
+def test_compatibility_authority_and_fresh_rerouting_preserve_semantic_endpoint():
+    project = adapter.render_managed()
+    concepts(project, ("independently deterministic", "accepted contract uniquely determines"),
+             ("compatibility authority ambiguity remains semantic", "production behavior", "historical fixtures"),
+             ("representative evidence", "dependency to controller", "does not mandate full regression"),
+             ("same semantic closure", "fresh ordinary session", "explicit inputs", "independent acceptance"),
+             ("accumulated debugging state adds no benefit", "distilled invariants", "green evidence"),
+             ("provenance", "remaining acceptance", "blockers", "not raw history"))
+    for role in ("implementer", "focused-implementer"):
+        concepts(prompt(role), ("authority ambiguity", "compatibility", "ownership", "security", "lifecycle", "contract"),
+                 ("many failures", "many files", "long regression alone", "do not require escalation"),
+                 ("project installation closure excludes effective live host", "separate authority"))
+    concepts(prompt("focused-implementer"), ("production behavior", "historical fixtures", "representative evidence"),
+             ("dependency to controller", "do not classify", "mechanical compatibility"),
+             ("full regression by default"))
+    concepts(project, ("unchanged deterministic state", "runtime can wait", "meaningful or terminal event"))
 
 
 def test_pre_normalization_generated_ownership_is_exact_and_filename_bound():

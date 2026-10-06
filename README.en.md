@@ -8,18 +8,26 @@ The `thaliris-codex` distribution uses `thaliris_codex` and preserves the `thali
 
 pyproject.toml declares Python >=3.11 and thaliris>=0.4.3,<0.5.
 
-Use an isolated Python 3.11+ environment. Install reviewed Core before the adapter:
+On Windows with Python 3.11+, create a disposable bootstrap environment and use
+the packaged runtime installer. Select the independently reviewed full adapter
+commit and a new runtime directory:
 
-```sh
-python -m pip install 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44'
-python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
-thaliris version
+```powershell
+py -3.11 -m venv .thaliris-bootstrap
+$bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
+$adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
+& $bootstrap -m pip install --no-deps $adapterSource
+$env:PYTHONDONTWRITEBYTECODE = '1'
+$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --runtime "$env:LOCALAPPDATA\Thaliris\runtime-<reviewed-revision>" --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44' --adapter-source $adapterSource | ConvertFrom-Json)
+if (-not $runtime.ok) { throw $runtime.error }
+$exe = $runtime.executable
+& $exe version
 ```
 
 Replace the adapter commit placeholder with the independently reviewed published revision. Host maintenance uses `codex-maintenance-plan` and an explicit `--maintenance-contract FILE`, independently of project init/task admission. Prior authorized installation receipts establish byte ownership; candidate equality does not. Unknown project role documentation is preserved without blocking admission, while unknown control instructions remain blocking. Supported uninstall and normal reinstall preserve user configuration and recovery evidence. See [Host maintenance](docs/thaliris-host-maintenance.md) for the public sequence and legacy approval boundary.
 
 
-For local development install `../Thaliris[test]`, then this repository with `--no-deps -e '.[test]'`, and run `pytest`. A real Host installation needs both wheels in a dedicated environment with system site packages disabled; executable or path-extending `.pth` files are rejected. On Windows Python 3.11, if the standard venv bootstrap added `setuptools` and its `distutils-precedence.pth`, remove that bootstrap-only package after installing both wheels with `python -m pip uninstall -y setuptools`, then run `python -m pip check` and verify no executable or path-extending `.pth` remains. The entire environment, including shared Core, remains pinned by the runtime manifest. Installing packages does not prove Host enablement, authorization or health.
+For local development install `../Thaliris[test]`, then this repository with `--no-deps -e '.[test]'`, and run `pytest`. The installer creates the dedicated runtime without ensurepip and installs both selected packages through the bootstrap's pip. pip, setuptools and build dependencies stay outside the runtime; no manual `.pth` repair is required. System site packages stay disabled and executable or path-extending `.pth` files remain rejected without exceptions. Verified local wheels are also accepted as `absolute-wheel-path#sha256=<reviewed-digest>`. The entire environment, including shared Core, remains pinned by the runtime manifest. Keep the pinned directory immutable; use a new directory for upgrades. Installing packages does not prove Host enablement, authorization or health.
 
 See [integration](adapter/codex/README.md), [authority](docs/thaliris-task-authority.md), and [recovery](docs/thaliris-runtime-recovery.md). The [shared documentation](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs), [Core canonical README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) and [English version](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.en.md) stay in main. [Thaliris-DSH](https://github.com/Iris0fTheValley/Thaliris-DSH) is a sibling Host adapter using the same Core.
 

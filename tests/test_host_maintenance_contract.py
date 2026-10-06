@@ -295,3 +295,295 @@ def test_unknown_actor_maintenance_does_not_drop_prior_luna_constraint(tmp_path,
     payload = {"tool_name": "exec_command", "tool_input": {
         "cmd": f"& '{exe}' codex-install --maintenance-contract '{path}'"}}
     assert not lifecycle._trusted_host_maintenance_route(payload)
+
+
+def test_retired_receipt_owned_profiles_are_deleted_without_candidate_history(tmp_path, monkeypatch, installed):
+    from tests.host_maintenance_test_support import attest_prior_authorized_bytes
+    home, exe = installed
+    retired = "agents/thaliris-retired-generation.toml"
+    old_bytes = b"arbitrary authorized generation N profile\n"
+    (home / retired).write_bytes(old_bytes)
+    attest_prior_authorized_bytes(home, {retired: old_bytes})
+    (home / "agents/user.toml").write_bytes(b"user role")
+    result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
+    assert result["ok"], result
+    assert retired in result["files"]
+    assert not (home / retired).exists()
+    assert retired not in json.loads((home / maintenance.RECEIPT_NAME).read_bytes())["owned_bytes"]
+    assert (home / "agents/user.toml").read_bytes() == b"user role"
+
+
+@pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
+def test_edited_retired_profile_is_preserved(operation, tmp_path, installed):
+    from tests.host_maintenance_test_support import attest_prior_authorized_bytes
+    home, exe = installed
+    name = "agents/thaliris-retired.toml"
+    (home / name).write_bytes(b"old authorized")
+    attest_prior_authorized_bytes(home, {name: b"old authorized"})
+    (home / name).write_bytes(b"user edits")
+    before = snapshot(home)
+    path = intent(tmp_path, home, exe, operation)
+    result = adapter.codex_install(maintenance_contract=path) if operation == "codex-install" else adapter.codex_uninstall(maintenance_contract=path)
+    if operation == "codex-install":
+        assert not result["ok"]
+        assert snapshot(home) == before
+    else:
+        assert result["ok"], result
+        assert name in result["preserved_files"]
+    assert (home / name).read_bytes() == b"user edits"
+
+
+class SimulatedProcessExit(BaseException):
+    pass
+
+
+@pytest.mark.parametrize("operation", ["fresh", "upgrade", "uninstall"])
+@pytest.mark.parametrize("surface", ["AGENTS.md", "agents/thaliris-implementer.toml", "hooks.json",
+                                    runtime_identity.MANIFEST_NAME, maintenance.RECEIPT_NAME,
+                                    "COMMIT", "ARCHIVE"])
+def test_generation_crash_replays_original_contract(operation, surface, tmp_path, monkeypatch, pinned_test_thaliris):
+    import shutil
+    from thaliris_codex import host_transition
+    home = tmp_path / "home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    exe, _ = pinned_test_thaliris
+    if operation != "fresh":
+        assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))["ok"]
+    home.mkdir(exist_ok=True)
+    (home / "user.txt").write_bytes(b"user-owned content")
+    (home / "config.toml").write_bytes(b"user_setting=true\n")
+    (home / "agents").mkdir(exist_ok=True)
+    (home / "agents/user.toml").write_bytes(b"user role")
+    if operation == "upgrade":
+        next_runtime = tmp_path / "generation-n-plus-one"
+        shutil.copytree(exe.parent.parent, next_runtime)
+        exe = next_runtime / "Scripts" / exe.name
+        exe.write_bytes(b"independently selected N+1 launcher")
+        (next_runtime / "Lib/site-packages/thaliris_codex/cli.py").write_bytes(b"N+1 package source")
+        monkeypatch.setattr(adapter, "_host_install_executable", lambda _home, path, sha: (Path(path), sha, None))
+        original_profile = adapter._agent_profile
+        monkeypatch.setattr(adapter, "_agent_profile", lambda *a, **kw: original_profile(*a, **kw) + b"# N+1\n")
+        original_global = adapter._global_agents_block
+        monkeypatch.setattr(adapter, "_global_agents_block", lambda *a, **kw: original_global(*a, **kw).replace(b"## Thaliris project startup", b"## N+1 startup"))
+    op = "codex-uninstall" if operation == "uninstall" else "codex-install"
+    path = intent(tmp_path, home, exe, op)
+    approved_before = maintenance._files(home)
+    original_write = adapter._atomic_host_write
+    original_unlink = Path.unlink
+    hit = []
+
+    def fault(target, contents=None):
+        relative = target.relative_to(home).as_posix() if target.is_relative_to(home) else ""
+        selected = relative == surface or (surface == "COMMIT" and relative == host_transition.NAME) or (
+            surface == "ARCHIVE" and relative.startswith("thaliris-host-generations/"))
+        if selected and not hit:
+            hit.append(relative)
+            raise SimulatedProcessExit()
+
+    def write(target, contents):
+        fault(target, contents)
+        return original_write(target, contents)
+
+    def unlink(target, *args, **kwargs):
+        fault(target)
+        return original_unlink(target, *args, **kwargs)
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", write)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    invoke = adapter.codex_uninstall if operation == "uninstall" else adapter.codex_install
+    with pytest.raises(SimulatedProcessExit):
+        invoke(maintenance_contract=path)
+    assert hit
+    journal, before, after = host_transition.load(home, maintenance.contract(path, op, home))
+    assert journal["phase"] == ("COMMITTED" if surface == "ARCHIVE" else "PREPARED")
+    assert {n: v for n, v in before.items() if v is not None} == approved_before
+    # Read-only native routing accepts the exact original contract across an
+    # interrupted manifest/receipt pair. Children still have no maintenance grant.
+    payload = {"tool_name": "exec_command", "tool_input": {"cmd": f"& '{exe}' {op} --maintenance-contract '{path}'"}}
+    assert lifecycle._trusted_host_maintenance_route(payload)
+    assert not lifecycle._trusted_host_maintenance_route({**payload, "agent_id": "child"})
+    monkeypatch.setattr(adapter, "_atomic_host_write", original_write)
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    result = invoke(maintenance_contract=path)
+    assert result["ok"], result
+    assert not host_transition.pending(home)
+    assert (home / "user.txt").read_bytes() == b"user-owned content"
+    assert (home / "agents/user.toml").read_bytes() == b"user role"
+    assert (home / "config.toml").read_bytes() == b"user_setting=true\n"
+    if operation == "uninstall":
+        assert not (home / runtime_identity.MANIFEST_NAME).exists()
+        assert not (home / maintenance.RECEIPT_NAME).exists()
+    else:
+        receipt = maintenance.ownership(home, maintenance._installed(home), maintenance.contract(path, op, home))
+        assert all(maintenance.owned(receipt, n, (home / n).read_bytes()) for n in receipt["owned_bytes"] if n != "AGENTS.md#global")
+
+
+def test_partial_transition_drift_is_never_blessed(tmp_path, monkeypatch, pinned_test_thaliris):
+    from thaliris_codex import host_transition
+    home = tmp_path / "home"
+    exe, _ = pinned_test_thaliris
+    path = intent(tmp_path, home, exe)
+    original = adapter._atomic_host_write
+    def crash(target, contents):
+        if target.name == maintenance.RECEIPT_NAME:
+            raise SimulatedProcessExit()
+        original(target, contents)
+    monkeypatch.setattr(adapter, "_atomic_host_write", crash)
+    with pytest.raises(SimulatedProcessExit):
+        adapter.codex_install(codex_home=home, maintenance_contract=path)
+    monkeypatch.setattr(adapter, "_atomic_host_write", original)
+    (home / "AGENTS.md").write_bytes(b"user change during interrupted transition")
+    before = snapshot(home)
+    result = adapter.codex_install(codex_home=home, maintenance_contract=path)
+    assert not result["ok"]
+    assert snapshot(home) == before
+    assert host_transition.pending(home)
+
+
+@pytest.mark.parametrize("operation", ["install", "uninstall"])
+def test_native_trust_interruption_is_coherent_and_replayable(operation, tmp_path, monkeypatch, installed):
+    from thaliris_codex import host_transition, codex_app_server
+    home, exe = installed
+    op = "codex-" + operation
+    path = intent(tmp_path, home, exe, op)
+    module, name = (adapter, "_install_host_hook_trust") if operation == "install" else (codex_app_server, "remove_owned_hook_trust")
+    original = getattr(module, name)
+    def crash(*args):
+        raise SimulatedProcessExit()
+    monkeypatch.setattr(module, name, crash)
+    invoke = adapter.codex_install if operation == "install" else adapter.codex_uninstall
+    with pytest.raises(SimulatedProcessExit):
+        invoke(maintenance_contract=path)
+    journal, _, after = host_transition.load(home, maintenance.contract(path, op, home))
+    assert journal["phase"] == "COMMITTED"
+    assert all((home / n).read_bytes() == v if v is not None else not (home / n).exists() for n, v in after.items())
+    monkeypatch.setattr(module, name, original)
+    assert invoke(maintenance_contract=path)["ok"]
+    assert not host_transition.pending(home)
+
+
+def test_finalization_rechecks_effective_bytes_and_preserves_new_user_edits(tmp_path, monkeypatch, installed):
+    from thaliris_codex import host_transition
+    home, exe = installed
+    path = intent(tmp_path, home, exe)
+    original = adapter._install_host_hook_trust
+    def changed(home, *args):
+        result = original(home, *args)
+        (home / "AGENTS.md").write_bytes(b"user change during trust step")
+        return result
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", changed)
+    result = adapter.codex_install(maintenance_contract=path)
+    assert not result["ok"]
+    assert result["status"] == "HOST_TRANSITION_PENDING"
+    assert (home / "AGENTS.md").read_bytes() == b"user change during trust step"
+    assert host_transition.pending(home)
+
+
+@pytest.mark.parametrize("surface", ["thaliris-host-generations", "thaliris-host-maintenance.lock"])
+def test_transition_metadata_conflicts_are_full_preflight_failures(surface, tmp_path, monkeypatch, pinned_test_thaliris):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / surface).write_bytes(b"user-owned metadata path")
+    exe, _ = pinned_test_thaliris
+    before = snapshot(home)
+    result = adapter.codex_install(codex_home=home, maintenance_contract=intent(tmp_path, home, exe))
+    assert not result["ok"]
+    assert not result["changed"]
+    assert snapshot(home) == before
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows platform runner")
+def test_pending_generation_is_recognized_before_python_dispatch(tmp_path, pinned_test_thaliris):
+    from thaliris_codex import host_preflight, host_transition
+    exe, _ = pinned_test_thaliris
+    launcher = exe.parent / "dispatch.cmd"
+    launcher.write_bytes(b"@echo off\r\necho unexpected-dispatch\r\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    manifest = runtime_identity.manifest_bytes(launcher)
+    (home / runtime_identity.MANIFEST_NAME).write_bytes(manifest)
+    (home / host_preflight.NAME).write_bytes(host_preflight.script_bytes())
+    runner = home / lifecycle.HOST_RUN_SCRIPT_NAME
+    runner.write_bytes(lifecycle.host_run_script_bytes(launcher, maintenance.digest(manifest)))
+    (home / host_transition.NAME).write_bytes(b"pending generation evidence")
+    result = subprocess.run([str(runner), "codex-bootstrap"], capture_output=True, timeout=15)
+    assert result.returncode != 0
+    assert b"HOST_TRANSITION_PENDING" in result.stdout
+    assert b"unexpected-dispatch" not in result.stdout
+
+
+def test_pending_generation_blocks_bootstrap_without_project_mutation(tmp_path, monkeypatch, installed):
+    from thaliris_codex import host_transition
+    home, exe = installed
+    (home / host_transition.NAME).write_bytes(b"interrupted generation")
+    project = tmp_path / "project"
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    before = snapshot(project)
+    result = codex_bootstrap.bootstrap(project)
+    assert result["status"] == "HOST_TRANSITION_PENDING"
+    assert result["init_invoked"] is False
+    assert snapshot(project) == before
+
+
+def test_committed_replay_rejects_different_explicit_options(tmp_path, monkeypatch, installed):
+    from thaliris_codex import host_transition
+    home, exe = installed
+    path = intent(tmp_path, home, exe)
+    original = adapter._install_host_hook_trust
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *a: {"status": "FAILED"})
+    assert not adapter.codex_install(maintenance_contract=path)["ok"]
+    before = snapshot(home)
+    result = adapter.codex_install(maintenance_contract=path, execution_constraint="luna-only")
+    assert not result["ok"]
+    assert snapshot(home) == before
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", original)
+    assert adapter.codex_install(maintenance_contract=path)["ok"]
+    assert not host_transition.pending(home)
+
+
+def test_independent_historical_profile_needs_prior_authorization(tmp_path, installed):
+    from tests.support.history import historical_blob
+    from tests.host_maintenance_test_support import attest_prior_authorized_bytes
+    home, exe = installed
+    name = "agents/thaliris-focused-implementer.toml"
+    historical = historical_blob("e4b6975889ef348e13e94521dc300f1e572b42a3:.codex/agents/thaliris-focused-implementer.toml")
+    assert adapter._agent_profile_state(historical, Path(name).name) == "legacy"
+    (home / name).write_bytes(historical)
+    before = snapshot(home)
+    path = intent(tmp_path, home, exe)
+    assert not adapter.codex_install(maintenance_contract=path)["ok"]
+    assert snapshot(home) == before
+    attest_prior_authorized_bytes(home, {name: historical})
+    assert adapter.codex_install(maintenance_contract=path)["ok"]
+    assert (home / name).read_bytes() != historical
+
+
+def test_os_lock_releases_after_actual_process_exit(tmp_path):
+    import sys
+    from thaliris_codex import host_transition
+    home = tmp_path / "home"
+    child = subprocess.run([sys.executable, "-c",
+        "import os,sys; from pathlib import Path; from thaliris_codex.host_transition import locked; "
+        "guard=locked(Path(sys.argv[1])); guard.__enter__(); os._exit(17)", str(home)],
+        capture_output=True, timeout=15)
+    assert child.returncode == 17, child.stderr
+    assert (home / host_transition.LOCK_NAME).read_bytes() == host_transition.LOCK_BYTES
+    with host_transition.locked(home):
+        pass # acquiring succeeds after an actual abrupt process exit
+
+
+def test_malformed_transition_finalization_is_preserved_without_mutation(tmp_path, monkeypatch, installed):
+    from thaliris_codex import host_transition
+    home, exe = installed
+    path = intent(tmp_path, home, exe)
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *a: {"status": "FAILED"})
+    assert not adapter.codex_install(maintenance_contract=path)["ok"]
+    journal = home / host_transition.NAME
+    value = json.loads(journal.read_bytes())
+    value["finish"] = None
+    journal.write_text(json.dumps(value), encoding="utf-8")
+    before = snapshot(home)
+    result = adapter.codex_install(maintenance_contract=path)
+    assert not result["ok"]
+    assert result["status"] == "HOST_TRANSITION_PENDING"
+    assert snapshot(home) == before

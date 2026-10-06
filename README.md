@@ -8,12 +8,19 @@ Codex 的 Host 适配器，依赖共享 [Thaliris Core](https://github.com/Iris0
 
 pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.3,<0.5。
 
-在独立 Python 3.11+ 环境内，先安装 Core，再安装适配器：
+Windows Python 3.11+ 的正常安装先创建临时 bootstrap 环境，再使用包内的
+runtime installer。请独立选择已审阅的 adapter 完整 commit 和新的 runtime 目录：
 
-```sh
-python -m pip install 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44'
-python -m pip install --no-deps 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
-thaliris version
+```powershell
+py -3.11 -m venv .thaliris-bootstrap
+$bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
+$adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
+& $bootstrap -m pip install --no-deps $adapterSource
+$env:PYTHONDONTWRITEBYTECODE = '1'
+$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --runtime "$env:LOCALAPPDATA\Thaliris\runtime-<reviewed-revision>" --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44' --adapter-source $adapterSource | ConvertFrom-Json)
+if (-not $runtime.ok) { throw $runtime.error }
+$exe = $runtime.executable
+& $exe version
 ```
 
 请将 adapter commit 占位符替换为独立审阅的已发布不可变版本。Host 维护使用 `codex-maintenance-plan` 和明确的 `--maintenance-contract FILE`，不依赖项目 init/task admission。原始授权安装记录证明 bytes ownership；候选内容相同不证明 ownership。未知项目 role 文档保留且不单独阻止 admission，真正控制指令冲突仍阻止。受支持的卸载和正常重装保留用户配置及恢复证据。公共流程和 legacy 批准边界见 [Host 维护](docs/thaliris-host-maintenance.md)。
@@ -38,7 +45,7 @@ pytest
 POSIX shell 中，先设置 THALIRIS_CORE_SOURCE=../Thaliris，再运行 pytest。
 CI 将该变量指向 shared-core checkout。
 
-安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。正式 Host 安装应将两个 wheel 安装进禁用 system site packages 的专用环境；含可执行内容或扩展导入路径的 `.pth` 不会通过运行时 pin 验证。在 Windows Python 3.11 中，如果标准 venv bootstrap 附带 `setuptools` 与 `distutils-precedence.pth`，可在安装两个 wheel 后移除仅用于 bootstrap 的包（`python -m pip uninstall -y setuptools`），运行 `python -m pip check` 并确认没有可执行或扩展路径的 `.pth`。整个环境的文件（含共享 Core）被纳入 manifest。
+安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。installer 创建不含 ensurepip 的专用环境，再通过 bootstrap 的 pip 安装两个已选择的包；pip、setuptools 和构建依赖留在 runtime 之外，无需手工修复 `.pth`。system site packages 禁用，可执行或扩展导入路径的 `.pth` 仍无例外地拒绝。也支持 `absolute-wheel-path#sha256=<reviewed-digest>` 形式的已校验本地 wheel。整个环境的文件（含共享 Core）被纳入 manifest；固定目录保持不可变，升级使用新的 runtime 目录。
 
 [共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 基准结果](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
 

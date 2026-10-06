@@ -94,11 +94,15 @@ def contract(filename: str | Path | None, operation: str, home: Path, *, actor: 
 def ownership(home: Path, installed: bytes | None, intent: dict) -> dict:
     path = home / RECEIPT_NAME
     safe(path)
-    if not path.exists():
+    return validate_ownership(path.read_bytes() if path.exists() else None, installed, intent)
+
+
+def validate_ownership(contents: bytes | None, installed: bytes | None, intent: dict) -> dict:
+    if contents is None:
         # A narrow explicit human approval can migrate a legacy installation.
         # Neither historical render hashes nor candidate equality supply it.
         return {"owned_bytes": intent.get("legacy_owned_bytes", {}), "hook_handlers": {}}
-    record = json.loads(path.read_bytes())
+    record = json.loads(contents)
     if not isinstance(record, dict) or record.get("format") != RECEIPT_FORMAT or (
             record.get("runtime_sha256") != (digest(installed) if installed is not None else "ABSENT")):
         raise ValueError("installed ownership record does not match trusted current installation")
@@ -111,6 +115,10 @@ def ownership(home: Path, installed: bytes | None, intent: dict) -> dict:
     for name, sha in record.get("owned_bytes", {}).items():
         if not isinstance(name, str) or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
             raise ValueError("invalid installed ownership byte identity")
+        if name.startswith("agents/"):
+            from .host_transition import _profile_name
+            if not _profile_name(name):
+                raise ValueError("invalid installed ownership profile path")
     if any(not isinstance(event, str) or not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
            for event, entries in record["hook_handlers"].items()):
         raise ValueError("invalid installed hook ownership structure")
@@ -193,12 +201,30 @@ def _global_owned_bytes(current: bytes) -> bytes | None:
 
 
 def _files(home: Path) -> dict[str, bytes]:
-    from . import lifecycle, host_preflight, roles
+    from . import lifecycle, host_preflight, roles, host_transition
     if any(character in str(home) for character in ('"', "%", "!", "\r", "\n")):
         raise ValueError("host_hook_script_path_not_safe_for_cmd_trampoline")
     names = [runtime_identity.MANIFEST_NAME, RECEIPT_NAME, "AGENTS.md", "hooks.json",
              lifecycle.HOST_HOOK_SCRIPT_NAME, lifecycle.HOST_RUN_SCRIPT_NAME, host_preflight.NAME]
     names += ["agents/" + name for name in roles.agent_profiles()]
+    safe(home / host_transition.NAME)
+    safe(home / "thaliris-host-generations" / ".maintenance-path-check")
+    lock = home / host_transition.LOCK_NAME
+    safe(lock)
+    if lock.exists() and lock.read_bytes() != host_transition.LOCK_BYTES:
+        raise ValueError("unowned Host maintenance lock file; preserve for review")
+    receipt = home / RECEIPT_NAME
+    safe(receipt)
+    if receipt.exists():
+        from .host_transition import _profile_name
+        value = json.loads(receipt.read_bytes())
+        if not isinstance(value, dict) or not isinstance(value.get("owned_bytes"), dict):
+            raise ValueError("invalid installed ownership record structure")
+        for name in value["owned_bytes"]:
+            if isinstance(name, str) and name.startswith("agents/"):
+                if not _profile_name(name):
+                    raise ValueError("invalid installed ownership profile path")
+                names.append(name)
     safe(home / "agents" / ".maintenance-path-check")
     result = {}
     for name in names:
@@ -210,16 +236,32 @@ def _files(home: Path) -> dict[str, bytes]:
 
 
 def _failure(home: Path, error: Exception) -> dict:
-    return {"ok": False, "changed": False, "target": str(home), "files": [],
+    result = {"ok": False, "changed": False, "target": str(home), "files": [],
             "manual_action_required": [str(error)], "project_files_touched": [],
             "host_actor_assurance": "UNKNOWN", "host_session_load_status": "UNKNOWN"}
+    from . import host_transition
+    # Preserve a pending state even when a resumed preflight detects input drift.
+    if (home / host_transition.NAME).exists():
+        result.update(status="HOST_TRANSITION_PENDING", transition_pending=True,
+                      recovery_action="Replay the original maintenance contract; resolve reported drift first")
+    return result
 
 
 def install(home: Path, executable, executable_sha256, execution_constraint, filename) -> dict:
-    from . import codex_adapter as adapter, lifecycle, host_preflight, roles, codex_app_server
+    from . import codex_adapter as adapter, lifecycle, host_preflight, roles, host_transition
     # No disk, audit, profile or trust mutation occurs before this complete plan.
     try:
         intent = contract(filename, "codex-install", home)
+        candidate, approved = selected_runtime(intent["candidate"])
+        if executable is not None and Path(executable).resolve() != candidate:
+            raise ValueError("candidate executable differs from approved maintenance identity")
+        if executable_sha256 is not None and executable_sha256 != json.loads(approved)["executable_sha256"]:
+            raise ValueError("candidate executable hash differs from approved maintenance identity")
+        if intent.get("execution_constraint") != execution_constraint:
+            raise ValueError("execution constraint differs from explicit maintenance intent")
+        resumed = host_transition.resume(home, intent, _finish_install)
+        if resumed is not None:
+            return resumed
         prior = _installed(home)
         expected_prior = intent.get("installed_runtime_sha256")
         if expected_prior != (digest(prior) if prior is not None else "ABSENT"):
@@ -229,23 +271,17 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         record = ownership(home, prior, intent)
         if record.get("execution_constraint") == "luna-only" and execution_constraint != "luna-only":
             raise ValueError("existing luna-only installation requires the same explicit constraint; omission cannot remove it")
-        candidate, approved = selected_runtime(intent["candidate"])
-        if executable is not None and Path(executable).resolve() != candidate:
-            raise ValueError("candidate executable differs from approved maintenance identity")
         exe, sha, problem = adapter._host_install_executable(home, candidate, executable_sha256 or json.loads(approved)["executable_sha256"])
         if problem or exe != candidate:
             raise ValueError(problem or "candidate executable identity mismatch")
         runtime = runtime_identity.manifest_bytes(candidate)
         if runtime != approved:
             raise ValueError("candidate runtime changed during preflight")
-        # Render from the approved candidate, not an older executor's sources.
-        # A distinct trusted executor can invoke the approved candidate CLI;
-        # the candidate remains independently selected by the intent file.
+        # Render from the approved candidate itself, not an older executor's
+        # sources. The selected executor must identify that same approved package.
         executor, executor_bytes = selected_runtime(intent["executor"])
         if json.loads(executor_bytes)["package_dir"] != json.loads(runtime)["package_dir"]:
             raise ValueError("install executor must run the independently approved candidate renderer")
-        if intent.get("execution_constraint") != execution_constraint:
-            raise ValueError("execution constraint differs from explicit maintenance intent")
         current_global = before.get("AGENTS.md", b"")
         span = _global_owned_bytes(current_global)
         if span is not None and not owned(record, "AGENTS.md#global", span):
@@ -260,6 +296,12 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         }
         for name, (model, effort, role) in roles.agent_profiles(execution_constraint).items():
             writes["agents/" + name] = adapter._agent_profile(name.removesuffix(".toml"), role, model, effort)
+        deletes = []
+        for name, contents in before.items():
+            if name.startswith("agents/") and name not in writes and name in record.get("owned_bytes", {}):
+                if not owned(record, name, contents):
+                    raise ValueError(f"edited retired Host profile: {name}; preserve and review exact bytes")
+                deletes.append(name)
         for name in writes:
             if name in {runtime_identity.MANIFEST_NAME, "AGENTS.md"}:
                 continue
@@ -296,7 +338,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             if not hook_handlers[event]:
                 hook_handlers[event] = [entry for entry in merged.get("hooks", {}).get(event, [])
                     if entry in record.get("hook_handlers", {}).get(event, [])]
-        installation_changed = prior is None or prior != runtime or RECEIPT_NAME not in before or any(
+        installation_changed = bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
             before.get(name) != contents for name, contents in writes.items()
         )
         receipt = {"format": RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
@@ -314,13 +356,32 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
     except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
         return _failure(home, exc)
 
-    changed_files = []
-    if prior is not None and prior != runtime:
-        adapter._write_runtime_audit(home, prior, Path(json.loads(prior)["executable"]))
-    for name, contents in writes.items():
-        if before.get(name) != contents:
-            adapter._atomic_host_write(home / name, contents)
-            changed_files.append(name)
+    changed_files = sorted(set(deletes) | {name for name, contents in writes.items() if before.get(name) != contents})
+    finish = {"candidate": str(candidate), "sha": sha, "runtime": runtime.decode(),
+              "execution_constraint": execution_constraint, "changed_files": changed_files}
+    try:
+        with host_transition.locked(home):
+            transition = host_transition.begin(home, intent, before, writes, deletes, finish)
+            return _finish_install(home, transition)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _transition_failure(home, exc)
+
+
+def _transition_failure(home, error):
+    from . import host_transition
+    result = _failure(home, error)
+    is_pending = host_transition.pending(home)
+    result.update(status="HOST_TRANSITION_PENDING" if is_pending else "HOST_MAINTENANCE_PREPARE_FAILED", changed=is_pending,
+                  recovery_action="Replay the original codex-install/codex-uninstall --maintenance-contract FILE",
+                  host_integration_ready="NO", transition_pending=is_pending)
+    return result
+
+
+def _finish_install(home, transition):
+    from . import codex_adapter as adapter, lifecycle, codex_app_server, roles, host_transition
+    finish = transition["finish"]
+    candidate, sha, runtime = Path(finish["candidate"]), finish["sha"], finish["runtime"].encode()
+    execution_constraint, changed_files = finish["execution_constraint"], list(finish["changed_files"])
     health = lifecycle.host_hooks_health(home)
     trust_status, trust_error = "NOT_REGISTERED", None
     trusted_count = enabled_count = 0
@@ -338,6 +399,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
     ready = health["hooks_configured"] == "YES" and trust_status == "TRUSTED" and trusted_count == enabled_count == expected_count and adapter._host_profile_definition_present(home) == "YES"
     if ready:
         manual = []
+        host_transition.complete(home, transition)
     elif trust_error:
         manual = ["HOST_HOOK_TRUST_INSTALL_FAILED"]
     elif trust_status == "TRUSTED" and (trusted_count != expected_count or enabled_count != expected_count):
@@ -355,15 +417,20 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,
         "native_profile_names": sorted(roles.native_profile_names()), "project_files_touched": [],
+        "transition_pending": not ready,
+        "recovery_action": None if ready else "Replay the original codex-install --maintenance-contract FILE",
         "install_status": "RESTART_CODEX_ONCE" if ready and changed_files else "HOST_INTEGRATION_UNCHANGED" if ready else "INSTALL_INCOMPLETE",
         "session_restart_required": bool(ready and changed_files), "host_setup_requires_session_start": bool(changed_files)}
 
 
 def uninstall(home: Path, filename) -> dict:
-    from . import codex_adapter as adapter, lifecycle, codex_app_server
+    from . import codex_adapter as adapter, lifecycle, codex_app_server, host_transition
     import os
     try:
         intent = contract(filename, "codex-uninstall", home)
+        resumed = host_transition.resume(home, intent, _finish_uninstall)
+        if resumed is not None:
+            return resumed
         executor, executor_bytes = selected_runtime(intent["executor"])
         prior = _installed(home)
         if intent.get("installed_runtime_sha256") != (digest(prior) if prior is not None else "ABSENT"):
@@ -437,32 +504,35 @@ def uninstall(home: Path, filename) -> dict:
             raise ValueError("maintenance input changed during preflight")
     except (OSError, ValueError, TypeError, KeyError, RuntimeError, codex_app_server.CodexAppServerError) as exc:
         return _failure(home, exc)
-    # Preserve the provenance before removing the active installation record.
-    audits = []
-    if prior is not None:
-        audit = adapter._write_runtime_audit(home, prior, Path(json.loads(prior)["executable"]))
-        audit_value = json.loads(audit.read_bytes())
-        audit_value["ownership_receipt"] = record
-        audit_value["maintenance_contract_sha256"] = intent["contract_sha256"]
-        adapter._atomic_host_write(audit, (json.dumps(audit_value, sort_keys=True) + "\n").encode())
-        audits.append(audit.name)
+    deletes += [name for name, contents in writes.items() if not contents]
+    writes = {name: contents for name, contents in writes.items() if contents}
+    finish = {"keys": keys, "inert": inert, "preserved": preserved,
+              "changed_files": sorted(set(writes) | set(deletes))}
+    try:
+        with host_transition.locked(home):
+            transition = host_transition.begin(home, intent, before, writes, deletes, finish)
+            return _finish_uninstall(home, transition)
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _transition_failure(home, exc)
+
+
+def _finish_uninstall(home, transition):
+    from . import codex_app_server, lifecycle, codex_adapter as adapter, host_transition
+    finish = transition["finish"]
+    keys, inert, preserved = finish["keys"], finish["inert"], finish["preserved"]
+    audits = [host_transition.archive_name(transition)]
     try:
         trust_removed = codex_app_server.remove_owned_hook_trust(home, keys) if keys else 0
     except (OSError, ValueError, RuntimeError) as exc:
         result = _failure(home, exc)
-        result.update(status="UNINSTALL_INCOMPLETE", changed=bool(audits), runtime_audit_records=audits,
+        result.update(status="HOST_TRANSITION_PENDING", changed=True, runtime_audit_records=audits,
+                      transition_pending=True, recovery_action="Replay the original codex-uninstall --maintenance-contract FILE",
                       host_hook_trust_cleanup_status="FAILED", host_hook_trust_cleanup_error=str(exc))
         return result
-    for name, contents in writes.items():
-        if contents:
-            adapter._atomic_host_write(home / name, contents)
-        else:
-            (home / name).unlink()
-    for name in deletes:
-        (home / name).unlink()
-    return {"ok": True, "changed": bool(writes or deletes or trust_removed), "target": str(home),
+    host_transition.complete(home, transition)
+    return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed), "target": str(home),
         "status": "UNINSTALLED_INERT_RUNNER_RETAINED" if inert else "UNINSTALLED",
-        "files": sorted(set(writes) | set(deletes)), "preserved_files": preserved,
+        "files": finish["changed_files"], "preserved_files": preserved,
         "manual_action_required": [], "retained_inert_runner": inert, "runtime_audit_records": audits,
         "host_hook_trust_cleanup_status": "CLEANED" if keys else "NOT_NEEDED",
         "host_hook_trusted_state_removed": trust_removed, "host_hook_trust_cleanup_error": None,

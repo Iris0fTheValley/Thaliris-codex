@@ -157,6 +157,7 @@ def _parser() -> argparse.ArgumentParser:
     q = sub.add_parser("audit-hook", help=argparse.SUPPRESS)
     q.add_argument("event", choices=("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop"))
     q.add_argument("--managed-hook-abi", help=argparse.SUPPRESS)
+    q.add_argument("--maintenance-replay-contract", help=argparse.SUPPRESS)
     return p
 
 
@@ -205,6 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         root = args.root.resolve()
+        from . import host_transition
+        if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
+            raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")
         if args.command not in {"audit-hook", "codex-bootstrap", "task-status", "doctor", "version", "codex-install", "codex-uninstall", "codex-maintenance-plan", "task-recover-authority"}:
             task_authority.check(root)
         if args.command == "audit-hook":
@@ -212,7 +216,10 @@ def main(argv: list[str] | None = None) -> int:
                 payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 payload = None
-            response = codex_adapter.audit_hook(root, args.event, payload, args.managed_hook_abi)
+            if args.maintenance_replay_contract is not None:
+                response = lifecycle.maintenance_replay_check(root, payload, args.maintenance_replay_contract)
+            else:
+                response = codex_adapter.audit_hook(root, args.event, payload, args.managed_hook_abi)
             if response:
                 sys.stdout.write(response)
             return 0
@@ -237,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
                 out = codex_adapter.codex_uninstall(maintenance_contract=args.maintenance_contract)
         elif args.command == "codex-maintenance-plan":
             home = codex_adapter._codex_home()
+            if host_transition.pending(home):
+                raise ValueError("HOST_TRANSITION_PENDING: replay the original maintenance contract; do not approve a partial generation")
             executable = Path(args.executable).resolve(strict=True)
             selected = {"executable": str(executable),
                 "runtime_sha256": host_maintenance.digest(runtime_identity.manifest_bytes(executable)),

@@ -334,6 +334,12 @@ def _bootstrap(root: Path, hook_attestation: str | None = None) -> dict[str, obj
 
 
 def bootstrap(root: Path, hook_attestation: str | None = None) -> dict[str, object]:
+    from . import host_transition
+    if host_transition.pending(lifecycle._host_home_path()):
+        return {"ok": False, "status": "HOST_TRANSITION_PENDING", "init_invoked": False,
+                "session_restart_required": False, "ordinary_workspace_work_allowed": True,
+                "controller_actor_assurance": "UNKNOWN",
+                "recovery_action": "Replay the original standalone maintenance contract"}
     result = _bootstrap(root, hook_attestation)
     assurance = lifecycle._controller_actor_assurance({})
     result.update(controller_actor_assurance=assurance, ordinary_workspace_work_allowed=True)
