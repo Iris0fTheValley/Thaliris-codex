@@ -83,12 +83,12 @@ def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
              ("core implementation", "hard invariants", "unknowns are resolved", "focused evidence"),
              ("remaining tasks", "causal model", "architecture", "contract", "scope", "acceptance", "direction"),
              ("pass alone", "endpoint"),
-             ("regression", "lint", "build", "synchronization", "compatibility", "deterministic defects", "installation", "git closure", "fresh ordinary"),
+             ("regression", "lint", "build", "synchronization", "compatibility", "deterministic defects", "project/package install-smoke checks", "git closure", "fresh ordinary"),
              ("shared executor guidance", "does not extend"),
              ("candidate sources or diff", "evidence and limits", "remaining tasks", "escalation boundary"))
     assert "may remain in this workstream" not in normalized(focused)
     assert "runtime feedback" not in normalized(ordinary)
-    concepts(focused, ("installation or smoke feedback", "semantic defect"),
+    concepts(focused, ("project/package install or smoke feedback", "semantic defect"),
              ("formal documentation", "establishes core semantics"))
 
 
@@ -184,7 +184,7 @@ def test_compatibility_authority_and_fresh_rerouting_preserve_semantic_endpoint(
     for role in ("implementer", "focused-implementer"):
         concepts(prompt(role), ("authority ambiguity", "compatibility", "ownership", "security", "lifecycle", "contract"),
                  ("many failures", "many files", "long regression alone", "do not require escalation"),
-                 ("project installation closure excludes effective live host", "separate authority"))
+                 ("project/package install-smoke closure excludes effective live host", "separate authority"))
     concepts(prompt("focused-implementer"), ("production behavior", "historical fixtures", "representative evidence"),
              ("dependency to controller", "do not classify", "mechanical compatibility"),
              ("full regression by default"))
