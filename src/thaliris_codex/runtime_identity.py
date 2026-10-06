@@ -43,7 +43,10 @@ def physical_directory(path: Path) -> Path:
     close = kernel.CloseHandle
     close.argtypes = [wintypes.HANDLE]
     close.restype = wintypes.BOOL
-    handle = create(str(path), 0, 7, None, 3, 0x02000000, None)
+    # The setup creator keeps an exclusive directory handle until its final
+    # runtime smoke completes. Read/write sharing lets identity probes inspect
+    # that same directory while withholding delete sharing keeps its path fixed.
+    handle = create(str(path), 0, 3, None, 3, 0x02000000, None)
     if handle == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     try:

@@ -200,14 +200,42 @@ def test_redirected_destination_stops_before_venv_or_package_install(tmp_path, m
     adapter = source_wheel(tmp_path, "thaliris_codex", Path(thaliris_codex.__file__).parent, entry=True)
     target = tmp_path / "requested-runtime"
     actual = tmp_path / "physical-runtime"
-    monkeypatch.setattr(runtime_identity, "physical_directory", lambda _path: actual)
+    monkeypatch.setattr(runtime_setup, "_owned_directory_physical_path", lambda _owned: actual)
     calls = []
     monkeypatch.setattr(runtime_setup.venv.EnvBuilder, "create", lambda *_args: calls.append("venv"))
     monkeypatch.setattr(runtime_setup.subprocess, "run", lambda *_args, **_kw: calls.append("pip"))
-    with pytest.raises(ValueError, match="select final physical directory"):
+    with pytest.raises(ValueError, match="select final physical directory") as error:
         runtime_setup.create(target, core, adapter)
     assert calls == []
+    assert target.exists() is (os.name != "nt")
+    if os.name != "nt":
+        assert "created directory was preserved because safe empty cleanup was unavailable" in str(error.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="atomic created-directory cleanup is Windows-native")
+def test_redirected_empty_cleanup_allows_same_path_retry(tmp_path, monkeypatch):
+    target = tmp_path / "requested-runtime"
+    actual = tmp_path / "physical-runtime"
+    core = "git+https://example.test/core@" + "a" * 40
+    adapter = "git+https://example.test/adapter@" + "b" * 40
+    monkeypatch.setattr(runtime_setup, "_owned_directory_physical_path", lambda _owned: actual)
+    with pytest.raises(ValueError, match="select final physical directory"):
+        runtime_setup.create(target, core, adapter)
     assert not target.exists()
+
+    calls = []
+    monkeypatch.setattr(runtime_setup, "_owned_directory_physical_path", lambda _owned: target)
+    monkeypatch.setattr(runtime_identity, "location_bytes", lambda _path: b"location")
+    monkeypatch.setattr(runtime_setup.venv.EnvBuilder, "create", lambda *_args: calls.append("venv"))
+    monkeypatch.setattr(runtime_setup.subprocess, "run", lambda *_args, **_kwargs: calls.append("command"))
+    monkeypatch.setattr(runtime_identity, "manifest_bytes", lambda _executable: b"manifest")
+    monkeypatch.setattr(runtime_identity, "manifest_identity", lambda _contents: "digest")
+    monkeypatch.setattr(runtime_identity, "console_smoke", lambda *_args: {"ok": True})
+
+    result = runtime_setup.create(target, core, adapter)
+    assert result["ok"]
+    assert target.is_dir()
+    assert calls == ["venv", "command", "command"]
 
 
 def test_redirected_destination_cleanup_preserves_nonempty_attempt_directory(tmp_path, monkeypatch):
@@ -223,29 +251,81 @@ def test_redirected_destination_cleanup_preserves_nonempty_attempt_directory(tmp
         marker.write_text("preserve", encoding="utf-8")
         return actual
 
-    monkeypatch.setattr(runtime_identity, "physical_directory", redirected)
-    with pytest.raises(ValueError, match="select final physical directory"):
+    monkeypatch.setattr(runtime_setup, "_owned_directory_physical_path", redirected)
+    with pytest.raises(ValueError, match="created directory was preserved because safe empty cleanup was unavailable"):
         runtime_setup.create(target, core, adapter)
+    assert target.is_dir()
     assert marker.read_text(encoding="utf-8") == "preserve"
 
 
-def test_redirected_destination_cleanup_preserves_replacement_directory(tmp_path, monkeypatch):
+def test_redirected_destination_setup_blocks_replacement_after_create(tmp_path, monkeypatch):
     target = tmp_path / "requested-runtime"
     displaced = tmp_path / "original-attempt-directory"
     actual = tmp_path / "physical-runtime"
+    sentinel = target / "replacement-owned.txt"
 
-    def replace_then_redirect(path):
-        path.rename(displaced)
-        path.mkdir()
-        return actual
+    create_owned = runtime_setup._create_owned_directory
 
-    monkeypatch.setattr(runtime_identity, "physical_directory", replace_then_redirect)
+    def replace_after_atomic_create(path):
+        owned = create_owned(path)
+        # Reproduce replacement after the native create returned but before the
+        # caller could have captured a path identity. Windows keeps the target
+        # open without delete sharing, so this competing rename must fail.
+        try:
+            path.rename(displaced)
+        except OSError:
+            assert os.name == "nt"
+        else:
+            path.mkdir()
+            (path / sentinel.name).write_text("preserve", encoding="utf-8")
+        return owned
+
+    monkeypatch.setattr(runtime_setup, "_create_owned_directory", replace_after_atomic_create)
+    monkeypatch.setattr(runtime_setup, "_owned_directory_physical_path", lambda _owned: actual)
     with pytest.raises(ValueError, match="select final physical directory"):
         runtime_setup.create(target, "git+https://example.test/core@" + "a" * 40,
                              "git+https://example.test/adapter@" + "b" * 40)
-    assert target.is_dir()
-    assert displaced.is_dir()
-    assert not list(target.iterdir())
+    if os.name == "nt":
+        assert not target.exists()
+        assert not displaced.exists()
+    else:
+        assert target.is_dir()
+        assert sentinel.read_text(encoding="utf-8") == "preserve"
+        assert displaced.is_dir()
+
+
+def test_redirected_cleanup_blocks_replacement_after_path_check(tmp_path, monkeypatch):
+    target = tmp_path / "requested-runtime"
+    displaced = tmp_path / "original-attempt-directory"
+    actual = tmp_path / "physical-runtime"
+    sentinel = target / "replacement-owned.txt"
+    remove_owned = runtime_setup._remove_owned_directory_if_empty
+
+    def replace_at_cleanup_boundary(owned):
+        # This is the old identity-check / rmdir gap: replace the name after
+        # the destination check, exactly before cleanup's destructive action.
+        try:
+            target.rename(displaced)
+        except OSError:
+            assert os.name == "nt"
+        else:
+            target.mkdir()
+            (target / sentinel.name).write_text("preserve", encoding="utf-8")
+        remove_owned(owned)
+
+    monkeypatch.setattr(runtime_setup, "_owned_directory_physical_path", lambda _owned: actual)
+    monkeypatch.setattr(runtime_setup, "_remove_owned_directory_if_empty", replace_at_cleanup_boundary)
+    with pytest.raises(ValueError, match="select final physical directory"):
+        runtime_setup.create(target, "git+https://example.test/core@" + "a" * 40,
+                             "git+https://example.test/adapter@" + "b" * 40)
+    if os.name == "nt":
+        assert not target.exists()
+        assert not displaced.exists()
+    else:
+        assert sentinel.read_text(encoding="utf-8") == "preserve"
+        # Portable fallback preserves both names because it cannot perform
+        # race-safe removal by handle.
+        assert displaced.exists()
 
 
 def test_redirected_destination_does_not_touch_preexisting_target(tmp_path, monkeypatch):
