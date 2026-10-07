@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -369,3 +370,107 @@ def test_installed_command_checks_runtime_before_dispatch(tmp_path: Path, monkey
     assert b"dispatched" not in refused.stdout
     wrapper.write_bytes(wrapper.read_bytes() + b"\r\nrem tampered\r\n")
     assert lifecycle._context_arguments(f"& '{wrapper}' task-start goal") is None
+
+
+def _console_launcher(launcher: Path, interpreter: Path | None, terminator: bytes) -> None:
+    """Write a console launcher with distlib's exact observable byte layout.
+
+    distlib builds the Windows launcher as ``<PE stub>`` + ``#!<interpreter>`` +
+    ``<terminator>`` + ``<zip holding __main__.py>``, and the project's binding
+    check reads exactly that region through the zip entry's header offset. The
+    stub bytes are irrelevant to that check, so a synthetic stub keeps this
+    deterministic while preserving the real structure. Passing ``interpreter=None``
+    omits the shebang entirely.
+    """
+    import io as _io
+    import zipfile as _zipfile
+
+    payload = _io.BytesIO()
+    with _zipfile.ZipFile(payload, "w", _zipfile.ZIP_STORED) as archive:
+        archive.writestr("__main__.py", "import sys\nsys.exit(0)\n")
+    shebang = b"" if interpreter is None else b"#!" + str(interpreter).encode("utf-8") + terminator
+    launcher.write_bytes(
+        b"MZ" + b"\x00" * 62 + b"PE\x00\x00" + b"\x00" * 256
+        + shebang
+        + payload.getvalue()
+    )
+
+
+def _real_windows_interpreter() -> bytes:
+    """The running interpreter's own PE image, used as a real binding target."""
+    return Path(sys.executable).read_bytes()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows pip console launcher ABI")
+def test_console_launcher_binding_accepts_both_distlib_terminators(tmp_path: Path) -> None:
+    """A long interpreter path must not be rejected as an unavailable binding.
+
+    Observed on this host: distlib writes ``#!<interpreter>\\n`` when the
+    interpreter path is short and ``#!<interpreter>\\n\\r\\n`` once it is long
+    (PEP 397's terminator plus the archive separator). The final Codex runtime
+    path is long enough to take the second branch, so rejecting it made a clean
+    final-path runtime impossible to create.
+    """
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    interpreter = scripts / "python.exe"
+    interpreter.write_bytes(_real_windows_interpreter())
+
+    short_form = scripts / "short.exe"
+    _console_launcher(short_form, interpreter, b"\n")
+    runtime_identity._assert_launcher_binding(short_form)
+
+    long_form = scripts / "long.exe"
+    _console_launcher(long_form, interpreter, b"\n\r\n")
+    runtime_identity._assert_launcher_binding(long_form)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows pip console launcher ABI")
+def test_console_launcher_binding_still_rejects_relocated_interpreter(tmp_path: Path) -> None:
+    """Relaxing the terminator must not relax the binding itself."""
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    interpreter = scripts / "python.exe"
+    interpreter.write_bytes(_real_windows_interpreter())
+
+    elsewhere = tmp_path / "other" / "python.exe"
+    elsewhere.parent.mkdir()
+    elsewhere.write_bytes(interpreter.read_bytes())
+
+    relocated = scripts / "relocated.exe"
+    _console_launcher(relocated, elsewhere, b"\n\r\n")
+    with pytest.raises(ValueError, match="launcher location changed"):
+        runtime_identity._assert_launcher_binding(relocated)
+
+    # A relative binding is refused even when the terminator is the long form.
+    relative = scripts / "relative.exe"
+    _console_launcher(relative, Path("python.exe"), b"\n\r\n")
+    with pytest.raises(ValueError, match="launcher location changed"):
+        runtime_identity._assert_launcher_binding(relative)
+
+    # An empty path cannot become the same-directory interpreter by accident.
+    empty = scripts / "empty.exe"
+    _console_launcher(empty, Path(), b"\n\r\n")
+    with pytest.raises(ValueError):
+        runtime_identity._assert_launcher_binding(empty)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows pip console launcher ABI")
+def test_console_launcher_binding_rejects_missing_or_malformed_shebang(tmp_path: Path) -> None:
+    """Absent and trailing-garbage shebangs stay rejected."""
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    interpreter = scripts / "python.exe"
+    interpreter.write_bytes(_real_windows_interpreter())
+
+    no_shebang = scripts / "bare.exe"
+    _console_launcher(no_shebang, None, b"")
+    with pytest.raises(ValueError, match="binding is unavailable"):
+        runtime_identity._assert_launcher_binding(no_shebang)
+
+    trailing = scripts / "trailing.exe"
+    _console_launcher(trailing, interpreter, b"\n\r\n")
+    data = trailing.read_bytes()
+    trailing.write_bytes(data.replace(b"\n\r\n", b"\n\r\ngarbage\n", 1))
+    with pytest.raises(ValueError, match="binding is unavailable"):
+        runtime_identity._assert_launcher_binding(trailing)

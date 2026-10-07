@@ -101,7 +101,13 @@ def _assert_launcher_binding(launcher: Path) -> None:
                 raise ValueError("unsupported Windows console launcher archive")
             offset = entries[0].header_offset
         start = data.rfind(b"#!", 0, offset)
-        match = re.fullmatch(rb'#!(?:"([^"\r\n]+)"|([^"\r\n]+))\r?\n', data[start:offset]) if start >= 0 else None
+        # distlib writes the shebang as ``#!<interpreter>\n`` on the short-path
+        # branch and as ``#!<interpreter>\n\r\n`` (PEP 397's terminator plus the
+        # archive separator) once the interpreter path is long. Both encode the
+        # same exact absolute binding, so accept either terminator. The path
+        # itself still may not contain CR or LF, and the equality checks below
+        # remain the actual invariant.
+        match = re.fullmatch(rb'#!(?:"([^"\r\n]+)"|([^"\r\n]+))\r?\n(?:\r?\n)?', data[start:offset]) if start >= 0 else None
         if match is None:
             raise ValueError("Windows console launcher interpreter binding is unavailable")
         bound = Path((match[1] or match[2]).decode("utf-8"))
