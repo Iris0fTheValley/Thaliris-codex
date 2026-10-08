@@ -66,6 +66,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_global_arguments(p)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("runtime-check", help="report this public console's interpreter and package origin without mutation")
+    sub.add_parser("controller-instructions", help="retrieve Controller procedures without admission or mutation")
     q = sub.add_parser("init")
     q.add_argument(
         "--accept-managed-instruction-sha256",
@@ -218,6 +219,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(out, sort_keys=True, separators=(",", ":")))
             return 0
         root = args.root.resolve()
+        if args.command == "controller-instructions":
+            from . import controller_instructions
+            runner_path = str(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME).replace("'", "''")
+            runner = ("& " if sys.platform == "win32" else "") + f"'{runner_path}'"
+            print(json.dumps({"ok": True, "content": controller_instructions.render(runner)}, ensure_ascii=False))
+            return 0
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
             raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")

@@ -105,6 +105,7 @@ _OBVIOUS_WRITE = re.compile(
 )
 _COMMAND_SEPARATOR = re.compile(r"(?:\r?\n|&&|\|\||\||&|;)")
 _CONTEXT_OPERATIONS = frozenset({
+    "controller-instructions",
     "task-recover-authority",
     "init", "codex-bootstrap", "codex-install", "codex-uninstall", "codex-maintenance-plan", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
@@ -112,12 +113,14 @@ _CONTEXT_OPERATIONS = frozenset({
     "task-artifact", "task-close", "task-promote", "recover-pending-spawn", "rollback", "version",
 })
 _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
+    "controller-instructions",
     "task-recover-authority",
     "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
     "recover-pending-spawn", "task-abandon", "version",
 })
 _CHILD_CONTEXT_READS = frozenset({
+    "controller-instructions",
     "task-show", "task-status", "stale",
     "memory-status", "milestone-check", "task-get", "artifact-get", "catalog",
     "document-get",
@@ -1285,7 +1288,12 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
         if event not in HOOK_EVENTS or not isinstance(payload, dict):
             return ""
         root = _hook_repository_root(root, payload)
-        anchor = task_authority.read(root)
+        try:
+            anchor = task_authority.read(root)
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            if event == "PreToolUse" and _exact_standalone_controller_instructions_request(payload):
+                return _pre_tool_output(payload, root, managed_hook_abi)
+            raise
         if anchor is not None and (_session_id_hash(payload) in anchor["fenced_sessions"] or
                 _identity_hash(payload.get("agent_id")) in anchor["fenced_agents"]):
             return _permission_deny("THALIRIS_ABANDONED_ACTOR") if event == "PreToolUse" else ""
@@ -1294,7 +1302,7 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
                 if _context_operation(payload) == "task-recover-authority":
                     if _controller_actor_assurance(payload) == "CHILD":
                         return _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
-                elif _context_operation(payload) not in {"codex-install", "codex-uninstall"} and not (_controller_actor_assurance(payload) == "UNKNOWN" and _context_operation(payload) in {"task-status", "doctor"}):
+                elif _context_operation(payload) not in {"codex-install", "codex-uninstall", "controller-instructions"} and not (_controller_actor_assurance(payload) == "UNKNOWN" and _context_operation(payload) in {"task-status", "doctor"}):
                     task_authority.check(root)
             except (OSError, ValueError, KeyError, TypeError):
                 return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: preserve the external authority and task evidence; a Controller must resolve this conflict.")
@@ -1836,7 +1844,7 @@ def _parent_binding_matches(state: dict[str, Any], record: dict[str, Any], *, re
         and parent.get("turn_id_hash") == record["parent_turn_id_hash"]
         and parent.get("session_id_hash") == record.get("session_id_hash")
         and parent.get("handoff_id") == record["root_handoff_id"]
-        and (not require_live or parent.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"})
+        and (not require_live or parent.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"})
         for parent in state["children"])
 
 
@@ -1889,7 +1897,7 @@ def _bound_child_record(state: dict[str, Any], payload: dict[str, Any]) -> dict[
         and child.get("managed") is True and child.get("handoff_bound") is True
         and isinstance(child.get("handoff_id"), str)
         and _parent_binding_matches(state, child, require_live=False)
-        and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}]
+        and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}]
     return matches[0] if len(matches) == 1 else None
 
 
@@ -2139,7 +2147,8 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
             active = any(
                 isinstance(child, dict)
                 and child.get("managed") is True
-                and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}
+                and (child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}
+                     or child.get("native_status_conflict") is True)
                 and child is not parent
                 for child in state["children"]
             )
@@ -2384,16 +2393,12 @@ def _record_subagent_stop(root: Path, payload: dict[str, Any]) -> bool:
                 and child.get("session_id_hash") == session_id_hash
                 and child.get("turn_id_hash") == turn_id_hash
                 and child.get("managed") is True
-                and child.get("terminal_state", "RUNNING") != "STOP_ATTESTED"
+                and child.get("stop_observed") is None
             ):
                 state["sequence"] = int(state.get("sequence", 0)) + 1
-                child["stopped"] = state["sequence"]
-                child["terminal_state"] = "STOP_ATTESTED"
-                # SubagentStop attests this hook path only. It carries no
-                # AgentStatus result, so it must never manufacture completed
-                # or overwrite a trusted failed native terminal status.
-                if child.get("native_terminal_status") not in {"not_found", "interrupted", "errored", "shutdown"}:
-                    child["native_terminal_status"] = child.get("native_terminal_status") if child.get("native_terminal_status") == "completed" else None
+                child["stop_observed"] = state["sequence"]
+                # An optional hook observation is not native terminal proof.
+                # Preserve naturally returned execution evidence in either order.
                 state["stall"] = None
                 _runtime_metadata(state, payload)
                 _write_capture(path, state)
@@ -2412,17 +2417,18 @@ def _lifecycle_block_fingerprint(state: dict[str, Any]) -> str:
         for child in state.get("children", [])
         if isinstance(child, dict)
         and child.get("managed") is True
-        and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}
+        and (child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}
+             or child.get("native_status_conflict") is True)
     ]
     pending = state.get("pending_authorized_spawn")
     return hashlib.sha256(json.dumps({"active": active, "pending": pending}, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _native_terminal_status(value: object) -> str | None:
-    """Parse only Codex V2's documented AgentStatus JSON representation."""
+    """Parse only the native status shapes supported by current evidence."""
     if isinstance(value, str) and value in {"pending_init", "running", "not_found", "interrupted", "shutdown"}:
         return value
-    if isinstance(value, dict) and set(value) == {"completed"}:
+    if isinstance(value, dict) and set(value) == {"completed"} and isinstance(value["completed"], str):
         return "completed"
     if isinstance(value, dict) and set(value) == {"errored"} and isinstance(value.get("errored"), str):
         return "errored"
@@ -2435,31 +2441,37 @@ def _child_for_native_name(children: list[object], name: str) -> dict[str, Any] 
         child for child in children
         if isinstance(child, dict)
         and child.get("managed") is True
-        and (child.get("task_name_hash") == name_hash or child.get("agent_id_hash") == name_hash)
+        and (child.get("task_name_hash") == name_hash
+             or child.get("task_name_hash") is None and child.get("agent_id_hash") == name_hash)
     ]
     return matches[0] if len(matches) == 1 else None
 
 
-def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status: str) -> bool:
+def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status: str, source: str) -> bool:
     """Release only a proved terminal execution slot; never accept a result."""
     if status == "not_found":
         child["terminal_state"] = "ORPHANED"
         child["native_terminal_status"] = status
         return True
+    if status in {"pending_init", "running"} and child.get("native_terminal_status") in {"completed", "interrupted", "errored", "shutdown"}:
+        child["native_status_conflict"] = True
+        return True
     if status not in {"completed", "interrupted", "errored", "shutdown"}:
         return False
-    if child.get("terminal_state") == "STOP_ATTESTED":
-        # Preserve the independent stop attestation, but retain the native
-        # result when it naturally arrives afterwards. A failure is sticky.
-        prior = child.get("native_terminal_status")
-        if prior in {"interrupted", "errored", "shutdown"} or prior == status:
-            return False
-        child["native_terminal_status"] = status
+    prior = child.get("native_terminal_status")
+    if prior in {"completed", "interrupted", "errored", "shutdown"} and prior != status:
+        child["native_status_conflict"] = True
         return True
+    if prior == status and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+        if source == "list_agents" and child.get("native_terminal_source") != source:
+            child["native_terminal_source"] = source
+            return True
+        return False
     state["sequence"] = int(state.get("sequence", 0)) + 1
     child["stopped"] = state["sequence"]
     child["terminal_state"] = "NATIVE_TERMINAL_RECONCILED"
     child["native_terminal_status"] = status
+    child["native_terminal_source"] = source
     state["stall"] = None
     return True
 
@@ -2485,8 +2497,8 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
 
     This intentionally does not query or schedule anything.  It consumes only
     the current PostToolUse result, requires a canonical native name already
-    causally bound to the serial spawn, and keeps successful completion gated
-    on SubagentStop.
+    causally bound to the serial spawn. Native completion is independent of
+    optional SubagentStop observations and of Controller semantic acceptance.
     """
     task_id = _active_task_id(root)
     response = _post_tool_response(payload)
@@ -2549,7 +2561,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     observed = True
                     metrics = state.setdefault("metrics", {})
                     metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
-                    changed = _record_native_terminal(state, child, status)
+                    changed = _record_native_terminal(state, child, status, "interrupt_agent")
                     if changed and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
                         metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
                 else:
@@ -2570,7 +2582,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     observed = True
                     metrics = state.setdefault("metrics", {})
                     metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
-                    did_reconcile = _record_native_terminal(state, child, status)
+                    did_reconcile = _record_native_terminal(state, child, status, "list_agents")
                     changed = changed or did_reconcile
                     if did_reconcile and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
                         metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
@@ -2623,38 +2635,49 @@ def _bash_command(payload: dict[str, Any]) -> str | None:
     return command if isinstance(command, str) and command.strip() else None
 
 
-def qualifying_child_completed(root: Path) -> bool:
-    """Require completion proof from the latest authorized managed handoff."""
+def qualifying_child_completed(root: Path, *, allow_no_children: bool = False) -> bool:
+    """Bound native execution closure, independent of model acceptance and Stop."""
     task_id = _active_task_id(root)
     if task_id is None:
         return False
     path = _lifecycle_path(root, task_id)
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return allow_no_children
     except (OSError, ValueError, json.JSONDecodeError):
         return False
-    managed = [
-        child for child in value.get("children", [])
-        if isinstance(child, dict) and child.get("managed") is True
-    ] if isinstance(value, dict) else []
-    latest = max((child for child in managed if child.get("depth") == 1 and child.get("parent_role") == "controller"), key=lambda child: int(child.get("started", -1)), default=None)
-    return (
-        isinstance(value, dict)
-        and value.get("version") == LIFECYCLE_STATE_VERSION
-        and value.get("task_id_hash") == _task_key(task_id)
-        and value.get("managed_hook_spec_hash") == managed_hook_spec_hash()
-        and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
-        and value.get("pending_authorized_spawn") is None
-        and not _managed_child_active(root)
-        and isinstance(latest, dict)
-        and latest.get("handoff_bound") is True
-        and isinstance(latest.get("handoff_id"), str)
-        and isinstance(latest.get("payload_hash"), str)
-        and latest.get("terminal_state") == "STOP_ATTESTED"
-        and latest.get("native_terminal_status") == "completed"
-        and isinstance(latest.get("started"), int)
-        and isinstance(latest.get("stopped"), int)
-    )
+    if (not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION
+            or value.get("task_id_hash") != _task_key(task_id)
+            or not isinstance(value.get("children"), list)
+            or value.get("pending_authorized_spawn") is not None
+            or value.get("identity_collisions")):
+        return False
+    children = value["children"]
+    if allow_no_children and not children:
+        # No issued handoff needs child proof; close checks external authority.
+        return True
+    if (value.get("managed_hook_spec_hash") != managed_hook_spec_hash()
+            or value.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION
+            or not children):
+        return False
+    for child in children:
+        if (not isinstance(child, dict) or child.get("managed") is not True
+                or child.get("handoff_bound") is not True
+                or not isinstance(child.get("handoff_id"), str)
+                or not isinstance(child.get("payload_hash"), str)
+                or type(child.get("started")) is not int
+                or type(child.get("stopped")) is not int
+                or not _parent_binding_matches(value, child, require_live=False)
+                or child.get("terminal_state") != "NATIVE_TERMINAL_RECONCILED"
+                or child.get("native_terminal_status") not in {"completed", "interrupted", "errored", "shutdown"}
+                or child.get("native_status_conflict")):
+            return False
+    latest = max((child for child in children if child.get("depth") == 1
+                  and child.get("parent_role") == "controller"),
+                 key=lambda child: child["started"], default=None)
+    return (latest is not None and latest.get("native_terminal_status") == "completed"
+            and latest.get("native_terminal_source") == "list_agents")
 
 
 def _managed_child_active(root: Path) -> bool:
@@ -2665,7 +2688,7 @@ def _managed_child_active(root: Path) -> bool:
         value = json.loads(_lifecycle_path(root, task_id).read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         return False
-    return isinstance(value, dict) and value.get("version") == LIFECYCLE_STATE_VERSION and value.get("managed_hook_spec_hash") == managed_hook_spec_hash() and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION and any(isinstance(child, dict) and child.get("managed") is True and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"} for child in value.get("children", []))
+    return isinstance(value, dict) and value.get("version") == LIFECYCLE_STATE_VERSION and value.get("managed_hook_spec_hash") == managed_hook_spec_hash() and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION and any(isinstance(child, dict) and child.get("managed") is True and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"} for child in value.get("children", []))
 
 
 def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None = None) -> bool:
@@ -2699,7 +2722,7 @@ def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None
             or any(
                 selected(child)
                 and child.get("managed") is True
-                and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED"}
+                and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}
                 for child in value.get("children", [])
             )
         )
@@ -2930,6 +2953,45 @@ def _split_command_separators(command: str) -> list[str] | None:
 
 def _context_operation(payload: dict[str, Any]) -> str | None:
     return _context_call(payload)[0]
+
+
+def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -> bool:
+    """Recognize only the side-effect-free Controller-instructions CLI call."""
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not isinstance(tool, str) or _tool_basename(tool) not in _CONTROLLER_EXECUTION_TOOL_NAMES:
+        return False
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict) or ("command" in tool_input and "cmd" in tool_input):
+        return False
+    command = _bash_command(payload)
+    if command is None or _context_operation(payload) != "controller-instructions":
+        return False
+    arguments = _context_arguments(command)
+    if arguments is None:
+        return False
+    try:
+        tokens = [token.strip("\"'") for token in shlex.split(arguments, posix=False)]
+    except ValueError:
+        return False
+    index = 0
+    seen_pretty = False
+    seen_root = False
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--pretty" and not seen_pretty:
+            seen_pretty = True
+            index += 1
+        elif token == "--root" and not seen_root and index + 1 < len(tokens):
+            root_value = tokens[index + 1]
+            if not root_value or root_value.startswith("--"):
+                return False
+            seen_root = True
+            index += 2
+        elif token == "controller-instructions" and index == len(tokens) - 1:
+            return True
+        else:
+            return False
+    return False
 
 
 def _direct_context_option(payload: dict[str, Any], names: set[str], *, digest_only: bool = True) -> str | None:
@@ -3663,6 +3725,11 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     if _offline_administration_requested(payload):
         return _permission_deny("THALIRIS_OFFLINE_ADMINISTRATION_REQUIRES_DISCONNECTED_INTEGRATION: automated actors have no offline recovery grant while managed hooks are present.")
     operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
+    if operation == "controller-instructions":
+        # Public instruction retrieval grants no control and survives damaged
+        # task/authority state, including recovery and pre-admission use.
+        if _exact_standalone_controller_instructions_request(payload):
+            return ""
     if operation in {"codex-install", "codex-uninstall"}:
         if _controller_actor_assurance(payload) == "CHILD" or not _trusted_host_maintenance_route(payload):
             return _permission_deny("THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED: exact Host operation and approved immutable identity are required.")

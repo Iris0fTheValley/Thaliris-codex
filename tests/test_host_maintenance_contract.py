@@ -85,7 +85,7 @@ def test_n_plus_one_new_outputs_need_no_historical_hashes(tmp_path, monkeypatch,
     old_receipt = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())
     old_global = adapter._global_agents_block
     old_profile = adapter._agent_profile
-    monkeypatch.setattr(adapter, "_global_agents_block", lambda *a, **kw: old_global(*a, **kw).replace(b"## Thaliris project startup", b"## Future completely changed startup contract"))
+    monkeypatch.setattr(adapter, "_global_agents_block", lambda *a, **kw: old_global(*a, **kw).replace(b"## Thaliris shared entry", b"## Future completely changed startup contract"))
     monkeypatch.setattr(adapter, "_agent_profile", lambda *a, **kw: old_profile(*a, **kw) + b"# Future arbitrary profile output\n")
     changed = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert changed["ok"] is True, changed
@@ -100,7 +100,7 @@ def test_true_host_control_conflicts_fail_before_any_write(tmp_path, installed, 
     home, exe = installed
     contents = (home / surface).read_bytes()
     if surface == "AGENTS.md":
-        contents = contents.replace(b"## Thaliris project startup", b"## user control edit")
+        contents = contents.replace(b"## Thaliris shared entry", b"## user control edit")
     else:
         contents += b"user control edit"
     (home / surface).write_bytes(contents)
@@ -219,7 +219,7 @@ def test_unknown_project_control_is_preserved_and_admission_stays_blocked(tmp_pa
     home, exe = installed
     workspace = tmp_path / "control-conflict"
     subprocess.run(["git", "init", "-q", str(workspace)], check=True)
-    current = adapter.render_managed().replace("## Thaliris Router", "## Unknown authority contract").encode()
+    current = adapter.render_managed().replace("## Thaliris shared boundaries", "## Unknown authority contract").encode()
     (workspace / "AGENTS.md").write_bytes(current)
     result = adapter.init(workspace)
     assert result["project_definition_present"] == "NO"
@@ -380,7 +380,7 @@ def test_generation_crash_replays_original_contract(operation, surface, tmp_path
         original_profile = adapter._agent_profile
         monkeypatch.setattr(adapter, "_agent_profile", lambda *a, **kw: original_profile(*a, **kw) + b"# N+1\n")
         original_global = adapter._global_agents_block
-        monkeypatch.setattr(adapter, "_global_agents_block", lambda *a, **kw: original_global(*a, **kw).replace(b"## Thaliris project startup", b"## N+1 startup"))
+        monkeypatch.setattr(adapter, "_global_agents_block", lambda *a, **kw: original_global(*a, **kw).replace(b"## Thaliris shared entry", b"## N+1 startup"))
     op = "codex-uninstall" if operation == "uninstall" else "codex-install"
     path = intent(tmp_path, home, exe, op)
     approved_before = maintenance._files(home)

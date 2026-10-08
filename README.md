@@ -85,10 +85,11 @@ Core 将该可选非空字符串作为不可变 intent 保存；适配器只接�
 
 ## 运行时提示词层
 
-全局指令负责启动、授权与安全以及恢复。项目路由指令负责 Controller 的方向、范围、验收、角色选择和 Workstream 收尾。原生生成的角色提示词负责执行风格、委派方式和角色终点。每项不变量在常规运行时只有一个权威来源；设计理由和机械实现见[Codex 协议](adapter/codex/README.md)与[Core 提示词设计](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)。
+继承的全局/项目指令只保留共享授权、隔离边界与检索入口。Controller 在启动/准入、路由、恢复、持久知识准入、关闭任务或 Host 维护前显式读取 [Controller 指令](docs/thaliris-controller.md)；安装的 pinned runner 的 `controller-instructions` 命令可在项目准入前检索。原生角色提示词只负责当前角色的执行风格、委派和终点；选定的新鲜 handoff 不再向子角色批量注入 Controller 操作程序。所有角色仍可在自身权限内按需检索规则。设计理由与机械实现见 [Codex 协议](adapter/codex/README.md)与 [Core 提示词设计](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)。
 
 Controller 提供决策完备且经过选择的交接；实现方法由执行角色决定。普通 Implementer 负责稳定方向下的工作和确定性收敛。面对相互耦合的不变量时，Focused Implementer 负责完整的推理、实现、运行时反馈和修订循环；当聚焦证据支持核心语义，且剩余任务不会改变决策依据时，它返回 FINAL 并释放该工作上下文。
 新的普通 Implementer 负责剩余回归、构建与同步、确定性缺陷、安装和 Git 收尾。通用执行说明不会延长 Focused Implementer 的语义终点。Reviewer 是新建的独立只读角色；READY 需要支持关键验收的证据，不能仅因没有发现阻塞项就判为 READY。Core 和 lifecycle 的观察结果不决定验收。
+精确名称绑定的原生 Completed、已授权 handoff/身份关系以及没有 pending/active 后代共同证明执行关闭。Completed 证据必须是精确的单键 `{"completed": <string>}` 形式；null、非字符串和其他不支持的形状都保持 UNKNOWN。矛盾的原生状态会阻止新的托管 handoff 和任务关闭。SubagentStop 只是可选观察证据；缺失或延迟不能阻止已证明的原生完成。未绑定或冲突的身份、缺失原生终态证据继续 fail closed。Controller 的语义验收独立保留。实验功能默认值与实时 Host 安装不变；未验证兼容性保持 UNKNOWN。
 
 `thaliris_codex.roles` 是原生 profile 生成的规范来源。精确历史哈希用于安全升级；用户编辑过的字节和项目内 profile shadow 继续按 fail-closed 方式处理。[角色 profile 文档](docs/thaliris-role-packs.md)由源文件生成。源码变更不能证明运行中的 Host 已激活这些内容；父级任务处于 ACTIVE 时也不会在此安装。下方 ABCD 结果仍是历史证据；本次提示词规范化没有基准测试结论。
 

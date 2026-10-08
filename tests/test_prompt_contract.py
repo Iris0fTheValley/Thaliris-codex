@@ -12,7 +12,7 @@ import tomllib
 
 import pytest
 
-from thaliris_codex import codex_adapter as adapter, roles
+from thaliris_codex import codex_adapter as adapter, controller_instructions, roles
 
 
 def normalized(text):
@@ -33,18 +33,24 @@ def prompt(role):
 def test_runtime_ownership_has_one_normal_layer_per_concern():
     global_text = adapter._global_agents_block().decode()
     project = adapter.render_managed()
-    concepts(global_text, ("codex-bootstrap", "task_start_receipt", "authority-contract"),
-             ("invalid_state", "task-recover-state", "task-recover-authority"),
-             ("offline_recovery.py", "unknown", "fences"),
-             ("global", "security", "activation"))
+    controller = controller_instructions.render()
+    concepts(global_text, ("installed pinned runner", "controller-instructions"),
+             ("human decision", "isolation", "readonly boundaries"),
+             ("unknown user-owned bytes", "native activation"))
+    for controller_detail in ("codex-bootstrap", "task_start_receipt", "authority-contract",
+                              "task-recover-state", "task-recover-authority", "offline_recovery.py"):
+        assert controller_detail not in normalized(global_text)
+        assert controller_detail in normalized(controller)
     # Role microstyle and endpoint are not a second global runtime authority.
     for omitted in ("smallest relevant tests", "focused-test pass", "reviewer reopen"):
         assert omitted not in normalized(global_text)
     concepts(project, ("controller", "direction", "scope", "acceptance", "methods"),
-             ("decision-complete", "authoritative", "derived", "verification entry"),
+             ("selected spawn handoff", "unselected material", "ordinary local repair"),
+             ("controller instructions", "role docs", "codex protocol"))
+    concepts(controller, ("decision-complete handoff", "authoritative source", "derived relationships", "verification entry"),
              ("workstreams", "convergence", "fresh ordinary"))
-    assert "stale text" not in normalized(project)
-    assert "stale text" in normalized(prompt("implementer"))
+    assert "stale regions" not in normalized(project)
+    assert "stale regions" in normalized(prompt("implementer"))
     assert "task-recover-authority" not in prompt("implementer")
     assert prompt("implementer") in adapter.render_role_packs()
 
@@ -52,24 +58,24 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
 @pytest.mark.parametrize("role", list(roles.native_role_definitions()), ids=lambda r: r.id)
 def test_child_contract_is_private_selected_and_boundary_preserving(role):
     concepts(role.instructions, ("spawn message", "sole task-specific input"),
-             ("controller", "direction", "scope", "acceptance", "routing"),
-             ("hard invariants", "decided boundaries", "decision-changing unknown", "final"),
-             ("private", "no ordinary progress", "distilled result", "artifact"))
+             ("preserve its decisions", "hard invariants", "acceptance"),
+             ("decision-changing unknowns", "final", "contradictions"),
+             ("working sets", "tool logs", "private", "no ordinary progress", "artifact"))
     assert "controller routes registered" not in normalized(role.instructions)
 
 
 @pytest.mark.parametrize("role", ["implementer", "focused-implementer"])
 def test_execution_observation_mutation_verification_and_recovery_loop(role):
     value = prompt(role)
-    concepts(value, ("before first mutation", "current mutation surfaces", "authoritative", "derived", "verification entry"),
-             ("completed investigator discovery", "decision-critical originals", "without repeating"),
-             ("observation", "coherent semantic mutation", "verify", "repair from new evidence"),
-             ("independently verifiable", "smallest relevant tests", "coupled"),
-             ("authoritative source", "existing generator", "derived outputs"),
-             ("stale", "bounded authoritative region", "reconstruct", "method", "change methods"),
-             ("cwd", "quoting", "mechanically", "without restarting semantic inquiry"),
-             ("no", "retry", "tool", "token", "time", "thresholds"),
-             ("host protocol", "serialization", "identity", "schemas", "evidence"))
+    concepts(value, ("before mutation", "acceptance-relevant surfaces", "authoritative sources", "derived relationships", "verification entry"),
+             ("reuse selected discovery", "decision-critical originals", "without repeating inventory"),
+             ("coherent change", "verify", "repair ordinary local defects", "new evidence"),
+             ("independent slices", "smallest meaningful tests", "coupled changes"),
+             ("canonical sources", "existing sync path", "derived outputs"),
+             ("stale regions", "reconstructing edits", "unsuitable methods", "change unsuitable methods"),
+             ("cwd", "quoting", "mechanically", "environment mistakes"),
+             ("no retry/tool/token/time/closure thresholds"),
+             ("host schemas", "protocol", "identity", "serialization", "evidence"))
     assert normalized(roles._EXECUTOR_INSTRUCTIONS) in normalized(value)
     assert "ordinary regression" not in normalized(roles._EXECUTOR_INSTRUCTIONS)
 
@@ -79,17 +85,17 @@ def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
     concepts(ordinary, ("stable accepted direction", "deterministic convergence"),
              ("same session", "smallest acceptance-relevant"),
              ("original acceptance", "git closure", "unfinished assignment"))
-    concepts(focused, ("full reasoning", "implementation", "runtime feedback", "revision loop"),
-             ("core implementation", "hard invariants", "unknowns are resolved", "focused evidence"),
+    concepts(focused, ("full reasoning", "implementation", "runtime-feedback", "revision loop"),
+             ("core solution", "hard invariants", "unknowns are resolved", "focused evidence"),
              ("remaining tasks", "causal model", "architecture", "contract", "scope", "acceptance", "direction"),
              ("pass alone", "endpoint"),
-             ("regression", "lint", "build", "synchronization", "compatibility", "deterministic defects", "project/package install-smoke checks", "git closure", "fresh ordinary"),
-             ("shared executor guidance", "does not extend"),
-             ("candidate sources or diff", "evidence and limits", "remaining tasks", "escalation boundary"))
+             ("regression", "lint", "build", "generated/docs sync", "compatibility", "deterministic defects", "project/package install-smoke", "git closure", "fresh ordinary"),
+             ("shared guidance", "cannot extend"),
+             ("exact candidate/diff", "evidence and limits", "remaining tasks", "escalation boundary"))
     assert "may remain in this workstream" not in normalized(focused)
     assert "runtime feedback" not in normalized(ordinary)
-    concepts(focused, ("project/package install or smoke feedback", "semantic defect"),
-             ("formal documentation", "establishes core semantics"))
+    concepts(focused, ("including package/install smoke", "evidence could change the core solution"),
+             ("sync formal docs", "where they establish core semantics"))
 
 
 def test_reviewer_critical_evidence_and_correction_boundary():
@@ -121,7 +127,7 @@ def test_discovery_challenge_knowledge_and_delegation_capabilities():
 
 
 def test_controller_selects_roles_and_accounts_for_goals():
-    value = adapter.render_managed()
+    value = controller_instructions.render()
     concepts(value, ("minimum necessary", "work shape", "not a ladder", "threshold"),
              ("investigator", "broad facts", "architecture"),
              ("ordinary implementer", "deterministic convergence", "focused implementer", "coupled"),
@@ -141,12 +147,13 @@ def test_profile_styles_remain_specific_without_extending_endpoint():
     assert "explicitly user-authorized Astra" in astra and "With the Sol" not in astra
     assert "With the Sol" not in base
     for value in (sol, astra):
-        concepts(value, ("known unfinished scanner", "needed", "after its final", "without another wait"),
-                 ("shared executor guidance", "does not extend"))
+        concepts(value, ("wait only", "needed result", "unfinished", "without another wait"),
+                 ("shared guidance", "cannot extend"))
 
 
 def test_generated_sources_equal_derived_outputs():
     assert Path("AGENTS.md").read_text(encoding="utf-8") == adapter.render_managed()
+    assert Path("docs/thaliris-controller.md").read_text(encoding="utf-8") == controller_instructions.render()
     assert Path("docs/thaliris-role-packs.md").read_text(encoding="utf-8") == adapter.render_role_packs()
     for name, (model, effort, role) in roles.agent_profiles().items():
         path = Path(".codex/agents") / name
@@ -157,8 +164,8 @@ def test_generated_sources_equal_derived_outputs():
 
 
 def test_precision_and_operational_acceptance_are_controller_owned():
-    project = adapter.render_managed()
-    concepts(project, ("stable narrative base language", "precision-bearing original terms"),
+    controller = controller_instructions.render()
+    concepts(controller, ("stable narrative base language", "precision-bearing original terms"),
              ("quotations", "distinctions", "user formulations", "materially"),
              ("blur", "broaden", "narrow", "expand"),
              ("forced monolingual", "random language switching", "bilingual repetition"),
@@ -167,28 +174,29 @@ def test_precision_and_operational_acceptance_are_controller_owned():
              ("later workstream", "operational acceptance"),
              ("project/package", "fixtures", "isolated smoke", "packed artifacts", "project-local"),
              ("effective live", "global instructions", "profiles", "hooks", "trust", "separate"))
-    assert normalized(project).count("stable narrative base language") == 1
+    assert normalized(controller).count("stable narrative base language") == 1
     assert "stable narrative base language" not in adapter._global_agents_block().decode()
+    assert "stable narrative base language" not in adapter.render_managed()
     for role in roles.native_role_definitions():
         assert "stable narrative base language" not in role.instructions
 
 
 def test_compatibility_authority_and_fresh_rerouting_preserve_semantic_endpoint():
-    project = adapter.render_managed()
-    concepts(project, ("independently deterministic", "accepted contract uniquely determines"),
+    controller = controller_instructions.render()
+    concepts(controller, ("independently deterministic", "accepted contract uniquely determines"),
              ("compatibility authority ambiguity remains semantic", "production behavior", "historical fixtures"),
              ("representative evidence", "dependency to controller", "does not mandate full regression"),
              ("same semantic closure", "fresh ordinary session", "explicit inputs", "independent acceptance"),
              ("accumulated debugging state adds no benefit", "distilled invariants", "green evidence"),
-             ("provenance", "remaining acceptance", "blockers", "not raw history"))
+             ("provenance", "remaining acceptance", "blockers", "not raw history"),
+             ("unchanged deterministic state", "runtime can wait", "meaningful or terminal event"))
     for role in ("implementer", "focused-implementer"):
-        concepts(prompt(role), ("authority ambiguity", "compatibility", "ownership", "security", "lifecycle", "contract"),
-                 ("many failures", "many files", "long regression alone", "do not require escalation"),
-                 ("project/package install-smoke closure excludes effective live host", "separate authority"))
-    concepts(prompt("focused-implementer"), ("production behavior", "historical fixtures", "representative evidence"),
-             ("dependency to controller", "do not classify", "mechanical compatibility"),
+        concepts(prompt(role), ("compatibility", "ownership", "security", "lifecycle", "contract"),
+                 ("volume or difficulty alone does not require escalation"),
+                 ("project/package smoke", "does not authorize live host maintenance"))
+    concepts(prompt("focused-implementer"), ("production and historical fixtures", "compatibility authority undecided", "representative evidence"),
+             ("return the dependency", "never call that mechanical compatibility"),
              ("full regression by default"))
-    concepts(project, ("unchanged deterministic state", "runtime can wait", "meaningful or terminal event"))
 
 
 def test_pre_normalization_generated_ownership_is_exact_and_filename_bound():

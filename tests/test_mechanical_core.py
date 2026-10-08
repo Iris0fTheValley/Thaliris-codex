@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from thaliris import core, markdown
-from thaliris_codex import cli, codex_adapter, lifecycle as lifecycle_module
+from thaliris_codex import cli, codex_adapter, controller_instructions, lifecycle as lifecycle_module
 
 
 def repo(tmp_path: Path) -> Path:
@@ -168,16 +168,18 @@ def test_authoritative_prose_uses_role_names_or_explicit_native_child_context() 
     assert "Shared Child Result" not in generated
     project = codex_adapter.render_managed()
     normalized_project = " ".join(project.split())
-    assert "The Controller is the sole task-specific semantic router." in normalized_project
-    assert "In delegated mode, Controller owns direction, scope, acceptance, context selection" in normalized_project
-    assert "Controller-direct permits Controller execution with useful fresh auxiliary roles" in normalized_project
-    assert "single-agent permits ordinary execution without children." in normalized_project
-    assert "Choose the minimum necessary fresh role for the Workstream's work shape" in normalized_project
-    assert "Provide a decision-complete handoff:" in normalized_project
-    assert "Ordinary Implementer may finish assigned deterministic execution and Git closure in the same Workstream." in normalized_project
-    assert "Focused Implementer returns at semantic convergence:" in normalized_project
-    assert "Fresh role sessions use `fork_turns=\"none\"` and only the authorized parent's native" in normalized_project
-    assert "Controller may spawn registered roles; Implementer, Focused Implementer and Reviewer" in normalized_project
+    assert "controller-instructions" in normalized_project
+    controller = " ".join(controller_instructions.render().split())
+    assert "The Controller is the sole task-specific semantic router." in controller
+    assert "In delegated mode, Controller owns direction, scope, acceptance, context selection" in controller
+    assert "Controller-direct permits Controller execution with useful fresh auxiliary roles" in controller
+    assert "single-agent permits ordinary execution without children." in controller
+    assert "Choose the minimum necessary fresh role for the Workstream's work shape" in controller
+    assert "Provide a decision-complete handoff:" in controller
+    assert "Ordinary Implementer may finish assigned deterministic execution and Git closure in the same Workstream." in controller
+    assert "Focused Implementer returns at semantic convergence:" in controller
+    assert "Fresh role sessions use `fork_turns=\"none\"` and only the authorized parent's native" in controller
+    assert "Controller may spawn registered roles; Implementer, Focused Implementer and Reviewer" in controller
 
 
 def test_routing_guidance_assigns_stable_direction_to_ordinary_implementer() -> None:

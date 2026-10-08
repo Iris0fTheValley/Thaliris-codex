@@ -332,12 +332,16 @@ def test_start_consumes_only_exact_reservation_and_requires_own_identity(active)
         assert "deny" in lifecycle.handle_hook(active, "PreToolUse", {**scanner, key: "wrong", "tool_name": "read_file", "tool_input": {}})
 
 
-def test_parent_stop_before_scanner_start_does_not_bind(active):
+def test_parent_stop_before_scanner_start_is_not_terminal_evidence(active):
     parent = start(active)
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
     lifecycle.handle_hook(active, "SubagentStop", parent)
-    assert not lifecycle._record_subagent_start(active, identity("investigator", "scanner"))
-    assert state(active)["pending_authorized_spawn"] is not None
+    parent_record = state(active)["children"][0]
+    assert parent_record["terminal_state"] == "RUNNING"
+    assert parent_record["native_terminal_status"] is None
+    assert isinstance(parent_record["stop_observed"], int)
+    assert lifecycle._record_subagent_start(active, identity("investigator", "scanner"))
+    assert state(active)["pending_authorized_spawn"] is None
     finish(active, parent)
     assert not lifecycle.qualifying_child_completed(active)
 

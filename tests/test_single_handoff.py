@@ -14,7 +14,7 @@ import subprocess
 import pytest
 
 from thaliris import core
-from thaliris_codex import cli, codex_adapter, roles
+from thaliris_codex import cli, codex_adapter, controller_instructions, roles
 from thaliris_codex import runtime_identity
 from thaliris_codex.lifecycle import handle_hook, hook_spec
 import thaliris_codex.lifecycle as lifecycle_module
@@ -269,18 +269,23 @@ def test_codex_install_updates_and_uninstall_removes_only_global_owned_span(tmp_
     assert first["project_files_touched"] == []
     expected = codex_adapter._global_agents_block(executable, digest)
     assert global_agents.read_bytes() == expected + original
-    assert expected.count(b"--root <repo> codex-bootstrap") == 1
+    assert expected.count(b"--root <repo> controller-instructions") == 1
+    assert b"--root <repo> codex-bootstrap" not in expected
     assert str(home / lifecycle_module.HOST_RUN_SCRIPT_NAME).encode() in expected
     assert str(executable).encode() not in expected and digest.encode() not in expected
-    assert b"task_start_receipt" in expected and b"--bootstrap-receipt" in expected
+    controller_text = controller_instructions.render().encode()
+    assert b"task_start_receipt" in controller_text and b"--bootstrap-receipt" in controller_text
     assert b"--controller-bridge-sha256" not in expected
     assert b"bootstrap-check" not in expected and b" --root <repo> init" not in expected
     assert b"Get-FileHash" not in expected
     normalized_expected = " ".join(expected.decode().lower().split())
-    for concept in ("read-only", "host root identity remains unknown", "managed children",
-                    "authority", "task-recover-state", "task-recover-authority",
-                    "fences", "global integration", "project router"):
+    for concept in ("read-only", "managed children", "authority", "installed pinned runner"):
         assert concept in normalized_expected
+    normalized_controller = " ".join(controller_text.decode().lower().split())
+    for detail in ("host root identity remains unknown", "task-recover-state", "task-recover-authority",
+                   "fences", "global integration", "project router"):
+        assert detail in normalized_controller
+        assert detail.encode() not in expected.lower()
     assert "focused-test pass" not in normalized_expected
     assert "smallest relevant tests" not in normalized_expected
 
@@ -2615,9 +2620,10 @@ def test_lifecycle_binds_matching_identity_and_stop(tmp_path: Path) -> None:
     assert lifecycle(root)["children"][-1]["terminal_state"] == "RUNNING"
     assert handle_hook(root, "SubagentStop", hook_payload(agent_id="reviewer-1", agent_type="thaliris-reviewer")) == ""
     stopped = lifecycle(root)["children"][-1]
-    assert stopped["terminal_state"] == "STOP_ATTESTED"
+    assert stopped["terminal_state"] == "RUNNING"
     assert stopped["native_terminal_status"] is None
-    assert isinstance(stopped["started"], int) and isinstance(stopped["stopped"], int)
+    assert isinstance(stopped["started"], int) and isinstance(stopped["stop_observed"], int)
+    assert stopped["stopped"] is None
 
 
 def test_stop_requires_explicit_native_completed_for_close(tmp_path: Path) -> None:
@@ -2626,7 +2632,7 @@ def test_stop_requires_explicit_native_completed_for_close(tmp_path: Path) -> No
     spawn_start(root, "worker-1")
     stop(root, "worker-1")
     state = core.task_show(root)["state"]
-    with pytest.raises(ValueError, match="matching native SubagentStart/Stop"):
+    with pytest.raises(ValueError, match="authorized handoff/identity bindings"):
         codex_adapter.task_close(root, state["revision"])
 
     reconcile(root, "worker-1", {"completed": "result"})
@@ -2669,7 +2675,7 @@ def test_task_name_string_response_binds_distinct_host_child_id_through_close(tm
         tool_response=json.dumps({"agents": [{"agent_name": task_name, "agent_status": {"completed": "result"}}]}),
     )) == ""
     child = lifecycle(root)["children"][-1]
-    assert child["terminal_state"] == "STOP_ATTESTED"
+    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
     assert child["native_terminal_status"] == "completed"
     assert codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])["status"] == "DONE"
 
@@ -2687,7 +2693,7 @@ def test_string_list_response_does_not_reconcile_wrong_identity(tmp_path: Path) 
     )) == ""
     child = lifecycle(root)["children"][-1]
     assert child["native_terminal_status"] is None
-    with pytest.raises(ValueError, match="matching native SubagentStart/Stop"):
+    with pytest.raises(ValueError, match="authorized handoff/identity bindings"):
         codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])
 
 
@@ -2750,6 +2756,9 @@ def test_string_interrupt_response_reconciles_exact_task_name(tmp_path: Path) ->
     )) == ""
     child = lifecycle(root)["children"][-1]
     assert child["native_terminal_status"] == "completed"
+    with pytest.raises(ValueError, match="use list_agents"):
+        codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])
+    reconcile(root, task_name, {"completed": "result"})
     assert codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])["status"] == "DONE"
 
 
@@ -2763,7 +2772,7 @@ def test_string_list_response_reconciles_completed_child_and_allows_close(tmp_pa
         tool_response=json.dumps({"agents": [{"agent_name": "worker-1", "agent_status": {"completed": "result"}}]}),
     )) == ""
     child = lifecycle(root)["children"][-1]
-    assert child["terminal_state"] == "STOP_ATTESTED"
+    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
     assert child["native_terminal_status"] == "completed"
     assert codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])["status"] == "DONE"
 
@@ -2787,7 +2796,7 @@ def test_malformed_or_non_dict_string_response_produces_no_completion_fact(tmp_p
     assert child["native_terminal_status"] is None
 
 
-def test_missing_stop_native_terminal_reconciliation_is_not_success(tmp_path: Path) -> None:
+def test_missing_stop_native_completed_proves_execution_closure(tmp_path: Path) -> None:
     root = repo(tmp_path)
     _owned_task_start(root, "reconcile", None, None)
     spawn = hook_payload(tool_name="spawn_agent", tool_input={
@@ -2803,13 +2812,121 @@ def test_missing_stop_native_terminal_reconciliation_is_not_success(tmp_path: Pa
     assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
     assert child["native_terminal_status"] == "completed"
 
+    assert child.get("stop_observed") is None
+    # No child prose is stored as model acceptance; Controller invokes close.
+    assert "result" not in json.dumps(child)
     shown = core.task_show(root)["state"]
-    try:
-        codex_adapter.task_close(root, shown["revision"])
-    except ValueError as exc:
-        assert "matching native SubagentStart/Stop" in str(exc)
-    else:
-        raise AssertionError("native reconciliation incorrectly counted as successful result")
+    assert shown["status"] == "ACTIVE"
+    assert codex_adapter.task_close(root, shown["revision"])["status"] == "DONE"
+
+
+@pytest.mark.parametrize("stop_first", [False, True])
+def test_optional_stop_preserves_native_completed_in_either_order(tmp_path, stop_first):
+    root = repo(tmp_path)
+    _owned_task_start(root, "observation order", None, None)
+    spawn_start(root, "child")
+    if stop_first:
+        stop(root, "child")
+    reconcile(root, "child", {"completed": "result"})
+    if not stop_first:
+        stop(root, "child")
+    child = lifecycle(root)["children"][-1]
+    assert isinstance(child["stop_observed"], int)
+    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
+    assert child["native_terminal_status"] == "completed"
+    assert lifecycle_module.qualifying_child_completed(root)
+
+
+@pytest.mark.parametrize("unsupported", [
+    {"completed": None},
+    {"completed": 4},
+    {"completed": False},
+    {"completed": {"text": "result"}},
+])
+def test_unsupported_completed_payload_keeps_native_status_unknown(tmp_path, unsupported):
+    root = repo(tmp_path)
+    _owned_task_start(root, "unsupported native completed payload", None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", unsupported)
+    child = lifecycle(root)["children"][-1]
+    assert child["terminal_state"] == "RUNNING"
+    assert child["native_terminal_status"] is None
+    assert not lifecycle_module.qualifying_child_completed(root)
+    with pytest.raises(ValueError, match="use list_agents"):
+        codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])
+
+
+@pytest.mark.parametrize("contradiction", ["running", "interrupted", {"errored": "failure"}, "shutdown"])
+def test_conflicting_native_status_cannot_become_completion(tmp_path, contradiction):
+    root = repo(tmp_path)
+    _owned_task_start(root, "conflicting native observations", None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", {"completed": "result"})
+    reconcile(root, "child", contradiction)
+    reconcile(root, "child", {"completed": "result"})
+    assert lifecycle(root)["children"][-1]["native_status_conflict"] is True
+    assert not lifecycle_module.qualifying_child_completed(root)
+
+
+def test_native_status_conflict_blocks_new_spawn_and_close(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "conflicting status blocks work", None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", {"completed": "result"})
+    reconcile(root, "child", "running")
+    child = lifecycle(root)["children"][-1]
+    assert child["native_status_conflict"] is True
+    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
+
+    denied = handle_hook(root, "PreToolUse", hook_payload(
+        tool_name="spawn_agent",
+        tool_input={"fork_turns": "none", "agent_type": "worker", "message": "next handoff"},
+    ))
+    assert "THALIRIS_SERIAL_ROLE_SESSION_REQUIRED" in denied
+    assert lifecycle(root)["pending_authorized_spawn"] is None
+    with pytest.raises(ValueError, match="authorized handoff/identity bindings"):
+        codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])
+
+
+def test_known_native_task_name_excludes_different_agent_id_name(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "canonical native name", None, None)
+    spawn_start_with_host_task_name(root, "/root/task", "child-id")
+    reconcile(root, "child-id", {"completed": "result"})
+    assert lifecycle(root)["children"][-1]["native_terminal_status"] is None
+    reconcile(root, "/root/task", {"completed": "result"})
+    assert lifecycle_module.qualifying_child_completed(root)
+
+
+def test_native_completed_parent_keeps_active_descendant_and_unbound_child_fail_closed(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "native descendant closure", None, None)
+    spawn_start(root, "parent")
+    nested = hook_payload(agent_id="parent", agent_type="worker", tool_name="spawn_agent", tool_input={
+        "fork_turns": "none", "agent_type": "thaliris-investigator", "message": "selected discovery",
+    })
+    assert handle_hook(root, "PreToolUse", nested) == ""
+    assert handle_hook(root, "SubagentStart", hook_payload(agent_id="scanner", agent_type="thaliris-investigator")) == ""
+    reconcile(root, "parent", {"completed": "result"})
+    assert not lifecycle_module.qualifying_child_completed(root)
+    stop(root, "scanner", "thaliris-investigator")
+    assert not lifecycle_module.qualifying_child_completed(root)
+    reconcile(root, "scanner", {"completed": "facts"})
+    assert lifecycle_module.qualifying_child_completed(root)
+    assert handle_hook(root, "SubagentStart", hook_payload(agent_id="unbound", agent_type="worker")) == ""
+    assert not lifecycle_module.qualifying_child_completed(root)
+
+
+def test_bound_executor_can_iterate_locally_without_controller_or_native_reuse(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "local self iteration", None, None)
+    spawn_start(root, "child")
+    for command in ("Get-Content src/example.py", "Set-Content src/example.py fixed", "pytest tests/test_example.py"):
+        assert handle_hook(root, "PreToolUse", hook_payload(agent_id="child", agent_type="worker",
+            tool_name="Bash", tool_input={"command": command})) == ""
+    denied = handle_hook(root, "PreToolUse", hook_payload(agent_id="child", agent_type="worker",
+        tool_name="Bash", tool_input={"command": "thaliris task-close --base-revision 1"}))
+    assert "CONTROL_STATE_MUTATION" in denied
 
 
 def test_selected_handoff_sentinel_exists_once_across_native_and_adapter_payload(tmp_path: Path) -> None:
@@ -2826,7 +2943,7 @@ def test_selected_handoff_sentinel_exists_once_across_native_and_adapter_payload
 
 def test_latest_managed_child_alone_controls_close(tmp_path: Path) -> None:
     terminal_cases = (
-        ({"completed": "result"}, False, False),
+        ({"completed": "result"}, False, True),
         ("interrupted", True, False),
         ({"errored": "boom"}, True, False),
         ("shutdown", True, False),
@@ -2851,7 +2968,7 @@ def test_latest_managed_child_alone_controls_close(tmp_path: Path) -> None:
             try:
                 codex_adapter.task_close(root, state["revision"])
             except ValueError as exc:
-                assert "matching native SubagentStart/Stop" in str(exc)
+                assert "authorized handoff/identity bindings" in str(exc)
             else:
                 raise AssertionError(f"latest child status {latest_status!r} was hidden by historical success")
 
@@ -2861,6 +2978,7 @@ def test_subagent_start_identity_collision_preserves_reservation(tmp_path: Path)
     _owned_task_start(root, "collision", None, None)
     spawn_start(root, "reused-id")
     stop(root, "reused-id")
+    reconcile(root, "reused-id", {"completed": "first result"})
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="spawn_agent",
         tool_input={"fork_turns": "none", "agent_type": "worker", "message": "second handoff"},

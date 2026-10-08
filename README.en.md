@@ -73,9 +73,13 @@ This feature requires thaliris>=0.4.3. Development tests must install the Core c
 
 ## Runtime prompt layers
 
-Global instructions own startup, authority/security and recovery. The project router
-owns Controller direction/scope/acceptance, role selection and Workstream closure.
-Native generated role prompts own execution style, delegation and endpoints. Each
+Inherited global/project instructions carry shared authority/isolation boundaries
+and retrieval pointers. Controller explicitly reads [Controller instructions](docs/thaliris-controller.md)
+before startup/admission, routing, recovery, durable admission, closure or maintenance;
+the installed pinned runner's `controller-instructions` works before project admission.
+Native role prompts own current-role execution style, delegation and endpoints.
+Fresh selected handoffs keep unrelated Controller procedures out of child injection;
+rules remain retrievable on demand within authority. Each
 invariant has one normal runtime authority; rationale and mechanical design live in
 [Codex protocol](adapter/codex/README.md) and [Core prompt design](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md).
 
@@ -88,6 +92,14 @@ Fresh ordinary Implementer handles remaining regression, build/sync, determinist
 installation and Git closure. Shared execution guidance does not extend the Focused endpoint.
 Reviewer is fresh independent and non-writing; READY requires evidence supporting critical
 acceptance, not absence of blockers. Core/lifecycle observations do not decide acceptance.
+Exact name-bound native Completed with authorized handoff/identity binding and no
+pending/active descendants proves execution closure. SubagentStop is optional;
+missing/delayed Stop cannot block proved completion. Unbound/conflicting identities
+or missing native terminal evidence fail closed. Controller semantic acceptance stays
+independent. Completed evidence must be the exact one-key `{"completed": <string>}`
+variant; null, non-string and unsupported shapes remain UNKNOWN. Conflicting native
+statuses block new managed handoffs and closure. Feature defaults/live Host installation remain unchanged; unverified
+compatibility stays UNKNOWN.
 
 `thaliris_codex.roles` is canonical for native profile generation. Exact historical hashes
 preserve safe upgrades; user-edited bytes and project profile shadows retain fail-closed

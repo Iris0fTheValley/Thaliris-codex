@@ -144,6 +144,28 @@ def test_default_routing_and_closure_are_unchanged(workspace):
         codex_adapter.task_close(workspace, 1)
 
 
+@pytest.mark.parametrize("with_stop", [False, True])
+def test_controller_direct_auxiliary_close_requires_native_completed_independent_of_stop(workspace, with_stop):
+    start(workspace, "controller-direct")
+    identity = {"session_id": "first", "turn_id": "aux-turn"}
+    spawn = {**identity, "tool_name": "spawn_agent", "tool_input": {
+        "agent_type": "thaliris-reviewer", "fork_turns": "none", "message": "selected review",
+    }}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", spawn, lifecycle.MANAGED_HOOK_ABI) == ""
+    child = {**identity, "agent_id": "reviewer-id", "agent_type": "thaliris-reviewer"}
+    assert lifecycle.handle_hook(workspace, "SubagentStart", child) == ""
+    if with_stop:
+        assert lifecycle.handle_hook(workspace, "SubagentStop", child) == ""
+    with pytest.raises(ValueError, match="exact name-bound native Completed"):
+        codex_adapter.task_close(workspace, 1)
+    observed = {**identity, "tool_name": "list_agents", "tool_response": {
+        "agents": [{"agent_name": "reviewer-id", "agent_status": {"completed": "review result"}}],
+    }}
+    assert lifecycle.handle_hook(workspace, "PostToolUse", observed) == ""
+    assert core.task_show(workspace)["state"]["status"] == "ACTIVE"
+    assert codex_adapter.task_close(workspace, 1)["ok"]
+
+
 def test_abandoned_authority_is_not_reactivated_by_state_or_prompt(workspace):
     start(workspace)
     state_path = core._state_path(workspace)

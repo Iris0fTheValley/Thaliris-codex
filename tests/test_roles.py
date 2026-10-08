@@ -516,7 +516,7 @@ def test_current_focused_profile_bytes_remain_upgradeable_by_exact_identity() ->
         model, effort, role = profiles[name]
         value = tomllib.loads(codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode())
         assert value["developer_instructions"] == roles.profile_instructions("focused-implementer", name.removesuffix(".toml"))
-        assert "core semantic solution" in value["developer_instructions"].lower()
+        assert "core solution" in value["developer_instructions"].lower()
 
 
 def test_ec1ad7b_project_focused_profiles_have_exact_historical_ownership() -> None:
@@ -836,7 +836,8 @@ def test_formal_seventh_role_requires_only_spec_and_binding(tmp_path: Path, monk
     )
     assert "formal-sentinel" in role_action.choices
     assert "formal-sentinel" in codex_adapter.doctor(root)["role_registry"]["roles"]
-    assert "Formal Sentinel" in codex_adapter.render_managed()
+    from thaliris_codex import controller_instructions
+    assert "Formal Sentinel" in controller_instructions.render()
     assert "Formal Sentinel" in codex_adapter.render_role_packs()
     assert "| `formal-sentinel` |" in roles.render_registry_document().decode()
     assert roles.get_codex_binding("formal-sentinel").legacy_profile_hashes == frozenset()
@@ -915,6 +916,7 @@ def test_managed_renderer_matches_working_artifact_and_derives_added_role(monkey
     start, end = codex_adapter._managed_span(current, "test")
     assert current[start:end] + "\n" == codex_adapter.render_managed()
     monkeypatch.setitem(roles.ROLE_REGISTRY, "formal-sentinel", _formal_sentinel_registration())
-    assert "Formal Sentinel" in codex_adapter.render_managed()
+    from thaliris_codex import controller_instructions
+    assert "Formal Sentinel" in controller_instructions.render()
     assert "formal sentinel instructions" in codex_adapter.render_role_packs()
     assert 'fork_turns="none"' in codex_adapter.render_managed()

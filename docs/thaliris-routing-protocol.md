@@ -1,7 +1,8 @@
 # Codex Routing Contract
 
 The [shared routing semantics](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-routing-protocol.md)
-apply to this adapter. [Generated project routing](../AGENTS.md),
+apply to this adapter. [Explicitly retrieved Controller instructions](thaliris-controller.md),
+[inherited shared boundaries](../AGENTS.md),
 [native role prompts](thaliris-role-packs.md) and [Codex mechanics](../adapter/codex/README.md)
 have distinct ownership; model binding facts come from `thaliris_codex.roles`.
 
@@ -21,6 +22,10 @@ selected material, not an automatic task-state/memory projection. Their private
 working set is larger than the distilled result sent back. Reuse established
 inventory; reopening decision-critical originals is part of execution. A Scanner
 collects only an independent uncovered discovery gap, not a duplicate inventory.
+Inherited global/project managed spans carry shared boundaries and retrieval entries;
+Controller procedures are explicitly retrieved before the relevant operations.
+Current-role native prompts preserve executor self-iteration within the accepted
+assignment. Other rules remain retrievable on demand within authority.
 
 ## Role selection and Workstreams
 

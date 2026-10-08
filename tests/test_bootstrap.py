@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from thaliris_codex import codex_adapter, codex_bootstrap as bootstrap, lifecycle, runtime_identity
+from thaliris_codex import codex_adapter, codex_bootstrap as bootstrap, controller_instructions, lifecycle, runtime_identity
 from thaliris import core
 from thaliris_codex import cli
 
@@ -648,14 +648,16 @@ def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_
     assert "controller_bridge_sha256" not in result
     assert "controller_bridge_content" not in result
     rendered = codex_adapter._global_agents_block(Path("C:/installed/thaliris.exe"), digest).decode("utf-8")
-    assert rendered.count("--root <repo> codex-bootstrap") == 1
+    assert rendered.count("--root <repo> controller-instructions") == 1
+    assert "--root <repo> codex-bootstrap" not in rendered
     assert "bootstrap-check" not in rendered and "Get-FileHash" not in rendered
-    assert "--bootstrap-receipt" in rendered
+    assert "--bootstrap-receipt" in controller_instructions.render()
     normalized = " ".join(rendered.lower().split())
-    assert "owning root" in normalized and "controller runs" in normalized
+    normalized_controller = " ".join(controller_instructions.render().lower().split())
+    assert "owning root" in normalized_controller and "controller runs" in normalized_controller
     assert "managed children" in normalized and "parent" in normalized and "active task" in normalized
     assert "do not bootstrap, task-start or task-abandon" in normalized
-    assert "report blocked work honestly" in normalized
+    assert "report blocked work honestly" in normalized_controller
 
 
 def test_cli_bootstrap_receipt_alias_is_passed_to_task_start(tmp_path: Path, monkeypatch, capsys):

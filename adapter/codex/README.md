@@ -1,8 +1,13 @@
 # Codex Adapter: Runtime Layers and Mechanical Boundaries
 
-`thaliris_codex.roles` owns native role prompts and binding facts. Project routing
-comes from `render_managed()`; global startup/authority/recovery comes from
-`_global_agents_block()`. Generated native TOMLs, role docs and managed project spans
+`thaliris_codex.roles` owns native role prompts and binding facts. Inherited global
+and project managed spans contain shared boundaries and retrieval pointers. Controller
+procedures come from the package's `controller_instructions.md`, explicitly retrieved
+before relevant operations with the installed pinned runner's `controller-instructions`.
+The [repository Controller document](../../docs/thaliris-controller.md) is rendered
+from that source, including registry bindings. Retrieval grants no authority; other
+roles may retrieve rules on demand within their existing authority.
+Generated native TOMLs, role docs, Controller docs and managed project spans
 are derived outputs. Edit canonical sources and render them; do not maintain a second
 prompt authority. Shared semantics and research motivation live in the
 [Core prompt design](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)
@@ -15,9 +20,17 @@ construct or inject a child projection. Fresh roles use fork_turns="none". Contr
 routes registered roles; only Implementer, Focused Implementer and Reviewer may delegate
 one nested Investigator doing Scanner work. Maximum managed depth is two; exact bound
 parent agent/role/session/turn is required. Missing/conflicting identity fails closed.
-Only explicit native Completed evidence establishes lifecycle completion. SubagentStop,
-wake signals and child prose alone do not; final top-level handoff plus no pending/active
-descendants is required for close. An unbound spawn can be recovered only from exact
+Exact name-bound native Completed establishes execution completion independently of
+optional SubagentStop observations. Missing/delayed Stop cannot block proved completion;
+Stop, wake signals and child prose alone cannot prove it. The latest authorized
+handoff/identity relation and no pending/active descendants are required for close,
+including Controller-direct auxiliary handoffs. Unbound/conflicting identities and
+missing/malformed native evidence fail closed. Controller accepts result meaning and
+quality independently; native Completed never supplies semantic acceptance.
+The accepted Completed payload is exactly the one-key `{"completed": <string>}`
+variant. Null, non-string, extra-field and otherwise unsupported payload shapes remain
+UNKNOWN. Contradictory native statuses block new managed handoffs and closure.
+An unbound spawn can be recovered only from exact
 trusted name-bound native failure or spawn-failure callback, not timeout/not_found.
 
 ## Enforcement and assurance
@@ -70,3 +83,8 @@ Ordinary closure owns broader regression/build/docs/generated sync, installation
 Git after Focused semantic convergence. Installation/smoke exposing a semantic defect
 requires a new Controller decision about reopening the core candidate. This source
 change has no live Host activation or compression benchmark claim.
+
+The [native execution contract](../../docs/codex-native-execution-design.md) preserves
+feature defaults. V2 event waiting signals mailbox activity; list supplies exact
+names/statuses. Native messaging/completion is used only for concrete needs. No new
+scheduler, polling loop, execution-state mirror or World State Hook API is introduced.

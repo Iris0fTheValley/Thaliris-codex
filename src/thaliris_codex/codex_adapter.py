@@ -415,6 +415,51 @@ _KNOWN_GENERATED_ROLE_PACK_HASHES = _KNOWN_GENERATED_ROLE_PACK_HASHES | frozense
 
 _KNOWN_GENERATED_ROLE_REGISTRY_DOC_HASHES = _KNOWN_GENERATED_ROLE_REGISTRY_DOC_HASHES | frozenset({'04d6b201ff2329e8e203808a041d7243335eecebedcdbcb9094aee2dd4067014'})
 
+# Exact prior 7045c7de outputs, independently replayed from its role source;
+# tracked native profiles were compared byte-for-byte. No current-render ownership.
+_NATIVE_INTEGRATION_PREDECESSOR_PROFILE_HASHES = {
+    'thaliris-investigator.toml': frozenset({
+        '061fac29692264c5110c33f139c1bffdaf2f6e9475eb3e1db9ac8cba9d1f9533',
+    }),
+    'thaliris-curator.toml': frozenset({
+        'a3cc082f0a3047fb88da9bd62b8a0c11c90754f203a9804c4541e7766ae63b14',
+    }),
+    'thaliris-reasoning-specialist.toml': frozenset({
+        '613ae91b36c9a13d6982751f003bbce316b0cc88c41145af2e69d893bd761642',
+        'd60806998f08871aeaa34556b936d7b300e7bd3cda98323ed7e8d0c7d0f8ba19',
+    }),
+    'thaliris-implementer.toml': frozenset({
+        '2226e75df4098378f2af73d802d7b535af007506a827091f379a499fadd879a4',
+    }),
+    'thaliris-focused-implementer.toml': frozenset({
+        'd7137acf77e439f628743893e27adc4e7c039e069a2980aa43100616d833b757',
+        'db56acafac386dc26b7f4d23d862b95311dfdd719b5826254310453b709262c2',
+    }),
+    'thaliris-verifier.toml': frozenset({
+        'bb93576ce6ee0649ffd51baed6af9acbf582e62a6a614a8c94890d763268acd7',
+    }),
+    'thaliris-reviewer.toml': frozenset({
+        '2a15fc83200b7f00f0c29f57d5b0c906d1179cfce901fc38ca2f00bc5f0d039d',
+        '2fce0899c36c42ad86b86caf349c291af04302739397ada4ba11b2ae471e43d1',
+    }),
+    'thaliris-reasoning-specialist-astra-medium.toml': frozenset({
+        '21c570cd6243d02d9077485d92f6258d556a69edeb4e4b1c37caa9a072e06037',
+    }),
+    'thaliris-reasoning-specialist-xhigh.toml': frozenset({
+        '3c5d45e320562eb604ad78d3ce170cebd88413ef235c34a758e23574857bbb75',
+    }),
+    'thaliris-focused-implementer-astra-medium.toml': frozenset({
+        '2fc299fda4d7b82473a5aa367394be39fe4047c6c46f4d848622a53a115c02bd',
+    }),
+    'thaliris-focused-implementer-xhigh.toml': frozenset({
+        '365e4c9362f176a94d1c60ba36cb0dd9baa072cd71c987b0cf8af7198a7b09d8',
+    }),
+}
+for _profile_name, _profile_hashes in _NATIVE_INTEGRATION_PREDECESSOR_PROFILE_HASHES.items():
+    _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | _profile_hashes
+_KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'e59e6654cf81fb71bed838618a09dfc96a9709c5cc58a0077b09ea0ad76ae088'})
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'3e96d0dfee9a246582269fb1951ce779c8970117ecddc2a6160162a6ad230c36'})
+
 def _agent_profile(name: str, role: str, model: str, effort: str) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
     # isolation instructions contain quotes that must not terminate the value.
@@ -806,131 +851,29 @@ def _controller_bridge() -> dict[str, str]:
     }
 
 def _render_managed() -> str:
-    role_rows = "\n".join(
-        f"| {label} | {roles.get_role(role).purpose or role} | {roles.get_codex_binding(role).model or 'Host/user'}/{roles.get_codex_binding(role).reasoning_effort or 'selected'} |"
-        for role, label in zip((r for r in roles.role_choices() if r != "controller"), _native_role_labels())
-    )
     return f"""{MANAGED_START}
-## Thaliris Router
+## Thaliris shared boundaries
 
-The Controller is the sole task-specific semantic router. Core records identities,
-revisions, hashes, provenance and observations; models decide meaning and completion.
-Follow the global startup/authority contract and the selected execution mode.
-In delegated mode, Controller owns direction, scope, acceptance, context selection
-and next routing; assigned executors own implementation design and local methods.
-Controller-direct permits Controller execution with useful fresh auxiliary roles;
-single-agent permits ordinary execution without children. Isolation and readonly
-boundaries hold in every mode. Damaged management does not transfer child duties
-to Controller; diagnose the management failure and keep assurance UNKNOWN.
+Controller owns human intent, direction, scope, acceptance, selected context and
+next routing; native execution observations never decide semantic acceptance.
+Follow the authorized execution mode. Authority is persistent Controller-asserted
+intent, not universal Host owner authentication. Children cannot establish, expand,
+rewrite or reactivate it, alter frozen constraints or mutate Controller/security state.
+Isolation and readonly boundaries hold in every mode; damaged management grants no
+additional authority. Effective live Host maintenance needs separate human authority.
 
-Choose the minimum necessary fresh role for the Workstream's work shape:
+Assigned children use current-role native instructions and their authorized parent's
+selected spawn handoff, fork_turns="none"; unselected material stays outside the
+Workstream. Methods and ordinary local repair belong to the assigned executor.
+Return decision-changing unknowns to Controller. Rules are retrievable on demand
+within authority; contextual selection is not secrecy.
 
-| Role | Responsibility | Default native binding |
-| --- | --- | --- |
-{role_rows}
-
-Controller has no fixed model, effort or native profile; Host/user selection applies.
-Investigator gathers broad facts, not architecture decisions. Reasoning Specialist
-independently challenges a decision basis when that could change direction.
-Scanner is a nested Investigator discovery working pattern. Executor is a category
-covering Implementer and Focused Implementer; profiles select execution facts for
-those same semantic roles. Stable direction and deterministic convergence use
-ordinary Implementer; coupled invariants requiring sustained reasoning use Focused
-Implementer. Choose one profile per Workstream, not a ladder or size threshold.
-Automatic routing stops at Sol; static Astra medium/xhigh profiles require current-task
-user authorization before spawn. Per-spawn model/effort overrides are denied.
-The dedicated luna-only installation requires `execution_constraint: luna-only`
-in the authority contract; it retains semantic roles, restricts ordinary profiles
-to Luna/xhigh, and forbids Astra. Children cannot alter the frozen constraint.
-
-Provide a decision-complete handoff: goal and original acceptance, confirmed facts,
-hard invariants and decided boundaries, authoritative source/derived relationships,
-affected surfaces, usable verification entry, and decision-changing unknowns.
-Include current source locations and covered/uncovered scope from selected discovery.
-Resolve ambiguity from the human request and confirmed facts before handoff; bound
-the specific discrepancy or transformation in cleanup, migration or synchronization.
-Decisions, invariants and acceptance bind; recommendations are non-binding. Methods
-belong to the executor. Reuse established inventory and reopen only decision-critical
-originals; a new Scanner covers a genuinely uncovered evidence gap.
-
-Use a stable narrative base language and preserve precision-bearing original terms,
-quotations, distinctions and user formulations when translation would materially
-blur, broaden, narrow or expand meaning. Avoid forced monolingual translation,
-random language switching and bilingual repetition. Output language requirements
-still govern. Compression and handoff retain this precision-bearing representation.
-For operational artifact or installation acceptance, select the authoritative
-artifact, source, revision and provenance before delegation, or explicitly assign
-that selection to a later Workstream before its operational acceptance.
-
-Project/package install-smoke closure here covers builds, installs, fixtures,
-isolated smoke, packed artifacts and project-local verification. Effective live
-Host install/upgrade/uninstall, global instructions, profiles, hooks and trust
-require separate Host maintenance authority under the global contract.
-
-Root routes Workstreams; executors close local loops inside them. Semantic dependency,
-decision coupling and independent closure define their boundaries. Ordinary Implementer
-may finish assigned deterministic execution and Git closure in the same Workstream.
-Focused Implementer returns at semantic convergence: core solution/invariants hold,
-direction-changing unknowns are resolved, focused evidence supports core semantics,
-and remaining work cannot materially change causal model, architecture, contract,
-scope, acceptance or direction. A test PASS alone is insufficient. Remaining ordinary
-regression, lint/build, sync, deterministic defects, project/package install-smoke checks and Git closure then
-go to a fresh ordinary Implementer when assigned; shared guidance cannot extend the
-Focused endpoint. FINAL ends a child session; any further work uses a fresh handoff.
-Evidence changing a decided boundary or requiring an unverified external capability
-returns to Controller; ordinary local defects stay within the accepted assignment.
-
-Classify remaining work as independently deterministic only when the accepted
-contract uniquely determines the behavior to preserve. Compatibility authority
-ambiguity remains semantic: when production behavior and historical fixtures leave
-authority undecided, Focused must supply representative evidence or return the
-dependency to Controller; this does not mandate full regression. Controller may
-reroute the same semantic closure to a fresh ordinary session when explicit inputs
-and independent acceptance suffice and accumulated debugging state adds no benefit.
-Carry distilled invariants, exact candidate, green evidence, provenance, remaining
-acceptance and blockers, not raw history. FINAL still ends the prior child session.
-
-Select a fresh independent non-writing Reviewer only after candidate convergence
-when semantic challenge adds value. It checks original acceptance, invariants and
-cross-boundary behavior. Counterevidence is a finding; insufficient evidence remains
-unverified. READY requires supported critical closure, not absence of blockers.
-Bounded defects with design unchanged go to fresh ordinary correction; changes to
-architecture, contract, invariant, scope, acceptance or decision basis reopen Controller.
-Before opportunistic work, account for every explicit user goal as addressed,
-explicitly deferred, or blocked by a decision-changing dependency.
-
-Fresh role sessions use `fork_turns="none"` and only the authorized parent's native
-spawn message plus explicitly selected information. Controller may spawn registered
-roles; Implementer, Focused Implementer and Reviewer may spawn one fresh Investigator
-doing Scanner work. Other children cannot delegate. Maximum managed depth is two,
-one top-level child and its nested Investigator, never sibling workers.
-Keep working sets private; return distilled conclusions, facts, unknowns,
-contradictions, verification and optional Artifact pointers. Child communication,
-mutation/verification practice and role endpoints are defined in native role prompts.
-
-Controller alone selects durable retrieval and knowledge admission. Before task-start,
-read `.agent-memory/INDEX.md` and `.milestones/INDEX.md`; create minimal thin navigation
-if absent. Read selected documents explicitly through catalog/document-get; a bounded
-get names up to eight paths. Reread navigation after relevant change, missing context,
-invalid freshness or resumed compaction. Near task closure, select Curator only when
-reusable knowledge has future value; supply exact prior memory, navigation and evidence.
-Keep INDEX semantic and concise. Core validates storage, never chooses relevance.
-CHANGED is an observation, not semantic invalidation; Controller decides revalidation.
-
-Use only trusted direct runtime commands and native coordination allowed by the
-current execution mode. Pending-spawn recovery needs exact trusted native failure
-evidence; timeouts, not_found and prose cannot release a reservation. Wait only for
-a known unfinished necessary child, using the maximum in the current tool definition;
-do not infer a maximum or poll a finished child. Do not create repeated reasoning
-turns solely to observe unchanged deterministic state when the runtime can wait for
-a meaningful or terminal event. Before task-close call list_agents
-once for exact name-bound native Completed evidence. Stop/wake/prose alone is not
-completion; missing evidence keeps closure UNKNOWN. The last Controller-direct
-handoff must complete with no pending/active descendants. Host instruction/catalog
-activation remains UNKNOWN without native evidence; changed disk files alone do not
-prove activation. Keep security/control-state mutations and live Host installation
-outside child source work. See [Codex protocol](adapter/codex/README.md),
-[role profiles](docs/thaliris-role-packs.md), and [task authority](docs/thaliris-task-authority.md).
+The owning Controller explicitly reads [Controller instructions](docs/thaliris-controller.md)
+before startup/admission, routing, recovery, durable admission, closure or maintenance.
+If absent or potentially stale, retrieve the installed pinned runner's
+`controller-instructions` first. Role responsibilities are in native profiles and
+[role docs](docs/thaliris-role-packs.md); mechanical details are in
+[Codex protocol](adapter/codex/README.md).
 {MANAGED_END}
 """
 
@@ -950,7 +893,7 @@ def _render_role_packs() -> str:
 Generated from `thaliris_codex.roles`; edit canonical role instructions and render
 this document and native TOMLs through the adapter. These prompts supply role-owned
 responsibility, working style, delegation, endpoint and output. Project routing
-selects roles; global instructions own startup/authority/recovery. Full mechanical
+selects roles; explicitly retrieved Controller instructions own startup/authority/recovery. Full mechanical
 design belongs to [Codex protocol](../adapter/codex/README.md), not repeated prompts.
 
 {_native_profile_facts()}
@@ -1167,6 +1110,13 @@ def _install_plan(
         stripped = _strip_managed_agents(current)
         if stripped != current:
             writes[instruction.relative_to(root).as_posix()] = stripped.encode("utf-8")
+    from . import controller_instructions
+    controller_doc = core._safe(root, "docs/thaliris-controller.md")
+    controller_bytes = controller_instructions.render().encode("utf-8")
+    if not controller_doc.exists():
+        writes["docs/thaliris-controller.md"] = controller_bytes
+    elif controller_doc.read_bytes() != controller_bytes:
+        manual.append("docs/thaliris-controller.md")
     role_packs = core._safe(root, "docs/thaliris-role-packs.md")
     if not role_packs.exists():
         writes["docs/thaliris-role-packs.md"] = render_role_packs().encode("utf-8")
@@ -1393,82 +1343,32 @@ def _write_runtime_audit(home: Path, previous: bytes, old_executable: Path) -> P
 
 def _global_agents_block(executable: Path | None = None, executable_sha256: str | None = None,
                          codex_home: Path | None = None) -> bytes:
-    """Render the one-command user-layer startup contract."""
+    """Shared boundaries and a pre-admission Controller retrieval entry."""
     if (executable is None) != (executable_sha256 is None):
         raise ValueError("global instruction executable and SHA-256 must be paired")
     script = _codex_home(codex_home) / HOST_RUN_SCRIPT_NAME
     quoted = str(script).replace("'", "''")
-    trusted_route = f"`& '{quoted}' --root <repo> codex-bootstrap`" if os.name == "nt" else f"`'{quoted}' --root <repo> codex-bootstrap`"
-    task_route = f"`& '{quoted}' --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-file-path>'`" if os.name == "nt" else f"`'{quoted}' --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-file-path>'`"
+    route = f"& '{quoted}'" if os.name == "nt" else f"'{quoted}'"
     return f"""<!-- thaliris:global:begin -->
-## Thaliris project startup
+## Thaliris shared entry
 
-For substantive file-changing Git work, unless the human opts out, the owning root
-Controller runs {trusted_route} directly once. Read-only/chat/non-Git work needs none.
-Managed children follow their handoff; do not bootstrap, task-start or task-abandon
-the parent's ACTIVE task. Use this installed pinned runner for later operations;
-do not select alternate startup commands, shell-computed hashes or unknown runtime code.
-On READY or DEFINITION_READY_ACTOR_UNKNOWN, create a separate UTF-8 JSON authority
-contract file selecting the actual human instruction, boundary, invariants,
-acceptance and execution_mode: delegated, controller-direct or single-agent.
-Non-mode fields are nonempty strings. Then in a separate standalone direct tool call
-run {task_route}, using the returned task_start_receipt and quoted absolute file path.
-The contract argument is a file path, never inline JSON; do not combine invocations.
-After admission follow the effective project router and selected execution mode.
+Use the installed pinned runner for managed commands; do not substitute unknown
+runtime code. Authority comes from persistent Controller-asserted human intent,
+not session/PID/environment, missing actor fields or universal Host authentication.
+Known child, readonly, abandoned and fenced actors cannot establish, expand, rewrite
+or reactivate it. Goal, scope, acceptance, mode, unfencing and security-baseline
+changes require an actual superior human decision. Isolation and readonly boundaries
+hold in every mode. Live Host maintenance requires separate explicit authority;
+changed disk files do not prove native activation. Preserve unknown user-owned bytes.
 
-Authority is persistent Controller-asserted human intent under governance, not
-mechanical human/Root authentication. Host Root identity remains UNKNOWN.
-UserPromptSubmit, missing fields, matching session, PID, environment and SessionSource
-mint no authority. Known child, readonly, abandoned and fenced actors cannot establish,
-expand, rewrite or reactivate it. Shared OS/unrecognized delegates have no universal
-mechanical authentication. Ordinary interruption/reconnect needs no repeat Root proof;
-authority ends on human revocation, closure or Controller abandonment/replacement.
-Goal, scope, acceptance, mode, unfencing or security-baseline changes need an actual
-superior human decision. Children cannot authorize them through prompts, state or config.
-Controller-direct allows Controller reads/edits/tests/Git and useful auxiliary roles;
-single-agent allows ordinary execution without children. Default delegated routing,
-fresh isolation, readonly restrictions and explicit Astra authorization otherwise hold.
-
-On CURRENT_CONTINUATION continue or explicitly abandon using the exact task-abandon
-packet. An unbound pending spawn first needs trusted terminal Host recovery evidence.
-On FOREIGN_RECOVERY_DECISION or UNKNOWN, Controller decides continuation/recovery.
-On INVALID_STATE/bootstrap failure diagnose the affected surface; preserve evidence,
-label managed assurance UNKNOWN, and route ordinary source work through assigned roles.
-For incompatible task schema, read task-status and use task-recover-state with exact
-expected SHA-256; ACTIVE recovery also needs --abandon-active and no nonterminal children.
-Never delete invalid state or treat it as absent. Runtime drift is evidence for
-Controller repair/restore/accepted-upgrade judgment, not a blanket source-work ban.
-
-Authority conflict recovery uses task-recover-authority --expected-authority-sha256
-<exact external hash> --reason <reason>. It archives evidence, restores recorded bytes
-and original security baseline, and fences known old children; death proof may stay
-UNKNOWN. It cannot bless changed security bytes or remove fences.
-User-authorized external repair/forced recovery requires disconnected global integration
-and the separate reviewed tools/thaliris_offline_recovery.py runner with exact task,
-revision, state/lifecycle hashes and reason. OPERATOR_ASSERTED_USER_DELEGATED_ADMINISTRATION
-is operator intent, not cryptographic consent or Host attestation. It archives bytes,
-fences extractable identities and releases only the old slot; it grants no task-start,
-child binding, Controller identity or readonly exemption. Automated actors are denied
-while integration is present. Try native termination/observation of known children;
-unknown owner, unbound identities, incompatible fields and unavailable death proof stay
-UNKNOWN. Disk disconnection does not prove running Host configuration.
-
-Host installation, upgrade and uninstall require a separate --maintenance-contract:
-the actual human instruction, exact Host operation/home and independently selected
-immutable executor/candidate identities. They require no project init/task admission
-and never approve unknown project control instructions. Prior authorized installation
-receipts establish Host ownership independently of candidate rendering; unknown bytes
-are preserved until exact specific human approval. Preserved role documentation is
-manual follow-up, not project admission authority. Disk setup is not native activation.
-
-Host maintenance during another ACTIVE project uses a separate checkout and Codex
-session. Only exact identity-checked Host codex-install/codex-uninstall invocations with an explicit --maintenance-contract
-cross that boundary; source changes use managed roles. Self-uninstall reports any inert
-retained runner for later direct cleanup/reinstall. Changed installation requires a fresh
-Host session where needed; disk registration does not prove loaded instruction/catalog
-activation. Never change a live task's security anchor as part of source synchronization.
-In user-facing status describe work and concrete blockers plainly; keep receipts,
-hashes, attestations and lifecycle details out of that prose and report blocked work honestly.
+The owning Controller explicitly retrieves `{route} --root <repo> controller-instructions`
+before substantive file-changing Git work (unless the human opts out), admission,
+recovery, routing, durable admission, closure or Host maintenance, and follows the
+relevant procedures and project entry. Read-only/chat/non-Git work needs no startup.
+Managed children follow their selected handoff and current-role native instructions;
+do not bootstrap, task-start or task-abandon the parent's ACTIVE task. Rules remain
+retrievable on demand within authority. Source synchronization never changes a live
+task's security anchor or installs into Host.
 <!-- thaliris:global:end -->
 """.encode("utf-8")
 
@@ -1603,6 +1503,13 @@ def _adapter_uninstall_plan(root: Path) -> tuple[dict[str, bytes], list[str], li
                 kept.append(PROJECT_ACTIVATION_MARKER.replace("\\", "/"))
         except OSError:
             manual.append(PROJECT_ACTIVATION_MARKER.replace("\\", "/"))
+    from . import controller_instructions
+    controller_doc = core._safe(root, "docs/thaliris-controller.md")
+    if controller_doc.is_file():
+        if controller_doc.read_bytes() == controller_instructions.render().encode("utf-8"):
+            deletes.append("docs/thaliris-controller.md")
+        else:
+            kept.append("docs/thaliris-controller.md")
     packs = core._safe(root, "docs/thaliris-role-packs.md")
     if packs.is_file():
         if _role_pack_state(packs.read_bytes()) == "current":
@@ -1966,10 +1873,8 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
     state = core.task_show(root)["state"]
     task_id = str(state["task_id"])
     override = anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}
-    if override and lifecycle.managed_dependency_pending(core._repo_root(root)):
-        raise ValueError("task-close requires no pending or active managed children")
-    if not override and not lifecycle.qualifying_child_completed(core._repo_root(root)):
-        raise ValueError("task-close requires an authorized explicit handoff, a matching native SubagentStart/Stop identity, and no pending or active managed work; after child completion, use list_agents to observe an exact name-bound native Completed status")
+    if not lifecycle.qualifying_child_completed(core._repo_root(root), allow_no_children=override):
+        raise ValueError("task-close requires authorized handoff/identity bindings, exact name-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents to observe completion. SubagentStop is optional; Controller semantic acceptance remains independent")
     result = core.task_close(root, base_revision, expected_task_id=task_id)
     task_authority.checkpoint(core._repo_root(root))
     return result

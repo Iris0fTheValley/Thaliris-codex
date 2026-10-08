@@ -69,7 +69,17 @@ Execution modes are explicit task intent:
 
 No explicit human override means `delegated`. Every mode retains fresh role
 isolation, reviewer/verifier readonly and explicit Astra authorization.
-Closing an override task still requires no pending or active managed children.
+When no child handoff was issued, override closure needs no child execution proof.
+When auxiliary handoffs exist, the latest authorized top-level handoff must have
+exact name-bound native Completed evidence from list, with no pending/active
+descendants, unbound children or conflicting identities/statuses. This is the same
+execution distinction used in delegated mode: SubagentStop is optional observation,
+and missing/delayed Stop cannot veto proved native completion. Stop, wake signals
+or result prose alone cannot prove completion. Controller semantic acceptance
+remains independent in every mode.
+The accepted Completed payload is exactly `{"completed": <string>}`; `completed: null`,
+non-string values, extra fields and other unsupported shapes remain UNKNOWN. A
+contradictory native status blocks both new managed handoffs and task closure.
 
 State, lifecycle or security conflicts leave the external authority unchanged.
 `task-status` reports its exact hash and a bounded recovery action:
