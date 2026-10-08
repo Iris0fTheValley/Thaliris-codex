@@ -236,7 +236,9 @@ def main(argv: list[str] | None = None) -> int:
             task_authority.check(root)
         if args.command == "audit-hook":
             try:
-                payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+                # A single document-leading UTF-8 BOM is transport syntax,
+                # not actor data. Strict decoding preserves all JSON content.
+                payload = json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 payload = None
             if args.maintenance_replay_contract is not None:

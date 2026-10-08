@@ -95,9 +95,11 @@ def pending_native(tmp_path, monkeypatch, pinned_test_thaliris, replay_runtime):
     core.task_start(project, "Isolated native maintenance replay fixture", None, None)
     monkeypatch.setenv("CODEX_HOME", str(home))
 
-    def make_intent(exe, operation="codex-install"):
+    def make_intent(exe, operation="codex-install", unicode=False):
         path = intent(tmp_path, home, exe, operation)
         value = json.loads(path.read_text(encoding="utf-8"))
+        if unicode:
+            value["human_instruction"] += " Unicode intent: 雪 🪷 \ufeffpreserved"
         contents = runtime_identity.manifest_bytes(exe)
         metadata = json.loads((exe.parent.parent / "Lib/site-packages/thaliris_codex-0.4.3.dist-info/direct_url.json").read_bytes())
         if "vcs_info" in metadata:
@@ -108,15 +110,15 @@ def pending_native(tmp_path, monkeypatch, pinned_test_thaliris, replay_runtime):
         value["executor"] = selected
         if operation == "codex-install":
             value["candidate"] = selected
-        path.write_text(json.dumps(value), encoding="utf-8")
+        path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
         return path
 
-    def prepare(*, distinct=False, operation="codex-install", prepared=False):
+    def prepare(*, distinct=False, operation="codex-install", prepared=False, unicode=False):
         old_exe = pinned_test_thaliris[0] if distinct else replay_runtime
         monkeypatch.setattr(adapter, "_host_install_executable", lambda *_a: (old_exe, maintenance.digest(old_exe.read_bytes()), None))
-        assert adapter.codex_install(maintenance_contract=make_intent(old_exe))["ok"]
+        assert adapter.codex_install(maintenance_contract=make_intent(old_exe, unicode=unicode))["ok"]
         old_manifest = (home / runtime_identity.MANIFEST_NAME).read_bytes()
-        path = make_intent(replay_runtime, operation)
+        path = make_intent(replay_runtime, operation, unicode=unicode)
         monkeypatch.setattr(adapter, "_host_install_executable", lambda *_a: (replay_runtime, maintenance.digest(replay_runtime.read_bytes()), None))
         if operation == "codex-install":
             monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *_a: {"status": "FAILED"})
@@ -153,6 +155,16 @@ def native(command, project, payload):
     return decision
 
 
+def console_replay(executable, project, path, raw):
+    before = snapshot(project)
+    result = subprocess.run([str(executable), "--root", str(project), "audit-hook", "PreToolUse",
+        "--maintenance-replay-contract", str(path)],
+        input=raw, cwd=project, env=runtime_identity.child_environment(), capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert snapshot(project) == before
+    return json.loads(result.stdout)["hookSpecificOutput"]
+
+
 @pytest.mark.parametrize("distinct", [False, True])
 @pytest.mark.parametrize("prepared", [False, True])
 @pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
@@ -164,6 +176,53 @@ def test_exact_original_native_replay_admitted(pending_native, distinct, prepare
     # pytest truncates large dictionary assertion messages with saferepr.
     assert result["permissionDecision"] == "allow", json.dumps(result, indent=2)
     assert "UNKNOWN" in result["additionalContext"]
+    assert snapshot(home) == before
+
+
+@pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
+def test_utf8_signature_preserves_native_and_console_replay(pending_native, replay_runtime, operation):
+    home, project, path, command, payload = pending_native(distinct=True, operation=operation, unicode=True)
+    payload["metadata"] = {"source": "雪 🪷", "\ufeffkey": "\ufeffvalue\ufeff"}
+    before_home, before_project, contract = snapshot(home), snapshot(project), path.read_bytes()
+    baseline = native(command, project, payload)
+    assert baseline["permissionDecision"] == "allow", json.dumps(baseline, indent=2)
+    for signature in (b"", b"\xef\xbb\xbf"):
+        # Compare the native preflight decision to the same selected console
+        # launcher's UTF-8 document boundary, including actual Unicode bytes.
+        assert console_replay(replay_runtime, project, path,
+            signature + json.dumps(payload, ensure_ascii=False).encode("utf-8")) == baseline
+    assert path.read_bytes() == contract
+    assert snapshot(home) == before_home
+    assert snapshot(project) == before_project
+
+
+def test_utf8_signature_never_weakens_console_replay_guards(pending_native, replay_runtime):
+    home, project, path, command, payload = pending_native(distinct=True, unicode=True)
+    before = snapshot(home)
+    original = payload["tool_input"]["cmd"]
+    invalid = [{**payload, **actor} for actor in ({"agent_id": "child"}, {"agent_type": "unknown"},
+               {"readonly": True}, {"fenced": True})]
+    invalid += [{**payload, "tool_input": {"cmd": cmd}} for cmd in (
+        original.replace(str(replay_runtime), str(replay_runtime.with_name("unapproved.exe"))),
+        original.replace(str(replay_runtime), str(replay_runtime) + "\ufeff"),
+        original + " --execution-constraint luna-only",
+        original + f" --maintenance-contract '{path}'")]
+    invalid += [None, [], "unknown actor"]
+    for value in invalid:
+        for signature in (b"", b"\xef\xbb\xbf"):
+            assert console_replay(replay_runtime, project, path,
+                signature + json.dumps(value, ensure_ascii=False).encode("utf-8"))["permissionDecision"] == "deny"
+    # A transport signature cannot repair drift in independently hashed intent.
+    contract = path.read_bytes()
+    intent = json.loads(contract)
+    intent["human_instruction"] += " changed"
+    path.write_text(json.dumps(intent, ensure_ascii=False), encoding="utf-8")
+    try:
+        for signature in (b"", b"\xef\xbb\xbf"):
+            assert console_replay(replay_runtime, project, path,
+                signature + json.dumps(payload).encode())["permissionDecision"] == "deny"
+    finally:
+        path.write_bytes(contract)
     assert snapshot(home) == before
 
 
@@ -266,7 +325,7 @@ def test_native_replay_diagnostic_identifies_swallowed_guard_without_recording_i
 
 
 @pytest.mark.parametrize("raw,prefix", [(b"", "empty"),
-    (b"private-input-canary", "other"), (b"\xef\xbb\xbf{}", "bom")])
+    (b"private-input-canary", "other"), (b"\xef\xbb\xbf\xef\xbb\xbf{}", "bom")])
 def test_replay_diagnostic_distinguishes_invalid_stdin_without_recording_content(tmp_path, monkeypatch, capsys, raw, prefix):
     from thaliris_codex import cli
 
@@ -282,7 +341,7 @@ def test_replay_diagnostic_distinguishes_invalid_stdin_without_recording_content
     events = json.loads(output.err)["native_replay_trace"]
     errors = [item for item in events if item.get("exception") == "JSONDecodeError"]
     assert len(errors) == 1
-    assert errors[0]["input_char_count"] == len(raw.decode("utf-8"))
+    assert errors[0]["input_char_count"] == len(raw.decode("utf-8-sig"))
     assert errors[0]["json_error_position"] == 0
     assert errors[0]["input_prefix_kind"] == prefix
     assert "private-input-canary" not in output.err

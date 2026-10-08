@@ -41,6 +41,67 @@ def test_independent_entry_fails_closed_without_importing_installed_runtime(tmp_
 
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows independent preflight and console dispatch")
+def test_independent_entry_installs_into_isolated_home(tmp_path):
+    """Exercise the standalone emergency install route in a disposable Host home.
+
+    The synthetic contract is test-operator intent for this temporary home. The
+    real Windows preflight, immutable runtime selection, console dispatch, and
+    app-server hook trust path still run; no installed Host runner is invoked.
+    """
+    import shutil
+    import thaliris_codex
+
+    if shutil.which("codex") is None:
+        pytest.skip("Codex app-server CLI is required for an end-to-end isolated install")
+
+    reviewed_core = tmp_path / "reviewed-core"
+    shutil.copytree(Path(thaliris.__file__).parent, reviewed_core / "src/thaliris")
+    core = source_wheel(tmp_path, "thaliris", Path(thaliris.__file__).parent)
+    adapter = source_wheel(tmp_path, "thaliris_codex", Path(thaliris_codex.__file__).parent, entry=True)
+    runtime = runtime_setup.create(tmp_path / "approved-runtime", core, adapter)
+    executable = Path(runtime["executable"])
+    selection = {"executable": str(executable), "runtime_sha256": runtime["runtime_sha256"],
+                 "source_pin": "sha256:" + adapter.rsplit("=", 1)[1]}
+
+    home = tmp_path / "isolated-codex-home"
+    home.mkdir()
+    contract = tmp_path / "isolated-install.json"
+    contract.write_text(json.dumps({
+        "format": host_maintenance.FORMAT,
+        "operation": "codex-install",
+        "human_instruction": "Install this exact fixture into its disposable test Host home.",
+        "codex_home": str(home),
+        "executor": selection,
+        "candidate": selection,
+        "installed_runtime_sha256": "ABSENT",
+        "execution_constraint": None,
+    }), encoding="utf-8")
+
+    tool = Path(__file__).resolve().parents[1] / "tools/thaliris_host_maintenance.py"
+    environment = runtime_identity.child_environment()
+    environment["CODEX_HOME"] = str(home)
+    environment["PYTHONPATH"] = str(home)
+    environment["THALIRIS_EXECUTABLE"] = str(home / "missing.exe")
+    environment["THALIRIS_INSTALL_MANIFEST"] = str(home / "missing-manifest.json")
+    environment.pop("THALIRIS_RUN_SCRIPT", None)
+    command = [sys.executable, "-I", "-B", str(tool), "--core-source-root", str(reviewed_core),
+               "--maintenance-contract", str(contract)]
+
+    installed = subprocess.run(command, env=environment, capture_output=True, timeout=120)
+
+    assert installed.returncode == 0, installed.stdout or installed.stderr
+    result = json.loads(installed.stdout)
+    assert result["ok"] and result["host_integration_ready"] == "YES", result
+    assert result["host_actor_assurance"] == "UNKNOWN"
+    assert result["project_files_touched"] == []
+    assert result["installed_runtime_identity"] == runtime["runtime_sha256"]
+    assert (home / runtime_identity.MANIFEST_NAME).is_file()
+    assert (home / host_maintenance.RECEIPT_NAME).is_file()
+    assert (home / "hooks.json").is_file()
+    assert (home / "AGENTS.md").is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real Windows independent preflight and console dispatch")
 def test_independent_entry_removes_explicitly_approved_broken_legacy_controls(tmp_path):
     """Real subprocess and PowerShell, no installed runner or trust-test seam.
 
