@@ -842,7 +842,7 @@ def managed_executable_health() -> dict[str, str]:
     }
 
 
-def _context_arguments(command: str) -> str | None:
+def _context_arguments(command: str, *, validate_selected_maintenance: bool = True) -> str | None:
     """Extract arguments only from direct or exactly installed trusted routes."""
     command = command.lstrip()
     # Codex's Windows shell tool submits native PowerShell invocations with
@@ -887,24 +887,29 @@ def _context_arguments(command: str) -> str | None:
             operations = [token for token in tokens if token in {"codex-install", "codex-uninstall"}]
             if len(selected_contracts) != 1 or len(operations) != 1:
                 return None
-            intent = host_maintenance.contract(selected_contracts[0], operations[0], _host_home_path())
-            approved_executor, _ = host_maintenance.selected_runtime(intent["executor"])
-            if Path(executable).resolve(strict=True) != approved_executor:
-                return None
+            if validate_selected_maintenance:
+                intent = host_maintenance.contract(selected_contracts[0], operations[0], _host_home_path())
+                approved_executor, _ = host_maintenance.selected_runtime(intent["executor"])
+                if Path(executable).resolve(strict=True) != approved_executor:
+                    return None
         except (OSError, ValueError, TypeError, KeyError, RuntimeError):
             return None
     return match.group(2) or ""
 
 
-def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
+def _trusted_host_maintenance_route(payload: dict[str, Any], *, expected_contract: str | None = None) -> bool:
     """Admit exact Host intent without transferring project authority."""
     from . import host_maintenance
     command = _bash_command(payload)
-    operation = _context_call(payload)[0]
+    operation = _context_call(payload, validate_selected_maintenance=False)[0]
     if command is None or operation not in {"codex-install", "codex-uninstall"}:
         return False
     try:
-        filename = _direct_context_option(payload, {"--maintenance-contract"}, digest_only=False)
+        filename = _direct_context_option(payload, {"--maintenance-contract"}, digest_only=False,
+                                          validate_selected_maintenance=False)
+        if filename is None or (expected_contract is not None and
+                                Path(filename).resolve() != Path(expected_contract).resolve()):
+            return False
         intent = host_maintenance.contract(filename, operation, _host_home_path(), actor=payload)
         selected_executor, _ = host_maintenance.selected_runtime(intent["executor"])
         from . import host_transition
@@ -918,9 +923,11 @@ def _trusted_host_maintenance_route(payload: dict[str, Any]) -> bool:
             return False
         if operation == "codex-install":
             candidate, manifest = host_maintenance.selected_runtime(intent["candidate"])
-            explicit = _direct_context_option(payload, {"--executable"}, digest_only=False)
-            sha = _direct_context_option(payload, {"--sha256"})
-            constraint = _direct_context_option(payload, {"--execution-constraint"}, digest_only=False)
+            explicit = _direct_context_option(payload, {"--executable"}, digest_only=False,
+                                              validate_selected_maintenance=False)
+            sha = _direct_context_option(payload, {"--sha256"}, validate_selected_maintenance=False)
+            constraint = _direct_context_option(payload, {"--execution-constraint"}, digest_only=False,
+                                                validate_selected_maintenance=False)
             if explicit is not None and Path(explicit).resolve() != candidate:
                 return False
             if sha is not None and sha != json.loads(manifest)["executable_sha256"]:
@@ -972,9 +979,9 @@ def maintenance_replay_check(root: Path, payload: object, filename: str) -> str:
         state_path = core._safe_without_final_symlink(root, "/".join((".context", "state.json")))
         if state_path.exists() and not state_path.is_file() or managed_task_state(root)[0] == "INVALID_STATE":
             raise ValueError("THALIRIS_MANAGED_STATE_UNAVAILABLE")
-        selected = _direct_context_option(payload, {"--maintenance-contract"}, digest_only=False)
         from . import host_transition
-        if selected is None or Path(selected).resolve() != Path(filename).resolve() or not host_transition.pending(_host_home_path()) or not _trusted_host_maintenance_route(payload):
+        if not host_transition.pending(_host_home_path()) or not _trusted_host_maintenance_route(
+                payload, expected_contract=filename):
             raise ValueError("HOST_TRANSITION_PENDING: exact original maintenance intent required")
         return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
             "additionalContext": "Exact original Host maintenance replay checked; Host Root identity remains UNKNOWN."}}, separators=(",", ":"))
@@ -2884,7 +2891,7 @@ def _codex_bash_outcome(response: object) -> str:
     return "UNKNOWN"
 
 
-def _context_call(payload: dict[str, Any]) -> tuple[str | None, list[str]]:
+def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: bool = True) -> tuple[str | None, list[str]]:
     """Recognize a direct context call and its explicit bounded retrieval targets."""
     command = _bash_command(payload)
     if command is None:
@@ -2895,7 +2902,7 @@ def _context_call(payload: dict[str, Any]) -> tuple[str | None, list[str]]:
     segments = _split_command_separators(separator_check)
     if segments is None or len(segments) != 1:
         return None, []
-    arguments = _context_arguments(command)
+    arguments = _context_arguments(command, validate_selected_maintenance=validate_selected_maintenance)
     if arguments is None:
         return None, []
     try:
@@ -3063,12 +3070,13 @@ def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -
     return False
 
 
-def _direct_context_option(payload: dict[str, Any], names: set[str], *, digest_only: bool = True) -> str | None:
+def _direct_context_option(payload: dict[str, Any], names: set[str], *, digest_only: bool = True,
+                            validate_selected_maintenance: bool = True) -> str | None:
     """Read a scalar option from the already recognized direct CLI invocation."""
     command = _bash_command(payload)
-    if command is None or _context_call(payload)[0] is None:
+    if command is None or _context_call(payload, validate_selected_maintenance=validate_selected_maintenance)[0] is None:
         return None
-    arguments = _context_arguments(command)
+    arguments = _context_arguments(command, validate_selected_maintenance=validate_selected_maintenance)
     if arguments is None:
         return None
     try:
