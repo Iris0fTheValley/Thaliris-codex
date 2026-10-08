@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -18,11 +19,56 @@ from tests.test_runtime_setup import source_wheel
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="real Windows native preflight")
 
 
+# The disposable wheel retains the real console launcher and all admission
+# checks. Only its replay CLI entry emits bounded source locations to stderr;
+# no payload, contract, environment value or exception message is recorded.
+# This reaches failures that the production fail-closed response intentionally
+# collapses to THALIRIS_HOST_MAINTENANCE_REPLAY_DENIED.
+REPLAY_TRACE_ENTRY = '''
+_native_replay_main = main
+def main():
+    import json, sys
+    if "--maintenance-replay-contract" not in sys.argv:
+        return _native_replay_main()
+    events = []
+    watched = {"maintenance_replay_check", "_trusted_host_maintenance_route",
+               "_context_call", "_context_arguments", "contract", "selected_runtime",
+               "load", "console_smoke", "managed_task_state"}
+    def trace(frame, event, arg):
+        module = frame.f_globals.get("__name__", "")
+        if module.startswith(("thaliris.", "thaliris_codex.")):
+            name = frame.f_code.co_name
+            if event == "exception" or (event == "return" and name in watched):
+                item = {"module": module, "function": name,
+                        "line": frame.f_lineno, "event": event}
+                if event == "exception":
+                    item["exception"] = arg[0].__name__
+                elif arg is False or arg is None:
+                    item["result"] = str(arg)
+                else:
+                    item["result"] = "returned"
+                events.append(item)
+                if len(events) > 64:
+                    del events[0]
+        return trace
+    sys.settrace(trace)
+    try:
+        return _native_replay_main()
+    finally:
+        sys.settrace(None)
+        sys.stderr.write(json.dumps({"native_replay_trace": events}) + "\\n")
+'''
+
+
 @pytest.fixture(scope="module")
 def replay_runtime(tmp_path_factory):
     source = tmp_path_factory.mktemp("native-replay-source")
     core_source = source_wheel(source, "thaliris", Path(thaliris.__file__).parent)
-    adapter_source = source_wheel(source, "thaliris_codex", Path(lifecycle.__file__).parent, entry=True)
+    diagnostic_package = source / "diagnostic-package" / "thaliris_codex"
+    shutil.copytree(Path(lifecycle.__file__).parent, diagnostic_package)
+    cli = diagnostic_package / "cli.py"
+    cli.write_bytes(cli.read_bytes() + REPLAY_TRACE_ENTRY.encode("utf-8"))
+    adapter_source = source_wheel(source, "thaliris_codex", diagnostic_package, entry=True)
     target = source / "venv"
     result = runtime_setup.create(target, core_source, adapter_source)
     return Path(result["executable"])
@@ -91,7 +137,10 @@ def native(command, project, payload):
         input=json.dumps(payload).encode(), cwd=project, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
     assert snapshot(project) == before
-    return json.loads(result.stdout)["hookSpecificOutput"]
+    decision = json.loads(result.stdout)["hookSpecificOutput"]
+    if decision.get("permissionDecision") == "deny" and result.stderr:
+        decision["nativeReplayDiagnostic"] = result.stderr.decode(errors="replace")
+    return decision
 
 
 @pytest.mark.parametrize("distinct", [False, True])
@@ -101,7 +150,9 @@ def test_exact_original_native_replay_admitted(pending_native, distinct, prepare
     home, project, path, command, payload = pending_native(distinct=distinct, prepared=prepared, operation=operation)
     before = snapshot(home)
     result = native(command, project, payload)
-    assert result["permissionDecision"] == "allow", result
+    # A string message preserves the full bounded trace in pytest/JUnit;
+    # pytest truncates large dictionary assertion messages with saferepr.
+    assert result["permissionDecision"] == "allow", json.dumps(result, indent=2)
     assert "UNKNOWN" in result["additionalContext"]
     assert snapshot(home) == before
 
@@ -177,10 +228,37 @@ def test_degraded_native_denies_child_other_executor_even_with_invalid_journal(p
     assert native(command, project, {**payload, "agent_id": "child"})["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize("defect", ["state", "option_drift"])
+def test_native_replay_diagnostic_identifies_swallowed_guard_without_recording_inputs(pending_native, defect):
+    home, project, path, command, payload = pending_native()
+    if defect == "state":
+        state = project / ".context" / "state.json"
+        state.write_text("unknown managed state")
+    else:
+        payload["tool_input"]["cmd"] += " --execution-constraint luna-only"
+    before = snapshot(home)
+    result = native(command, project, payload)
+    assert result["permissionDecision"] == "deny"
+    diagnostic = json.loads(result["nativeReplayDiagnostic"])
+    events = diagnostic["native_replay_trace"]
+    if defect == "state":
+        assert any(item["function"] == "maintenance_replay_check" and
+                   item["event"] == "exception" and item["exception"] == "ValueError" for item in events)
+    else:
+        assert any(item["function"] == "_trusted_host_maintenance_route" and
+                   item["event"] == "return" and item["result"] == "False" for item in events)
+    assert len(events) <= 64
+    assert all(set(item) <= {"module", "function", "line", "event", "exception", "result"} for item in events)
+    assert str(home) not in result["nativeReplayDiagnostic"]
+    assert payload["session_id"] not in result["nativeReplayDiagnostic"]
+    assert snapshot(home) == before
+
+
 @pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
 def test_native_admission_then_original_recovery_completes(pending_native, monkeypatch, operation):
     home, project, path, command, payload = pending_native(distinct=True, operation=operation)
-    assert native(command, project, payload)["permissionDecision"] == "allow"
+    decision = native(command, project, payload)
+    assert decision["permissionDecision"] == "allow", json.dumps(decision, indent=2)
     monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *_a: {"status": "TRUSTED",
         "trusted_count": len(lifecycle.HOOK_EVENTS), "enabled_count": len(lifecycle.HOOK_EVENTS)})
     from thaliris_codex import codex_app_server
