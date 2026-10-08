@@ -13,6 +13,37 @@ import pytest
 from thaliris_codex import codex_adapter, lifecycle, runtime_identity, host_preflight
 
 
+@pytest.mark.skipif(os.name == "nt", reason="CPython POSIX venv layout")
+def test_internal_lib64_alias_is_exactly_pinned_and_drift_is_rejected(tmp_path):
+    root = tmp_path / "runtime"
+    (root / "bin").mkdir(parents=True)
+    (root / "bin/thaliris").write_text("launcher")
+    (root / "pyvenv.cfg").write_text("include-system-site-packages = false\n")
+    package = root / "lib/python3.11/site-packages/thaliris_codex"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "cli.py").write_text("")
+    alias = root / "lib64"
+    alias.symlink_to("lib", target_is_directory=True)
+    exe = root / "bin/thaliris"
+    contents = runtime_identity.manifest_bytes(exe)
+    identity = runtime_identity.manifest_identity(contents)
+    assert json.loads(contents)["files"]["lib64"] == hashlib.sha256(b"symlink:lib").hexdigest()
+    runtime_identity.validate_manifest(contents, exe, identity)
+    alias.unlink()
+    with pytest.raises(ValueError, match="runtime changed"):
+        runtime_identity.validate_manifest(contents, exe, identity)
+    for destination in (str(root / "lib"), "./lib", "../runtime/lib", "../outside"):
+        alias.symlink_to(destination, target_is_directory=True)
+        with pytest.raises(ValueError, match="symlink|unsafe"):
+            runtime_identity.manifest_bytes(exe)
+        alias.unlink()
+    alias.symlink_to("lib", target_is_directory=True)
+    (package / "cli.py").write_text("tampered")
+    with pytest.raises(ValueError, match="runtime changed"):
+        runtime_identity.validate_manifest(contents, exe, identity)
+
+
 @pytest.fixture(autouse=True)
 def hypothetical_controller_contract(monkeypatch):
     """Unit seam for old pin/receipt mechanics, not current Host actor proof.

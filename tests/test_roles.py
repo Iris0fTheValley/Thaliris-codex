@@ -654,7 +654,7 @@ def test_new_registry_role_appears_in_active_spawn_isolation_diagnostic(tmp_path
 
     reason = json.loads(denied)["hookSpecificOutput"]["permissionDecisionReason"]
     assert reason.startswith("THALIRIS_ISOLATION_REQUIRED:")
-    assert reason.endswith('and Sentinel session explicitly with fork_turns="none".')
+    assert reason.endswith('and Sentinel session explicitly with fork_turns="none" (V2) or fork_context=false (V1).')
 
 
 def _initialized_repo(tmp_path: Path) -> Path:

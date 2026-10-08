@@ -156,7 +156,7 @@ def test_controller_direct_auxiliary_close_requires_native_completed_independent
     assert lifecycle.handle_hook(workspace, "SubagentStart", child) == ""
     if with_stop:
         assert lifecycle.handle_hook(workspace, "SubagentStop", child) == ""
-    with pytest.raises(ValueError, match="exact name-bound native Completed"):
+    with pytest.raises(ValueError, match="exact identity-bound native Completed"):
         codex_adapter.task_close(workspace, 1)
     observed = {**identity, "tool_name": "list_agents", "tool_response": {
         "agents": [{"agent_name": "reviewer-id", "agent_status": {"completed": "review result"}}],

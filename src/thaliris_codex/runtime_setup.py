@@ -255,7 +255,8 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
         target = final
         (target / runtime_identity.LOCATION_NAME).write_bytes(runtime_identity.location_bytes(target))
         # Copies are intentional: a system Python symlink is outside the venv's
-        # independently pinned file topology.
+        # independently pinned file topology. CPython's POSIX lib64 -> lib
+        # alias is separately checked and pinned by runtime_identity.
         venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
         interpreter = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         environment = runtime_identity.child_environment()

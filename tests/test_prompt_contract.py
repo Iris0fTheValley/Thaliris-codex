@@ -9,6 +9,7 @@ import hashlib
 import json
 import subprocess
 import tomllib
+import re
 
 import pytest
 
@@ -20,10 +21,39 @@ def normalized(text):
 
 
 def concepts(text, *groups):
-    """Each concept has short semantic anchors, not a whole fixed paragraph."""
-    text = normalized(text)
+    """Vocabulary coverage tolerates word order, inflection and connective edits.
+
+    This is deliberately not a semantic/LLM compliance proof. Executable role,
+    authority and lifecycle tests prove mechanical behavior; generated equality
+    proves distribution. Historical ownership below always uses exact bytes.
+    Negation and precision-bearing protocol identifiers remain required tokens.
+    """
+    def tokens(value):
+        filler = {"a", "an", "the", "its", "their", "that", "this", "are", "is", "be", "and", "or", "of", "to", "in", "with", "by", "for"}
+        return {word.removesuffix("s") for word in re.findall(r"[a-z0-9_]+", value.lower()) if word not in filler}
+    available = tokens(text)
     for group in groups:
-        assert all(anchor in text for anchor in group), group
+        for anchor in ((group,) if isinstance(group, str) else group):
+            assert tokens(anchor) <= available, f"missing contract vocabulary: {tokens(anchor) - available}"
+
+
+def require_local_prohibition(text, *, action, target):
+    """Require negation in the same clause as a role action and its target."""
+    clauses = re.split(r"[.!?;:\n]+", text.lower())
+    action_pattern = re.compile(rf"\b{re.escape(action)}(?:s|ed|ing)?\b")
+    target_pattern = re.compile(rf"\b{re.escape(target)}\b")
+    negative_pattern = re.compile(r"\b(?:not|never|cannot|can't|mustn't|prohibited)\b")
+    assert any(action_pattern.search(clause) and target_pattern.search(clause)
+               and negative_pattern.search(clause) for clause in clauses), (
+        f"missing local prohibition: {action} {target}"
+    )
+
+
+def test_concept_coverage_tolerates_rewording_but_keeps_required_boundaries():
+    concepts("The Controller preserves acceptance and scope; readonly boundaries hold.",
+             ("controller scope acceptance", "readonly boundaries"))
+    with pytest.raises(AssertionError, match="readonly"):
+        concepts("The Controller preserves scope and acceptance.", ("readonly boundaries",))
 
 
 def prompt(role):
@@ -99,14 +129,20 @@ def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
 
 
 def test_reviewer_critical_evidence_and_correction_boundary():
-    concepts(prompt("reviewer"), ("converged candidate", "original acceptance", "hard invariants", "cross-boundary"),
-             ("non-writing", "do not repair"),
+    reviewer = prompt("reviewer")
+    concepts(reviewer, ("converged candidate", "original acceptance", "hard invariants", "cross-boundary"),
+             ("non-writing",),
              ("counterevidence", "finding"), ("inadequate evidence", "unverified", "insufficient"),
              ("ready only", "evidence", "critical closure"),
              ("absence", "not verified acceptance"),
              ("bounded defect", "design unchanged", "fresh ordinary"),
              ("architecture", "contract", "invariant", "scope", "acceptance", "decision basis", "controller reopen"),
              ("finding", "affected surface", "needed validation"))
+    require_local_prohibition(reviewer, action="repair", target="candidate")
+    mutated = reviewer.replace("do not repair the candidate", "do repair the candidate", 1)
+    assert mutated != reviewer
+    with pytest.raises(AssertionError, match="local prohibition"):
+        require_local_prohibition(mutated, action="repair", target="candidate")
     assert not roles.repo_write_allowed("reviewer")
 
 

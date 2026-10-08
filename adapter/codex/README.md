@@ -3,7 +3,8 @@
 `thaliris_codex.roles` owns native role prompts and binding facts. Inherited global
 and project managed spans contain shared boundaries and retrieval pointers. Controller
 procedures come from the package's `controller_instructions.md`, explicitly retrieved
-before relevant operations with the installed pinned runner's `controller-instructions`.
+on demand with the installed pinned runner's `controller-instructions --section <name>`.
+The bare command returns the procedure index, without the full Controller manual.
 The [repository Controller document](../../docs/thaliris-controller.md) is rendered
 from that source, including registry bindings. Retrieval grants no authority; other
 roles may retrieve rules on demand within their existing authority.
@@ -16,19 +17,23 @@ and [routing protocol](../../docs/thaliris-routing-protocol.md).
 ## Handoff and role isolation
 
 Authorized parent native spawn carries the sole task-specific input. Core does not
-construct or inject a child projection. Fresh roles use fork_turns="none". Controller
+construct or inject a child projection. Fresh roles use V2 fork_turns="none" or
+V1 fork_context=false. Controller
 routes registered roles; only Implementer, Focused Implementer and Reviewer may delegate
 one nested Investigator doing Scanner work. Maximum managed depth is two; exact bound
 parent agent/role/session/turn is required. Missing/conflicting identity fails closed.
-Exact name-bound native Completed establishes execution completion independently of
+Exact identity-bound native Completed establishes execution completion independently of
 optional SubagentStop observations. Missing/delayed Stop cannot block proved completion;
 Stop, wake signals and child prose alone cannot prove it. The latest authorized
 handoff/identity relation and no pending/active descendants are required for close,
 including Controller-direct auxiliary handoffs. Unbound/conflicting identities and
 missing/malformed native evidence fail closed. Controller accepts result meaning and
 quality independently; native Completed never supplies semantic acceptance.
-The accepted Completed payload is exactly the one-key `{"completed": <string>}`
-variant. Null, non-string, extra-field and otherwise unsupported payload shapes remain
+V1 wait_agent status maps use the exact spawned agent ID; V2 list_agents status
+entries use canonical task names. Both establish execution evidence without
+requiring V2 or another completion check. The accepted Completed payload is exactly
+the one-key `{"completed": <string or null>}` variant. Null supplies no result text.
+Other value types, extra-field and otherwise unsupported payload shapes remain
 UNKNOWN. Contradictory native statuses block new managed handoffs and closure.
 An unbound spawn can be recovered only from exact
 trusted name-bound native failure or spawn-failure callback, not timeout/not_found.

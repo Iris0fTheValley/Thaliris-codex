@@ -74,9 +74,10 @@ This feature requires thaliris>=0.4.3. Development tests must install the Core c
 ## Runtime prompt layers
 
 Inherited global/project instructions carry shared authority/isolation boundaries
-and retrieval pointers. Controller explicitly reads [Controller instructions](docs/thaliris-controller.md)
-before startup/admission, routing, recovery, durable admission, closure or maintenance;
-the installed pinned runner's `controller-instructions` works before project admission.
+and retrieval pointers. Controller selects the relevant [Controller procedure](docs/thaliris-controller.md)
+for startup/admission, routing, recovery, durable admission, closure or maintenance.
+The installed pinned runner's `controller-instructions` returns an index before
+project admission; `controller-instructions --section <name>` retrieves one procedure.
 Native role prompts own current-role execution style, delegation and endpoints.
 Fresh selected handoffs keep unrelated Controller procedures out of child injection;
 rules remain retrievable on demand within authority. Each
@@ -92,12 +93,13 @@ Fresh ordinary Implementer handles remaining regression, build/sync, determinist
 installation and Git closure. Shared execution guidance does not extend the Focused endpoint.
 Reviewer is fresh independent and non-writing; READY requires evidence supporting critical
 acceptance, not absence of blockers. Core/lifecycle observations do not decide acceptance.
-Exact name-bound native Completed with authorized handoff/identity binding and no
+Exact identity-bound native Completed with authorized handoff/identity binding and no
 pending/active descendants proves execution closure. SubagentStop is optional;
 missing/delayed Stop cannot block proved completion. Unbound/conflicting identities
 or missing native terminal evidence fail closed. Controller semantic acceptance stays
-independent. Completed evidence must be the exact one-key `{"completed": <string>}`
-variant; null, non-string and unsupported shapes remain UNKNOWN. Conflicting native
+independent. V1 wait_agent status maps use exact spawned agent IDs; V2 list_agents
+uses canonical task names. Completed evidence is the one-key `{"completed": <string or null>}`
+variant; null supplies no result text. Other value types and unsupported shapes remain UNKNOWN. Conflicting native
 statuses block new managed handoffs and closure. Feature defaults/live Host installation remain unchanged; unverified
 compatibility stays UNKNOWN.
 

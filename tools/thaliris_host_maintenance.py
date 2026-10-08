@@ -41,8 +41,10 @@ def main() -> int:
         # the same source, not just similarly named installations.
         package = Path(json.loads(contents)["package_dir"])
         source = Path(__file__).resolve().parents[1] / "src" / "thaliris_codex"
-        reviewed = {p.relative_to(source): p.read_bytes() for p in source.rglob("*.py")}
-        installed = {p.relative_to(package): p.read_bytes() for p in package.rglob("*.py")}
+        reviewed = {p.relative_to(source): p.read_bytes() for p in source.rglob("*")
+                    if p.is_file() and p.suffix in {".py", ".md"}}
+        installed = {p.relative_to(package): p.read_bytes() for p in package.rglob("*")
+                     if p.is_file() and p.suffix in {".py", ".md"}}
         if reviewed != installed:
             raise ValueError("reviewed adapter source differs from selected executor")
         host_preflight.verify_runtime(executable, contents)

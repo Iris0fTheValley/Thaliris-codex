@@ -863,15 +863,16 @@ Isolation and readonly boundaries hold in every mode; damaged management grants 
 additional authority. Effective live Host maintenance needs separate human authority.
 
 Assigned children use current-role native instructions and their authorized parent's
-selected spawn handoff, fork_turns="none"; unselected material stays outside the
+selected spawn handoff, V2 fork_turns="none" or V1 fork_context=false; unselected material stays outside the
 Workstream. Methods and ordinary local repair belong to the assigned executor.
 Return decision-changing unknowns to Controller. Rules are retrievable on demand
 within authority; contextual selection is not secrecy.
 
-The owning Controller explicitly reads [Controller instructions](docs/thaliris-controller.md)
-before startup/admission, routing, recovery, durable admission, closure or maintenance.
-If absent or potentially stale, retrieve the installed pinned runner's
-`controller-instructions` first. Role responsibilities are in native profiles and
+The owning Controller selects the relevant procedure from [Controller instructions](docs/thaliris-controller.md)
+for startup/admission, routing, recovery, durable admission, closure or maintenance.
+The installed pinned runner's `controller-instructions` lists retrieval paths;
+`controller-instructions --section <name>` retrieves one procedure on demand.
+Role responsibilities are in native profiles and
 [role docs](docs/thaliris-role-packs.md); mechanical details are in
 [Codex protocol](adapter/codex/README.md).
 {MANAGED_END}
@@ -1361,10 +1362,11 @@ changes require an actual superior human decision. Isolation and readonly bounda
 hold in every mode. Live Host maintenance requires separate explicit authority;
 changed disk files do not prove native activation. Preserve unknown user-owned bytes.
 
-The owning Controller explicitly retrieves `{route} --root <repo> controller-instructions`
-before substantive file-changing Git work (unless the human opts out), admission,
-recovery, routing, durable admission, closure or Host maintenance, and follows the
-relevant procedures and project entry. Read-only/chat/non-Git work needs no startup.
+The owning Controller uses `{route} --root <repo> controller-instructions` for the
+procedure index and retrieves `controller-instructions --section <name>` for the
+next startup/admission, recovery, routing, durable admission, closure or Host
+maintenance operation. Follow the selected procedure and project entry.
+Read-only/chat/non-Git work needs no startup.
 Managed children follow their selected handoff and current-role native instructions;
 do not bootstrap, task-start or task-abandon the parent's ACTIVE task. Rules remain
 retrievable on demand within authority. Source synchronization never changes a live
@@ -1874,7 +1876,7 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
     task_id = str(state["task_id"])
     override = anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}
     if not lifecycle.qualifying_child_completed(core._repo_root(root), allow_no_children=override):
-        raise ValueError("task-close requires authorized handoff/identity bindings, exact name-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents to observe completion. SubagentStop is optional; Controller semantic acceptance remains independent")
+        raise ValueError("task-close requires authorized handoff/identity bindings, exact identity-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents (V2) or wait_agent status map (V1) to observe completion. SubagentStop is optional; Controller semantic acceptance remains independent")
     result = core.task_close(root, base_revision, expected_task_id=task_id)
     task_authority.checkpoint(core._repo_root(root))
     return result

@@ -7,6 +7,8 @@ import sys
 
 import pytest
 import thaliris
+from thaliris_codex import host_maintenance, runtime_identity, runtime_setup
+from tests.test_runtime_setup import source_wheel
 
 
 @pytest.mark.parametrize("defect", ["operation", "unknown-runtime"])
@@ -36,3 +38,58 @@ def test_independent_entry_fails_closed_without_importing_installed_runtime(tmp_
     output = json.loads(result.stdout)
     assert output["ok"] is False and output["changed"] is False
     assert {p.name: p.read_bytes() for p in home.iterdir()} == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real Windows independent preflight and console dispatch")
+def test_independent_entry_removes_explicitly_approved_broken_legacy_controls(tmp_path):
+    """Real subprocess and PowerShell, no installed runner or trust-test seam.
+
+    Narrow exact approval is test-operator intent, not permission to approve
+    drift in a production installation or proof of live Codex activation.
+    """
+    import shutil
+    import thaliris_codex
+    reviewed_core = tmp_path / "reviewed-core"
+    shutil.copytree(Path(thaliris.__file__).parent, reviewed_core / "src/thaliris")
+    core = source_wheel(tmp_path, "thaliris", Path(thaliris.__file__).parent)
+    adapter = source_wheel(tmp_path, "thaliris_codex", Path(thaliris_codex.__file__).parent, entry=True)
+    runtime = runtime_setup.create(tmp_path / "approved-runtime", core, adapter)
+    exe = Path(runtime["executable"])
+    contents = runtime_identity.manifest_bytes(exe)
+    home = tmp_path / "broken-disposable-host"
+    home.mkdir()
+    controls = {"thaliris-run.cmd": b"broken runner", "thaliris-hook.cmd": b"broken hook",
+                "thaliris-preflight.ps1": b"broken preflight"}
+    for name, data in controls.items():
+        (home / name).write_bytes(data)
+    (home / runtime_identity.MANIFEST_NAME).write_bytes(contents)
+    selection = {"executable": str(exe), "runtime_sha256": runtime["runtime_sha256"],
+                 "source_pin": "sha256:" + adapter.rsplit("=", 1)[1]}
+    contract = tmp_path / "explicit-recovery.json"
+    value = {"format": host_maintenance.FORMAT, "operation": "codex-uninstall",
+             "human_instruction": "Remove these exact reviewed broken controls in the disposable test Host.",
+             "codex_home": str(home), "executor": selection,
+             "installed_runtime_sha256": runtime["runtime_sha256"], "legacy_owned_bytes": {}}
+    tool = Path(__file__).resolve().parents[1] / "tools/thaliris_host_maintenance.py"
+    environment = runtime_identity.child_environment()
+    # Pollution and broken installed entrypoints cannot route the import.
+    environment.update(PYTHONPATH=str(home), THALIRIS_RUN_SCRIPT=str(home / "thaliris-run.cmd"))
+    command = [sys.executable, "-I", "-B", str(tool), "--core-source-root", str(reviewed_core),
+               "--maintenance-contract", str(contract)]
+    contract.write_text(json.dumps(value), encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in home.iterdir()}
+    rejected = subprocess.run(command, env=environment, capture_output=True, timeout=60)
+    assert rejected.returncode != 0
+    assert {p.name: p.read_bytes() for p in home.iterdir()} == before
+    value["legacy_owned_bytes"] = {name: host_maintenance.digest(data) for name, data in controls.items()}
+    contract.write_text(json.dumps(value), encoding="utf-8")
+    environment.pop("THALIRIS_RUN_SCRIPT")
+    recovered = subprocess.run(command, env=environment, capture_output=True, timeout=60)
+    assert recovered.returncode == 0, recovered.stdout or recovered.stderr
+    result = json.loads(recovered.stdout)
+    assert result["ok"] and result["status"] == "UNINSTALLED"
+    assert not result["project_files_touched"] and result["host_actor_assurance"] == "UNKNOWN"
+    assert all(not (home / name).exists() for name in controls)
+    assert not (home / runtime_identity.MANIFEST_NAME).exists()
+    assert result["runtime_audit_records"]
+    assert runtime_identity.manifest_bytes(exe) == contents

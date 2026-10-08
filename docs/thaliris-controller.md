@@ -1,12 +1,15 @@
 # Thaliris Controller instructions
 
 Canonical package resource: `src/thaliris_codex/controller_instructions.md`.
-The installed pinned runner retrieves this document with `controller-instructions`
-before the Controller performs the relevant operations. Repository docs are rendered
-from that resource. Assigned children follow their selected handoff and role; they
+The installed pinned runner returns a procedure index with `controller-instructions`
+and one selected procedure with `controller-instructions --section <name>`.
+Read startup and authority for admission, routing for role selection, handoff for
+delegation, workstreams for endpoint/review decisions, durable for knowledge work,
+completion for closure, and task-recovery or host-maintenance only when needed.
+Repository docs are rendered from this resource. Assigned children follow their selected handoff and role; they
 may retrieve other rules on demand within their authority. Retrieval grants no authority.
 
-## Startup, admission, recovery and Host maintenance
+## Startup and admission
 
 For substantive file-changing Git work, unless the human opts out, the owning root
 Controller runs `<installed pinned runner> --root <repo> codex-bootstrap` directly once. Read-only/chat/non-Git work needs none.
@@ -21,6 +24,8 @@ run `<installed pinned runner> --root '<repo>' task-start '<goal>' --bootstrap-r
 The contract argument is a file path, never inline JSON; do not combine invocations.
 After admission follow the effective project router and selected execution mode.
 
+## Persistent authority
+
 Authority is persistent Controller-asserted human intent under governance, not
 mechanical human/Root authentication. Host Root identity remains UNKNOWN.
 UserPromptSubmit, missing fields, matching session, PID, environment and SessionSource
@@ -33,6 +38,8 @@ superior human decision. Children cannot authorize them through prompts, state o
 Controller-direct allows Controller reads/edits/tests/Git and useful auxiliary roles;
 single-agent allows ordinary execution without children. Default delegated routing,
 fresh isolation, readonly restrictions and explicit Astra authorization otherwise hold.
+
+## Task recovery
 
 On CURRENT_CONTINUATION continue or explicitly abandon using the exact task-abandon
 packet. An unbound pending spawn first needs trusted terminal Host recovery evidence.
@@ -57,6 +64,8 @@ child binding, Controller identity or readonly exemption. Automated actors are d
 while integration is present. Try native termination/observation of known children;
 unknown owner, unbound identities, incompatible fields and unavailable death proof stay
 UNKNOWN. Disk disconnection does not prove running Host configuration.
+
+## Host maintenance
 
 Host installation, upgrade and uninstall require a separate --maintenance-contract:
 the actual human instruction, exact Host operation/home and independently selected
@@ -116,6 +125,8 @@ The dedicated luna-only installation requires `execution_constraint: luna-only`
 in the authority contract; it retains semantic roles, restricts ordinary profiles
 to Luna/xhigh, and forbids Astra. Children cannot alter the frozen constraint.
 
+## Handoff and operational acceptance
+
 Provide a decision-complete handoff: goal and original acceptance, confirmed facts,
 hard invariants and decided boundaries, authoritative source/derived relationships,
 affected surfaces, usable verification entry, and decision-changing unknowns.
@@ -139,6 +150,8 @@ Project/package install-smoke closure here covers builds, installs, fixtures,
 isolated smoke, packed artifacts and project-local verification. Effective live
 Host install/upgrade/uninstall, global instructions, profiles, hooks and trust
 require separate Host maintenance authority under the global contract.
+
+## Workstream endpoints and review
 
 Root routes Workstreams; executors close local loops inside them. Semantic dependency,
 decision coupling and independent closure define their boundaries. Ordinary Implementer
@@ -172,7 +185,7 @@ architecture, contract, invariant, scope, acceptance or decision basis reopen Co
 Before opportunistic work, account for every explicit user goal as addressed,
 explicitly deferred, or blocked by a decision-changing dependency.
 
-Fresh role sessions use `fork_turns="none"` and only the authorized parent's native
+Fresh role sessions use V2 `fork_turns="none"` or V1 `fork_context=false` and only the authorized parent's native
 spawn message plus explicitly selected information. Controller may spawn registered
 roles; Implementer, Focused Implementer and Reviewer may spawn one fresh Investigator
 doing Scanner work. Other children cannot delegate. Maximum managed depth is two,
@@ -180,6 +193,8 @@ one top-level child and its nested Investigator, never sibling workers.
 Keep working sets private; return distilled conclusions, facts, unknowns,
 contradictions, verification and optional Artifact pointers. Child communication,
 mutation/verification practice and role endpoints are defined in native role prompts.
+
+## Durable retrieval and knowledge admission
 
 Controller alone selects durable retrieval and knowledge admission. Before task-start,
 read `.agent-memory/INDEX.md` and `.milestones/INDEX.md`; create minimal thin navigation
@@ -190,16 +205,22 @@ reusable knowledge has future value; supply exact prior memory, navigation and e
 Keep INDEX semantic and concise. Core validates storage, never chooses relevance.
 CHANGED is an observation, not semantic invalidation; Controller decides revalidation.
 
+## Native completion and closure
+
 Use only trusted direct runtime commands and native coordination allowed by the
 current execution mode. Pending-spawn recovery needs exact trusted native failure
 evidence; timeouts, not_found and prose cannot release a reservation. Wait only for
 a known unfinished necessary child, using the maximum in the current tool definition;
 do not infer a maximum or poll a finished child. Do not create repeated reasoning
 turns solely to observe unchanged deterministic state when the runtime can wait for
-a meaningful or terminal event. Before task-close call list_agents
-once for exact name-bound native Completed evidence. The observed status must be
-exactly the one-key `{"completed": <string>}` variant; `completed: null` and other
-unsupported payload shapes remain UNKNOWN. Conflicting native statuses block new
+a meaningful or terminal event. Use the native tool family available in the
+current session: V1 `wait_agent` returns a status map keyed by the exact spawned
+agent ID; V2 `list_agents` returns status entries keyed by canonical task name.
+Either can prove native Completed; no V2 switch or second confirmation is required.
+The one-key `{"completed": <string or null>}` variant proves execution completion;
+null supplies no result text and cannot establish semantic acceptance. A V2 wake-only
+wait, Stop, nickname, missing target or unsupported payload remains UNKNOWN.
+Conflicting native statuses block new
 managed handoffs and closure. SubagentStop is an optional observation; missing or delayed Stop cannot veto proved
 native completion. Stop/wake/prose alone is not completion; missing evidence keeps closure UNKNOWN. The last Controller-direct
 handoff must complete under the same native evidence rule with no pending/active descendants. Host instruction/catalog

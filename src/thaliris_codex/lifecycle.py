@@ -50,6 +50,7 @@ _COLLABORATION_TOOL_NAMES = (
     "list_agents",
     "wait_agent",
     "interrupt_agent",
+    "close_agent",
 )
 _COLLABORATION_TOOL_PATTERN = "(?:" + "|".join(re.escape(name) for name in _COLLABORATION_TOOL_NAMES) + ")"
 # Keep legacy spellings observable for diagnostics, but do not confuse them
@@ -98,7 +99,7 @@ POST_TOOL_MATCHER = rf"^(?:{_COLLABORATION_TOOL_PATTERN}|(?:[A-Za-z0-9_]+\.)+{_C
 PRE_TOOL_MATCHER = "*"
 _DELEGATION_TOOL_NAMES = frozenset({"spawn_agent", "Agent", "followup_task", "send_input", "send_message"})
 _FRESH_CHILD_REUSE_TOOL_NAMES = frozenset({"followup_task", "send_input", "send_message"})
-_ROOT_MANAGED_TOOL_NAMES = frozenset({"spawn_agent", "wait_agent", "list_agents", "interrupt_agent"})
+_ROOT_MANAGED_TOOL_NAMES = frozenset({"spawn_agent", "wait_agent", "list_agents", "interrupt_agent", "close_agent"})
 _CONTROLLER_BOUNDARY_REASON = "THALIRIS_CONTROLLER_BOUNDARY: delegate investigation to a fresh Investigator session and edits to a fresh Implementer session; the Controller may run only bounded control-plane or acceptance checks."
 _OBVIOUS_WRITE = re.compile(
     r"(?i)(?:apply_patch|git\s+(?:apply|commit|reset|checkout|restore|rebase)|(?:set|add|clear|out|remove|move|copy|rename|new)-content|(?:set|add|remove|move|copy|rename|new)-item|\b(?:ni|mkdir)\b|(?<![<>])>{1,2}(?![&]))"
@@ -1571,7 +1572,7 @@ def _record_runtime_event(root: Path, payload: dict[str, Any], event: str, tool:
             tool_input = _delegation_input(payload)
             state.pop("pre_dispatch_rewrite", None)
             state["pre_dispatch_isolation"] = (
-                "EXPLICIT" if tool_input.get("fork_turns") == "none" else "NONCOMPLIANT"
+                "EXPLICIT" if _explicit_fresh_spawn(tool_input) else "NONCOMPLIANT"
             )
         if event == "PostToolUse":
             metrics = state.setdefault("orchestration_metrics", {})
@@ -1770,7 +1771,7 @@ def _load_lifecycle(path: Path, task_id: str) -> dict[str, Any]:
     pending = value.get("pending_authorized_spawn")
     if pending is not None and (
         not isinstance(pending, dict)
-        or set(pending) not in (
+        or (set(pending) - {"native_agent_id_hash"}) not in (
             {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"},
             {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash"},
         )
@@ -1783,6 +1784,8 @@ def _load_lifecycle(path: Path, task_id: str) -> dict[str, Any]:
         or pending.get("producer") != "controller"
         or not isinstance(pending.get("payload_hash"), str)
         or type(pending.get("created_at_ns")) is not int
+        or ("native_agent_id_hash" in pending and (not isinstance(pending["native_agent_id_hash"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", pending["native_agent_id_hash"]) is None))
         or ("spawn_turn_id_hash" in pending and pending["spawn_turn_id_hash"] is not None
             and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
         or not _valid_parent_metadata(pending)
@@ -1914,6 +1917,18 @@ def _native_spawn_agent_type(payload: dict[str, Any]) -> str | None:
     if not supplied or any(not isinstance(value, str) or value not in _native_agent_roles() for value in supplied):
         return None
     return supplied[0] if all(value == supplied[0] for value in supplied) else None
+
+
+def _explicit_fresh_spawn(tool_input: dict[str, Any]) -> bool:
+    """Native V1 uses fork_context=false, V2 uses fork_turns=none.
+
+    Omission alone cannot identify the native family: V2 defaults to all.
+    Contradictory flags never establish fresh isolation.
+    """
+    if "fork_turns" in tool_input:
+        return tool_input["fork_turns"] == "none" and (
+            "fork_context" not in tool_input or tool_input["fork_context"] is False)
+    return tool_input.get("fork_context") is False
 
 
 def _bound_managed_child(root: Path, payload: dict[str, Any]) -> bool:
@@ -2111,8 +2126,8 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
     if role is None:
         return _permission_deny("THALIRIS_MANAGED_AGENT_REQUIRED: managed tasks may spawn only a supported Thaliris agent profile.")
     tool_input = _delegation_input(payload)
-    if tool_input.get("fork_turns") != "none":
-        return _permission_deny('THALIRIS_ISOLATION_REQUIRED: use fork_turns="none".')
+    if not _explicit_fresh_spawn(tool_input):
+        return _permission_deny('THALIRIS_ISOLATION_REQUIRED: use fork_turns="none" (V2) or fork_context=false (V1).')
     nested = payload.get("agent_id") is not None or payload.get("agent_type") is not None
     overrides = {key: tool_input[key] for key in ("model", "reasoning_effort", "thinking", "model_reasoning_effort") if tool_input.get(key) is not None}
     if overrides:
@@ -2144,6 +2159,8 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exact bound depth-one Executor/Reviewer parent and Investigator target required.")
             if not nested and not roles.delegation_allowed("controller", role):
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: unsupported Controller target.")
+            if state.get("identity_collisions"):
+                return _permission_deny("THALIRIS_NATIVE_IDENTITY_COLLISION: conflicting native spawn identities block new role-session authorization.")
             active = any(
                 isinstance(child, dict)
                 and child.get("managed") is True
@@ -2311,6 +2328,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
             and pending.get("role") == role
             and pending.get("expected_agent_type") == native_agent_type
             and pending.get("session_id_hash") == session_id_hash
+            and pending.get("native_agent_id_hash", child_hash) == child_hash
             and _pending_parent_live(state, pending)
             and constrained_model_status in {None, "MATCH"}
         )
@@ -2428,7 +2446,8 @@ def _native_terminal_status(value: object) -> str | None:
     """Parse only the native status shapes supported by current evidence."""
     if isinstance(value, str) and value in {"pending_init", "running", "not_found", "interrupted", "shutdown"}:
         return value
-    if isinstance(value, dict) and set(value) == {"completed"} and isinstance(value["completed"], str):
+    if (isinstance(value, dict) and set(value) == {"completed"}
+            and (value["completed"] is None or isinstance(value["completed"], str))):
         return "completed"
     if isinstance(value, dict) and set(value) == {"errored"} and isinstance(value.get("errored"), str):
         return "errored"
@@ -2463,7 +2482,7 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
         child["native_status_conflict"] = True
         return True
     if prior == status and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
-        if source == "list_agents" and child.get("native_terminal_source") != source:
+        if source in {"list_agents", "wait_agent"} and child.get("native_terminal_source") not in {"list_agents", "wait_agent"}:
             child["native_terminal_source"] = source
             return True
         return False
@@ -2479,14 +2498,19 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
 def _record_pending_terminal(state: dict[str, Any], name: str, status: str, source: str) -> bool:
     """Retain only exact name-bound native failure for an unbound reservation."""
     pending = state.get("pending_authorized_spawn")
+    identity_hash = _identity_hash(name)
+    matches_task_name = isinstance(pending, dict) and pending.get("task_name_hash") == identity_hash
+    matches_native_id = isinstance(pending, dict) and pending.get("native_agent_id_hash") == identity_hash
     if (status not in {"interrupted", "errored", "shutdown"}
             or not isinstance(pending, dict)
-            or pending.get("task_name_hash") != _identity_hash(name)
+            or not (matches_task_name or matches_native_id)
             or not _pending_parent_live(state, pending)):
         return False
     state["pending_spawn_terminal_evidence"] = {
         "handoff_id": pending["handoff_id"], "status": status,
-        "source": source, "task_name_hash": pending["task_name_hash"],
+        "source": source,
+        "task_name_hash": pending.get("task_name_hash") if matches_task_name else None,
+        "native_agent_id_hash": pending.get("native_agent_id_hash") if matches_native_id else None,
         "observed_at_ns": time.time_ns(),
     }
     return True
@@ -2532,6 +2556,26 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     "source": "spawn_agent", "observed_at_ns": time.time_ns(),
                 }
                 changed = True
+            if (set(response) == {"agent_id", "nickname"} and isinstance(response["agent_id"], str)
+                    and response["agent_id"] and (response["nickname"] is None or isinstance(response["nickname"], str))):
+                agent_hash = _identity_hash(response["agent_id"])
+                if isinstance(pending, dict) and _spawn_parent_matches(root, pending, payload):
+                    if pending.get("native_agent_id_hash", agent_hash) != agent_hash:
+                        # Conflicting spawn results cannot rewrite the first identity.
+                        collisions = state.setdefault("identity_collisions", [])
+                        if len(collisions) < 16:
+                            collisions.append({"source": "spawn_agent", "agent_id_hash": agent_hash})
+                    else:
+                        pending["native_agent_id_hash"] = agent_hash
+                    changed = True
+                else:
+                    candidates = [child for child in state["children"] if isinstance(child, dict)
+                                  and child.get("managed") is True and child.get("task_name_hash") is None
+                                  and _spawn_parent_matches(root, child, payload)]
+                    latest = max(candidates, key=lambda child: child["started"], default=None)
+                    if latest is not None and latest.get("agent_id_hash") != agent_hash:
+                        latest["native_status_conflict"] = True
+                        changed = True
             task_name = response.get("task_name")
             if isinstance(task_name, str) and task_name:
                 name_hash = _identity_hash(task_name)
@@ -2551,9 +2595,9 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     if len(candidates) == 1:
                         candidates[0]["task_name_hash"] = name_hash
                         changed = True
-        elif tool == "interrupt_agent":
+        elif tool in {"interrupt_agent", "close_agent"}:
             tool_input = _delegation_input(payload)
-            target = tool_input.get("target")
+            target = tool_input.get("target" if tool == "interrupt_agent" else "id")
             status = _native_terminal_status(response.get("previous_status"))
             if isinstance(target, str) and status is not None:
                 child = _child_for_native_name(state["children"], target)
@@ -2561,11 +2605,33 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     observed = True
                     metrics = state.setdefault("metrics", {})
                     metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
-                    changed = _record_native_terminal(state, child, status, "interrupt_agent")
+                    changed = _record_native_terminal(state, child, status, tool)
                     if changed and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
                         metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
                 else:
-                    changed = _record_pending_terminal(state, target, status, "interrupt_agent") or changed
+                    changed = _record_pending_terminal(state, target, status, tool) or changed
+        elif tool == "wait_agent":
+            # Codex V1's status map is keyed by the spawned thread ID; V2's
+            # wake-only response does not carry this execution evidence.
+            # Never use nicknames or a V2 task path as V1 identity aliases.
+            targets = _delegation_input(payload).get("targets")
+            statuses = response.get("status")
+            if (set(response) == {"status", "timed_out"} and type(response["timed_out"]) is bool
+                    and isinstance(statuses, dict) and isinstance(targets, list)
+                    and all(isinstance(target, str) and target for target in targets)
+                    and set(statuses) <= set(targets)):
+                for agent_id, value in statuses.items():
+                    status = _native_terminal_status(value)
+                    matches = [child for child in state["children"]
+                               if isinstance(child, dict) and child.get("managed") is True
+                               and child.get("task_name_hash") is None
+                               and child.get("agent_id_hash") == _identity_hash(agent_id)]
+                    if status is None or len(matches) != 1:
+                        if status is not None and not matches:
+                            changed = _record_pending_terminal(state, agent_id, status, "wait_agent") or changed
+                        continue
+                    observed = True
+                    changed = _record_native_terminal(state, matches[0], status, "wait_agent") or changed
         elif tool == "list_agents":
             entries = response.get("agents")
             if isinstance(entries, list):
@@ -2677,7 +2743,7 @@ def qualifying_child_completed(root: Path, *, allow_no_children: bool = False) -
                   and child.get("parent_role") == "controller"),
                  key=lambda child: child["started"], default=None)
     return (latest is not None and latest.get("native_terminal_status") == "completed"
-            and latest.get("native_terminal_source") == "list_agents")
+            and latest.get("native_terminal_source") in {"list_agents", "wait_agent"})
 
 
 def _managed_child_active(root: Path) -> bool:
@@ -2987,8 +3053,11 @@ def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -
                 return False
             seen_root = True
             index += 2
-        elif token == "controller-instructions" and index == len(tokens) - 1:
-            return True
+        elif token == "controller-instructions":
+            from . import controller_instructions
+            tail = tokens[index + 1:]
+            return not tail or (len(tail) == 2 and tail[0] == "--section"
+                                and tail[1] in controller_instructions.SECTIONS)
         else:
             return False
     return False
@@ -3677,7 +3746,7 @@ def _delegation_input(payload: dict[str, Any]) -> dict[str, Any]:
         return value
     if isinstance(payload.get("tool_input"), dict):
         return payload["tool_input"]
-    return {key: payload[key] for key in ("message", "input", "text", "agent_type", "agentType", "role", "agent_role", "task_id", "child_id", "target", "task_name", "agent_id", "id", "fork_turns", "isolation_reason", "fork_turns_reason", "model", "reasoning_effort", "thinking", "model_reasoning_effort") if key in payload}
+    return {key: payload[key] for key in ("message", "input", "text", "agent_type", "agentType", "role", "agent_role", "task_id", "child_id", "target", "task_name", "agent_id", "id", "fork_turns", "fork_context", "isolation_reason", "fork_turns_reason", "model", "reasoning_effort", "thinking", "model_reasoning_effort") if key in payload}
 
 
 def _delegation_text(tool_input: dict[str, Any]) -> object:
@@ -3693,7 +3762,7 @@ def _isolation_classification(tool: str, tool_input: dict[str, Any], _role: str)
     if _tool_basename(tool) != "spawn_agent":
         return None
     fork = tool_input.get("fork_turns")
-    if fork == "none":
+    if _explicit_fresh_spawn(tool_input):
         return {"required": "YES", "fork_turns": "NONE", "status": "PASS"}
     if fork is None:
         return {"required": "YES", "fork_turns": "MISSING", "status": "FAIL"}
@@ -3750,13 +3819,13 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
         # Keep ordinary work available; withhold only dangerous control grants.
         target = _control_state_target(payload)
         if (operation in _CHILD_CONTEXT_MUTATIONS or _compound_invalid_state_mutation(payload)
-                or state_status == "ACTIVE" and normalized in _DELEGATION_TOOL_NAMES or normalized == "interrupt_agent"
+                or state_status == "ACTIVE" and normalized in _DELEGATION_TOOL_NAMES or normalized in {"interrupt_agent", "close_agent"}
                 or target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized))):
             return _permission_deny("THALIRIS_CONTROLLER_ACTOR_UNKNOWN: this Host cannot distinguish every Controller from delegated actors; managed control authority is unavailable.")
         if operation == "codex-bootstrap" and state_status == "ACTIVE":
             return _issue_bootstrap_observation(root, _task_id, payload, managed_hook_abi)
         if normalized == "spawn_agent" and _native_spawn_agent_type(payload) in _native_agent_roles():
-            if _delegation_input(payload).get("fork_turns") != "none":
+            if not _explicit_fresh_spawn(_delegation_input(payload)):
                 return _permission_deny("THALIRIS_ISOLATION_REQUIRED: named Thaliris work requires a fresh context even without managed admission.")
             # Ordinary degraded delegation: no reservation, owner, or managed
             # child binding is created from this ambiguous actor.
@@ -3817,8 +3886,8 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
                 if mode == "controller-direct" and _managed_spawn_role(payload) in {"implementer", "focused-implementer"}:
                     return _permission_deny("THALIRIS_CONTROLLER_DIRECT_TASK: implementation belongs to the Controller; only auxiliary roles apply.")
             tool_input = _delegation_input(payload)
-            if tool_input.get("fork_turns") != "none":
-                return _permission_deny(f"THALIRIS_ISOLATION_REQUIRED: spawn a fresh {_native_role_names()} session explicitly with fork_turns=\"none\".")
+            if not _explicit_fresh_spawn(tool_input):
+                return _permission_deny(f"THALIRIS_ISOLATION_REQUIRED: spawn a fresh {_native_role_names()} session explicitly with fork_turns=\"none\" (V2) or fork_context=false (V1).")
             return _reserve_managed_spawn(root, payload, _task_id)
         if anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}:
             if operation in {"task-start", "init", "rollback", "task-recover-state"}:

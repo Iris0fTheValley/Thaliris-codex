@@ -225,8 +225,19 @@ def _files(venv: Path) -> dict[str, str]:
         root_path = Path(root)
         dirs[:] = sorted(dirs)
         for name in dirs:
-            if _is_link(root_path / name):
-                raise ValueError("installed runtime contains a symlink")
+            path = root_path / name
+            if _is_link(path):
+                # CPython creates this relative, internal alias on 64-bit
+                # POSIX even with symlinks=False. Pin the link itself, while
+                # walking and hashing its real target exactly once via lib.
+                # No absolute target, alternate spelling or nested link gains
+                # admission from this platform-layout exception.
+                if (os.name != "nt" and root_path == venv and name == "lib64"
+                        and path.is_symlink() and os.readlink(path) == "lib"
+                        and (venv / "lib").is_dir() and not _is_link(venv / "lib")):
+                    result["lib64"] = hashlib.sha256(b"symlink:lib").hexdigest()
+                else:
+                    raise ValueError("installed runtime contains a symlink")
         for name in sorted(files):
             relative = (root_path / name).relative_to(venv).as_posix()
             path = _safe_file(root_path / name)

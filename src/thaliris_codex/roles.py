@@ -127,8 +127,10 @@ class RoleDefinition:
 _SHARED_INSTRUCTIONS = (
     "Your authorized parent's native spawn message is your sole task-specific input; "
     "use selected facts and source pointers, keeping unselected material outside this Workstream. "
-    "Preserve its decisions, hard invariants and acceptance. Return decision-changing unknowns "
-    "or unverified external dependencies in FINAL for Controller routing. Keep working sets and "
+    "Preserve its decisions, hard invariants and acceptance. "
+    "For fresh native delegation use fork_turns=\"none\" on V2 or fork_context=false on V1; "
+    "never inherit parent history. "
+    "Return decision-changing unknowns or unverified external dependencies in FINAL for Controller routing. Keep working sets and "
     "tool logs private; send no ordinary progress, heartbeat or partial-completion messages. "
     "Return Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, "
     "Verification performed and optional repo-relative Artifact refs. "
@@ -150,7 +152,7 @@ _EXECUTOR_INSTRUCTIONS = (
     "Host schemas, protocol, identity and serialization from source or real-shaped evidence. "
     "Project/package smoke does not authorize live Host maintenance. Keep durable admission "
     "and INDEX maintenance with Controller/selected Curator. You may delegate one independent, "
-    "genuinely uncovered discovery set to a fresh Investigator Scanner, fork_turns=\"none\", "
+    "genuinely uncovered discovery set to a fresh Investigator Scanner, fork_turns=\"none\" (V2) or fork_context=false (V1), "
     "without model/effort overrides. Wait only while its needed result is unfinished; use its "
     "FINAL without another wait or repeated discovery. "
 )
@@ -242,7 +244,7 @@ def _instructions(role: str) -> str:
             'history. Treat unrelated workspace anomalies as observations. Historical/generated '
             'ownership requires independent historical evidence, not current HEAD. Delegate '
             'independent broad discovery to one fresh Investigator doing Scanner work, '
-            'fork_turns="none", without model/effort overrides; retain independent semantic judgment '
+            'fork_turns="none" (V2) or fork_context=false (V1), without model/effort overrides; retain independent semantic judgment '
             'and wait only while its needed result is unfinished.'
         ),
         'verifier': (

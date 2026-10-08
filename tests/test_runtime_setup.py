@@ -20,7 +20,9 @@ def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False):
     path = tmp_path / f"{name}-0.4.3-py3-none-any.whl"
     info = f"{name}-0.4.3.dist-info"
     with zipfile.ZipFile(path, "w") as wheel:
-        for source in package.rglob("*.py"):
+        for source in sorted(package.rglob("*")):
+            if source.suffix not in {".py", ".md"} or not source.is_file():
+                continue
             relative = name + "/" + source.relative_to(package).as_posix()
             if legacy_cli and source.name == "cli.py":
                 wheel.writestr(relative, "import json,sys\ndef main():\n"

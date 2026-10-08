@@ -15,9 +15,15 @@ def test_controller_retrieval_is_readonly_before_admission_and_during_conflict(t
     result = json.loads(capsys.readouterr().out)
     assert result["ok"]
     text = result["content"]
-    for procedure in ("codex-bootstrap", "task-start", "task-recover-authority",
-                      "task-recover-state", "--maintenance-contract", ".agent-memory/INDEX.md"):
-        assert procedure in text
+    assert "--section startup" in text and "--section host-maintenance" in text
+    assert "task-recover-authority" not in text
+    for section in controller_instructions.SECTIONS:
+        assert cli.main(["--root", str(tmp_path), "controller-instructions", "--section", section]) == 0
+        selected = json.loads(capsys.readouterr().out)["content"]
+        assert selected == controller_instructions.render(
+            ("& " if __import__("sys").platform == "win32" else "") +
+            "'" + str(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME).replace("'", "''") + "'", section=section)
+        assert selected.count("\n## ") == 0
     assert "@RUNNER@" not in text and "@ROLE_ROWS@" not in text
     assert list(tmp_path.iterdir()) == before
 
@@ -36,6 +42,8 @@ def test_hook_retrieval_during_authority_conflict_grants_no_control_or_compound_
     payload = {"session_id": "unknown", "tool_name": "Bash", "tool_input": {
         "command": "thaliris controller-instructions",
     }}
+    assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload) == ""
+    payload["tool_input"]["command"] = "thaliris controller-instructions --section task-recovery"
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload) == ""
     assert lifecycle._controller_actor_assurance(payload) == "UNKNOWN"
     payload["tool_input"]["command"] = "thaliris controller-instructions --unexpected"

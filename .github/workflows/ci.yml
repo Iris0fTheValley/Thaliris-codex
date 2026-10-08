@@ -2,7 +2,9 @@ name: CI
 on: [push, pull_request]
 jobs:
   test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ['3.11', '3.12', '3.13']
@@ -18,6 +20,27 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install './shared-core[test]'
       - run: python -m pip install --no-deps -e '.[test]'
-      - run: pytest
+      - name: Runtime layout, identity and platform launchers
+        run: python -m pytest tests/test_runtime_setup.py tests/test_runtime_identity.py tests/test_platform_launcher_parity.py tests/test_independent_host_maintenance.py --junitxml=results/platform.xml
         env:
           THALIRIS_CORE_SOURCE: ${{ github.workspace }}/shared-core
+      - name: Generated instruction consistency
+        if: ${{ !cancelled() }}
+        run: python -m pytest --ignore=tests/test_runtime_setup.py --ignore=tests/test_runtime_identity.py --ignore=tests/test_platform_launcher_parity.py --ignore=tests/test_independent_host_maintenance.py -k 'generated' --junitxml=results/generated.xml
+        env:
+          THALIRIS_CORE_SOURCE: ${{ github.workspace }}/shared-core
+      - name: Instruction concepts and exact historical ownership
+        if: ${{ !cancelled() }}
+        run: python -m pytest tests/test_prompt_contract.py -k 'not generated' --junitxml=results/instructions.xml
+        env:
+          THALIRIS_CORE_SOURCE: ${{ github.workspace }}/shared-core
+      - name: Behavioral regression
+        if: ${{ !cancelled() }}
+        run: python -m pytest --ignore=tests/test_runtime_setup.py --ignore=tests/test_runtime_identity.py --ignore=tests/test_platform_launcher_parity.py --ignore=tests/test_independent_host_maintenance.py --ignore=tests/test_prompt_contract.py -k 'not generated' --junitxml=results/behavior.xml
+        env:
+          THALIRIS_CORE_SOURCE: ${{ github.workspace }}/shared-core
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: test-results-${{ matrix.os }}-python-${{ matrix.python }}
+          path: results/*.xml
