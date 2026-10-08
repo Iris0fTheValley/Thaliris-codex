@@ -36,6 +36,7 @@ setup 在创建候选目录前，通过 OS handle 解析自动发现的 Host Loc
 报告应选择的物理路径，并且只清理由本次尝试创建的空 leaf；预先存在或非空目录保持原样。
 位置 anchor 与 Windows launcher 内嵌的 interpreter 必须绑定同一目录。setup 使用普通最终路径 `thaliris.exe runtime-check`，禁用 bytecode
 写入并验证实际 interpreter；维护选择在生成 contract 前重复该无副作用检查。
+setup 与安装切换前还会运行独立 PowerShell 预检。正常入口失效时的明确授权维护路径见 [启动器预检恢复](docs/host-preflight-recovery.md)。
 准备、contract 和最终 Host 安装使用同一目录。禁止复制、移动或重命名已安装 venv；
 旧 interpreter 仍存在时，重算 manifest 也不能批准 relocation。通过重定向检查后出现失败时
 保留候选，并在正确最终目录直接重新创建。

@@ -11,7 +11,12 @@ import base64
 import hashlib
 import gzip
 import io
+import os
+from pathlib import Path
+import subprocess
 import zlib
+
+from .runtime_identity import WINDOWS_LAUNCHER_BINDING
 
 NAME = "thaliris-preflight.ps1"
 
@@ -128,10 +133,10 @@ function AssertRuntime($bytes,$exe,$identity) {
     if (($keys -join ',') -cne 'executable,format,interpreter,venv_dir' -or $anchor.format -cne 'thaliris-runtime-location-v1' -or $anchor.venv_dir -ine $venv -or $anchor.executable -ine $exe -or $anchor.interpreter -ine $interpreter) { throw 'runtime location changed: installed venv may not be relocated' }
   }
   if ([IO.Path]::GetExtension($exe) -ieq '.exe') {
-    # pip/distlib appends one UTF-8 interpreter line immediately before its ZIP.
+    # Use the same short/long distlib ABI as Python installation admission.
     # Successful dispatch via a surviving old interpreter is still relocation.
     $data=[Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($exe))
-    $bindings=[regex]::Matches($data,'#!(?:"([^"\r\n]+)"|([^"\r\n]+))\r?\nPK\x03\x04')
+    $bindings=[regex]::Matches($data,'__WINDOWS_LAUNCHER_BINDING__PK\x03\x04')
     if ($bindings.Count -ne 1) { throw 'Windows console launcher interpreter binding unavailable' }
     $bound=$bindings[0].Groups[1].Value;if (-not $bound) { $bound=$bindings[0].Groups[2].Value }
     $interpreter=Join-Path ([IO.Path]::GetDirectoryName($exe)) 'python.exe'
@@ -194,7 +199,7 @@ function Replay($hostHome,$journal,$raw) {
   if ($decision.hookSpecificOutput.hookEventName -cne 'PreToolUse' -or $decision.hookSpecificOutput.permissionDecision -cnotin @('allow','deny')) { throw 'invalid replay decision' }
   $output|Write-Output
 }
-''')
+''').replace('__WINDOWS_LAUNCHER_BINDING__', WINDOWS_LAUNCHER_BINDING)
 
 
 def script_bytes() -> bytes:
@@ -227,6 +232,33 @@ try {
   exit 1
 }
 ''').encode("utf-8")
+
+
+def verify_runtime(executable: Path, contents: bytes) -> None:
+    """Exercise the actual platform guard before admitting a new generation.
+
+    This independent PowerShell entry imports no installed Python and needs no
+    working Host hook, runner, or project task. Inputs are data, never code.
+    """
+    if os.name != "nt":
+        return
+    from .runtime_identity import child_environment, manifest_identity
+    environment = child_environment()
+    environment.update(THALIRIS_PROBE_MANIFEST=base64.b64encode(contents).decode("ascii"),
+                       THALIRIS_PROBE_EXE=str(executable),
+                       THALIRIS_PROBE_IDENTITY=manifest_identity(contents))
+    source = _platform_source() + r'''
+try {
+  AssertRuntime ([Convert]::FromBase64String($env:THALIRIS_PROBE_MANIFEST)) $env:THALIRIS_PROBE_EXE $env:THALIRIS_PROBE_IDENTITY
+  exit 0
+} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+'''
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                             packed_literal_without_variables(source)],
+                            env=environment, capture_output=True, timeout=30, check=False)
+    if result.returncode:
+        raise ValueError("independent platform runtime preflight failed: "
+                         + result.stderr.decode("utf-8", errors="replace").strip())
 
 
 def recovery_source() -> str:

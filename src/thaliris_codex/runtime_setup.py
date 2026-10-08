@@ -274,6 +274,8 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
         if runtime_identity.manifest_bytes(executable) != contents:
             raise ValueError("new runtime changed during verification")
         smoke = runtime_identity.console_smoke(executable, contents)
+        from .host_preflight import verify_runtime
+        verify_runtime(executable, contents)
         return {"ok": True, "executable": str(executable),
                 "runtime_sha256": runtime_identity.manifest_identity(contents),
                 "runtime_dir": str(target), "console_smoke": smoke,

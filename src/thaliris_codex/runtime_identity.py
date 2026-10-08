@@ -20,6 +20,10 @@ MANIFEST_FORMAT = "thaliris-installed-runtime-v1"
 LOCATION_NAME = "thaliris-runtime-location.json"
 LOCATION_FORMAT = "thaliris-runtime-location-v1"
 
+# One ABI definition for Python admission and the generated independent
+# PowerShell preflight/replay verifier. CR/LF never belongs to the binding.
+WINDOWS_LAUNCHER_BINDING = r'#!(?:"([^"\r\n]+)"|([^"\r\n]+))\r?\n(?:\r?\n)?'
+
 
 def physical_directory(path: Path) -> Path:
     """Observe the final OS directory, including packaged Windows redirection."""
@@ -107,7 +111,7 @@ def _assert_launcher_binding(launcher: Path) -> None:
         # same exact absolute binding, so accept either terminator. The path
         # itself still may not contain CR or LF, and the equality checks below
         # remain the actual invariant.
-        match = re.fullmatch(rb'#!(?:"([^"\r\n]+)"|([^"\r\n]+))\r?\n(?:\r?\n)?', data[start:offset]) if start >= 0 else None
+        match = re.fullmatch(WINDOWS_LAUNCHER_BINDING.encode("ascii"), data[start:offset]) if start >= 0 else None
         if match is None:
             raise ValueError("Windows console launcher interpreter binding is unavailable")
         bound = Path((match[1] or match[2]).decode("utf-8"))

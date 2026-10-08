@@ -33,6 +33,22 @@ def snapshot(home):
     return {p.relative_to(home).as_posix(): p.read_bytes() for p in home.rglob("*") if p.is_file()} if home.exists() else {}
 
 
+def test_candidate_platform_failure_preserves_previous_generation(tmp_path, monkeypatch, installed):
+    from thaliris_codex import host_preflight
+    home, exe = installed
+    before = snapshot(home)
+    path = intent(tmp_path, home, exe)
+
+    def reject(*_args):
+        raise ValueError("independent platform runtime preflight failed: incompatible launcher")
+
+    monkeypatch.setattr(host_preflight, "verify_runtime", reject)
+    result = adapter.codex_install(maintenance_contract=path)
+    assert result["ok"] is False and result["changed"] is False
+    assert "platform runtime preflight failed" in result["manual_action_required"][0]
+    assert snapshot(home) == before
+
+
 @pytest.fixture
 def installed(tmp_path, monkeypatch, pinned_test_thaliris):
     home = tmp_path / "home"

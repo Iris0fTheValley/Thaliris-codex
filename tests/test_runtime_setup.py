@@ -231,6 +231,7 @@ def test_redirected_empty_cleanup_allows_same_path_retry(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_identity, "manifest_bytes", lambda _executable: b"manifest")
     monkeypatch.setattr(runtime_identity, "manifest_identity", lambda _contents: "digest")
     monkeypatch.setattr(runtime_identity, "console_smoke", lambda *_args: {"ok": True})
+    monkeypatch.setattr(host_preflight, "verify_runtime", lambda *_args: None)
 
     result = runtime_setup.create(target, core, adapter)
     assert result["ok"]

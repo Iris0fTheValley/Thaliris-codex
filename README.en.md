@@ -202,4 +202,8 @@ See [DESIGN.md](DESIGN.md) and
 
 ## README maintenance
 
+Setup and installation also exercise the independent PowerShell runtime guard
+before switching the Host generation. For explicitly authorized maintenance when
+the ordinary entrypoints fail, see [launcher preflight recovery](docs/host-preflight-recovery.md).
+
 The [Thaliris Core Chinese README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) and [English README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.en.md) are canonical for shared explanations and full ABCD results. Keep Codex-specific features, dependencies, and limits here; update both Core language variants for shared changes and keep this repository's English and Chinese READMEs aligned.

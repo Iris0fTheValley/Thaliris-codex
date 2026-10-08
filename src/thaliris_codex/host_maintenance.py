@@ -281,6 +281,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         runtime = runtime_identity.manifest_bytes(candidate)
         if runtime != approved:
             raise ValueError("candidate runtime changed during preflight")
+        host_preflight.verify_runtime(candidate, runtime)
         # Render from the approved candidate itself, not an older executor's
         # sources. The selected executor must identify that same approved package.
         executor, executor_bytes = selected_runtime(intent["executor"])
