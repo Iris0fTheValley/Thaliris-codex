@@ -160,15 +160,26 @@ def test_cumulative_usage_deduplicates_token_count_and_keeps_reasoning_as_output
 
 
 
-@pytest.mark.parametrize(("event_thread_id", "expected_status"), [(None, "observed"), ("foreign-id", "unknown")])
-def test_token_count_identity_uses_session_file_when_event_id_is_omitted(
-    tmp_path: Path, event_thread_id: str | None, expected_status: str,
+@pytest.mark.parametrize(
+    ("event_thread_id", "include_event_thread_id", "expected_status", "expected_verified"),
+    [
+        (None, False, "observed", True),
+        ("root-id", True, "observed", True),
+        ("foreign-id", True, "unknown", False),
+    ],
+)
+def test_token_count_identity_uses_file_anchor_only_when_event_id_is_omitted(
+    tmp_path: Path,
+    event_thread_id: str | None,
+    include_event_thread_id: bool,
+    expected_status: str,
+    expected_verified: bool,
 ) -> None:
     event_payload = {
         "type": "token_count",
         "info": {"total_token_usage": counters(100, 70, 20, 5)},
     }
-    if event_thread_id is not None:
+    if include_event_thread_id:
         event_payload["thread_id"] = event_thread_id
     root = write_log(tmp_path / "root.jsonl", [
         session_meta("root-id", START),
@@ -179,13 +190,63 @@ def test_token_count_identity_uses_session_file_when_event_id_is_omitted(
     report = usage_for(make_parsed_file(root, None, None))
 
     assert report["status"] == expected_status
-    if event_thread_id is None:
-        assert report["thread_identity_verified"] is True
+    assert report["thread_identity_verified"] is expected_verified
+    if expected_status == "observed":
         assert report["event_total_snapshots"]["status"] == "observed"
         assert report["metrics"]["total_tokens"] == 120
     else:
-        assert report["thread_identity_verified"] is False
         assert "usage_thread_identity_mismatch" in report["reasons"]
+        assert report["metrics"] is None
+        assert report["window_increment"]["metrics"] is None
+
+
+@pytest.mark.parametrize("event_thread_id", [None, 7, True, [], {}, ""])
+def test_token_count_explicit_malformed_identity_is_unverified_and_withholds_metrics(
+    tmp_path: Path, event_thread_id,
+) -> None:
+    root = write_log(tmp_path / "root.jsonl", [
+        session_meta("root-id", START),
+        usage("root-id", counters(100, 70, 20, 5), 2, "2026-10-08T10:01:00.000Z"),
+        record(3, "2026-10-08T10:01:00.001Z", "event_msg", {
+            "type": "token_count",
+            "thread_id": event_thread_id,
+            "info": {"total_token_usage": counters(100, 70, 20, 5)},
+        }),
+    ])
+
+    report = usage_for(make_parsed_file(root, None, None))
+
+    assert report["status"] == "unknown"
+    assert report["thread_identity_verified"] is False
+    assert "usage_thread_identity_mismatch" in report["reasons"]
+    assert report["metrics"] is None
+    assert report["window_increment"]["status"] == "unknown"
+    assert report["window_increment"]["metrics"] is None
+
+
+@pytest.mark.parametrize("record_thread_id", ["missing", None, 7, True, [], {}, ""])
+def test_token_usage_record_requires_a_matching_string_identity_and_withholds_metrics(
+    tmp_path: Path, record_thread_id,
+) -> None:
+    payload = {
+        "turn_id": "turn-2",
+        "thread_token_usage": counters(100, 70, 20, 5),
+    }
+    if record_thread_id != "missing":
+        payload["thread_id"] = record_thread_id
+    root = write_log(tmp_path / "root.jsonl", [
+        session_meta("root-id", START),
+        record(2, "2026-10-08T10:01:00.000Z", "token_usage_record", payload),
+    ])
+
+    report = usage_for(make_parsed_file(root, None, None))
+
+    assert report["status"] == "unknown"
+    assert report["thread_identity_verified"] is False
+    assert "usage_thread_identity_mismatch" in report["reasons"]
+    assert report["metrics"] is None
+    assert report["window_increment"]["status"] == "unknown"
+    assert report["window_increment"]["metrics"] is None
 
 def test_explicit_window_increment_uses_pre_window_baseline_and_excludes_cutoff_records(tmp_path: Path) -> None:
     root = write_log(tmp_path / "root.jsonl", [

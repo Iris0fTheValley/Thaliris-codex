@@ -459,8 +459,7 @@ def usage_for(
         if (ordinal := native_ordinal(record.get("ordinal"))) is not None
         and (end is None or (stamp := parse_datetime(record.get("timestamp"))) is None or stamp < end)
     )
-    record_thread_ids: set[str] = set()
-    event_thread_ids: set[str] = set()
+    thread_identity_verified = True
     turn_ids: set[str] = set()
     for record in session.records:
         stamp = parse_datetime(record.get("timestamp"))
@@ -470,6 +469,7 @@ def usage_for(
         kind = record.get("type")
         payload = record.get("payload")
         if kind == "token_usage_record" and not isinstance(payload, dict):
+            thread_identity_verified = False
             issue = "usage_payload_missing"
             if stamp is None:
                 issue = "snapshot_timestamp_unavailable"
@@ -483,11 +483,10 @@ def usage_for(
             continue
         if kind == "token_usage_record":
             thread_id = payload.get("thread_id")
-            if isinstance(thread_id, str):
-                record_thread_ids.add(thread_id)
             counters, issue = parse_counter_map(payload.get("thread_token_usage"))
             if not isinstance(thread_id, str) or thread_id != session.thread_id:
                 issue = "usage_thread_identity_mismatch"
+                thread_identity_verified = False
             if stamp is None:
                 issue = "snapshot_timestamp_unavailable"
             elif session.created_at is not None and stamp < session.created_at:
@@ -497,8 +496,6 @@ def usage_for(
             usage_chronology.append((stamp, ordinal))
         elif kind == "event_msg" and payload.get("type") == "token_count":
             thread_id = payload.get("thread_id")
-            if isinstance(thread_id, str):
-                event_thread_ids.add(thread_id)
             info = payload.get("info")
             counters, issue = parse_counter_map(info.get("total_token_usage") if isinstance(info, dict) else None)
             # Native token_count events can omit thread_id because they are
@@ -506,6 +503,7 @@ def usage_for(
             # an explicit identity only when it conflicts with that anchor.
             if "thread_id" in payload and (not isinstance(thread_id, str) or thread_id != session.thread_id):
                 issue = "usage_thread_identity_mismatch"
+                thread_identity_verified = False
             if stamp is None:
                 issue = "snapshot_timestamp_unavailable"
             elif session.created_at is not None and stamp < session.created_at:
@@ -691,7 +689,7 @@ def usage_for(
         "token_usage_record_snapshots": record_summary,
         "event_total_snapshots": event_summary,
         "unique_turn_count": len(turn_ids),
-        "thread_identity_verified": (not record_thread_ids or record_thread_ids == {session.thread_id}) and (not event_thread_ids or event_thread_ids == {session.thread_id}),
+        "thread_identity_verified": thread_identity_verified,
     }
 
 
