@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 import thaliris
@@ -20,8 +22,8 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="real Windows native pre
 
 
 # The disposable wheel retains the real console launcher and all admission
-# checks. Only its replay CLI entry emits bounded source locations to stderr;
-# no payload, contract, environment value or exception message is recorded.
+# checks. Only its replay CLI entry emits bounded source locations and JSON
+# transport metadata to stderr; no input content or exception message is recorded.
 # This reaches failures that the production fail-closed response intentionally
 # collapses to THALIRIS_HOST_MAINTENANCE_REPLAY_DENIED.
 REPLAY_TRACE_ENTRY = '''
@@ -43,6 +45,14 @@ def main():
                         "line": frame.f_lineno, "event": event}
                 if event == "exception":
                     item["exception"] = arg[0].__name__
+                    if module == "thaliris_codex.cli" and isinstance(arg[1], json.JSONDecodeError):
+                        error = arg[1]
+                        item["input_char_count"] = len(error.doc)
+                        item["json_error_position"] = error.pos
+                        item["input_prefix_kind"] = ("empty" if not error.doc else
+                            "bom" if error.doc.startswith(chr(0xfeff)) else
+                            "object" if error.doc.lstrip().startswith("{") else
+                            "array" if error.doc.lstrip().startswith("[") else "other")
                 elif arg is False or arg is None:
                     item["result"] = str(arg)
                 else:
@@ -248,10 +258,35 @@ def test_native_replay_diagnostic_identifies_swallowed_guard_without_recording_i
         assert any(item["function"] == "_trusted_host_maintenance_route" and
                    item["event"] == "return" and item["result"] == "False" for item in events)
     assert len(events) <= 64
-    assert all(set(item) <= {"module", "function", "line", "event", "exception", "result"} for item in events)
+    assert all(set(item) <= {"module", "function", "line", "event", "exception", "result",
+                            "input_char_count", "json_error_position", "input_prefix_kind"} for item in events)
     assert str(home) not in result["nativeReplayDiagnostic"]
     assert payload["session_id"] not in result["nativeReplayDiagnostic"]
     assert snapshot(home) == before
+
+
+@pytest.mark.parametrize("raw,prefix", [(b"", "empty"),
+    (b"private-input-canary", "other"), (b"\xef\xbb\xbf{}", "bom")])
+def test_replay_diagnostic_distinguishes_invalid_stdin_without_recording_content(tmp_path, monkeypatch, capsys, raw, prefix):
+    from thaliris_codex import cli
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(sys, "argv", ["thaliris", "--root", str(tmp_path), "audit-hook", "PreToolUse",
+                                    "--maintenance-replay-contract", str(tmp_path / "contract.json")])
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8"))
+    entry = {"main": cli.main}
+    exec(REPLAY_TRACE_ENTRY, entry)
+    assert entry["main"]() == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    events = json.loads(output.err)["native_replay_trace"]
+    errors = [item for item in events if item.get("exception") == "JSONDecodeError"]
+    assert len(errors) == 1
+    assert errors[0]["input_char_count"] == len(raw.decode("utf-8"))
+    assert errors[0]["json_error_position"] == 0
+    assert errors[0]["input_prefix_kind"] == prefix
+    assert "private-input-canary" not in output.err
+    assert str(tmp_path) not in output.err
 
 
 @pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
