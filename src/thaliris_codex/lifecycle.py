@@ -18,7 +18,7 @@ from typing import Any
 
 from thaliris import core
 
-from . import roles, runtime_identity, host_preflight, task_authority
+from . import roles, runtime_identity, host_preflight, task_authority, diagnostics
 
 HOOK_COMMAND_PREFIX = "thaliris audit-hook"
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop")
@@ -986,6 +986,7 @@ def maintenance_replay_check(root: Path, payload: object, filename: str) -> str:
         return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
             "additionalContext": "Exact original Host maintenance replay checked; Host Root identity remains UNKNOWN."}}, separators=(",", ":"))
     except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        diagnostics.failure("dispatch")
         return _permission_deny("THALIRIS_HOST_MAINTENANCE_REPLAY_DENIED")
 
 

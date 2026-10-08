@@ -10,10 +10,15 @@ import json
 import subprocess
 import tomllib
 import re
+import ast
+import sys
+import types
+import shlex
 
 import pytest
 
-from thaliris_codex import codex_adapter as adapter, controller_instructions, roles
+from thaliris_codex import codex_adapter as adapter, codex_bootstrap, controller_instructions, roles
+from tests.support.history import historical_blob
 
 
 def normalized(text):
@@ -64,13 +69,22 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
     global_text = adapter._global_agents_block().decode()
     project = adapter.render_managed()
     controller = controller_instructions.render()
+    resident = codex_bootstrap.controller_guidance()
     concepts(global_text, ("installed pinned runner", "controller-instructions"),
              ("human decision", "isolation", "readonly boundaries"),
              ("unknown user-owned bytes", "native activation"))
-    for controller_detail in ("codex-bootstrap", "task_start_receipt", "authority-contract",
-                              "task-recover-state", "task-recover-authority", "offline_recovery.py"):
+    for controller_detail in ("task_start_receipt", "authority-contract", "task-recover-state", "task-recover-authority", "offline_recovery.py"):
         assert controller_detail not in normalized(global_text)
         assert controller_detail in normalized(controller)
+    for name in controller_instructions.RESIDENT_SECTIONS:
+        # Necessary normal bootstrap returns the canonical guidance; no extra get
+        # or full Controller injection into each fresh native child is required.
+        section = controller_instructions.render(section=name)
+        if name == "startup":
+            concepts(resident, ("codex-bootstrap", "task_start_receipt", "authority-contract"))
+        else:
+            assert section.strip() in resident
+            assert section.strip() not in global_text
     # Role microstyle and endpoint are not a second global runtime authority.
     for omitted in ("smallest relevant tests", "focused-test pass", "reviewer reopen"):
         assert omitted not in normalized(global_text)
@@ -191,9 +205,12 @@ def test_generated_sources_equal_derived_outputs():
     assert Path("AGENTS.md").read_text(encoding="utf-8") == adapter.render_managed()
     assert Path("docs/thaliris-controller.md").read_text(encoding="utf-8") == controller_instructions.render()
     assert Path("docs/thaliris-role-packs.md").read_text(encoding="utf-8") == adapter.render_role_packs()
+    # Ignored project profiles are user/local state, not authoritative derived
+    # artifacts. Admission still rejects shadows; tests never overwrite them.
+    tracked = set(subprocess.check_output(["git", "ls-files", "--", ".codex/agents"], text=True).splitlines())
     for name, (model, effort, role) in roles.agent_profiles().items():
         path = Path(".codex/agents") / name
-        if path.is_file():
+        if path.as_posix() in tracked:
             assert path.read_bytes() == adapter._agent_profile(name[:-5], role, model, effort)
         parsed = tomllib.loads(adapter._agent_profile(name[:-5], role, model, effort).decode())
         assert parsed["developer_instructions"] == roles.profile_instructions(role, name[:-5])
@@ -212,6 +229,7 @@ def test_precision_and_operational_acceptance_are_controller_owned():
              ("effective live", "global instructions", "profiles", "hooks", "trust", "separate"))
     assert normalized(controller).count("stable narrative base language") == 1
     assert "stable narrative base language" not in adapter._global_agents_block().decode()
+    assert "stable narrative base language" in codex_bootstrap.controller_guidance()
     assert "stable narrative base language" not in adapter.render_managed()
     for role in roles.native_role_definitions():
         assert "stable narrative base language" not in role.instructions
@@ -258,6 +276,66 @@ def test_pre_normalization_generated_ownership_is_exact_and_filename_bound():
     assert hashlib.sha256(registry).hexdigest() == provenance["role_registry_sha256"]
     assert adapter._role_registry_state(registry) == "legacy"
     assert adapter._role_registry_state(registry + b"edit") == "user"
+
+
+def test_orchestration_predecessor_is_independently_rendered_and_filename_bound():
+    base = Path(__file__).parent / "fixtures/orchestration-before"
+    proof = json.loads((base / "provenance.json").read_text(encoding="utf-8"))
+    revision = "3d2d3026c9a81790219040f926baa2f975f8bce1"
+    assert proof["revision"] == revision
+    module = types.ModuleType("orchestration_immutable_roles")
+    sys.modules[module.__name__] = module
+    source = historical_blob(revision + ":src/thaliris_codex/roles.py")
+    exec(compile(source, "immutable_roles.py", "exec"), module.__dict__)
+    tree = ast.parse(historical_blob(revision + ":src/thaliris_codex/codex_adapter.py"))
+    namespace = {"roles": module, "json": json}
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_agent_profile"]
+    exec(compile(ast.Module(functions, type_ignores=[]), "immutable_adapter.py", "exec"), namespace)
+    for constraint in (None, "luna-only"):
+        label = constraint or "default"
+        for name, (model, effort, role) in module.agent_profiles(constraint).items():
+            raw = (base / label / name).read_bytes()
+            assert raw == namespace["_agent_profile"](name[:-5], role, model, effort)
+            assert hashlib.sha256(raw).hexdigest() == proof["profiles"][label][name]
+            assert adapter._agent_profile_state(raw, name, constraint) in {"current", "legacy"}
+            assert adapter._agent_profile_state(raw + b"\n# private edit", name, constraint) == "user"
+            wrong = next(item for item in module.agent_profiles(constraint) if item != name)
+            assert adapter._agent_profile_state(raw, wrong, constraint) == "user"
+    managed = (base / "managed.md").read_bytes()
+    assert managed == historical_blob(revision + ":AGENTS.md")
+    assert adapter._managed_agents_state(managed.decode()) == "legacy"
+    assert adapter._managed_agents_state(managed.decode().replace("<!-- thaliris:end -->", "edit\n<!-- thaliris:end -->")) == "user"
+    packs = (base / "role-packs.md").read_bytes()
+    assert packs == historical_blob(revision + ":docs/thaliris-role-packs.md")
+    assert adapter._role_pack_state(packs) == "legacy"
+    assert adapter._role_pack_state(packs + b"edit") == "user"
+
+
+def test_resident_waiting_observation_and_causal_contract_rejects_negation_reversal():
+    value = controller_instructions.render()
+    for text in (value, prompt("implementer"), prompt("focused-implementer")):
+        concepts(text, ("observation", "tests", "processes", "ci", "controller", "result"),
+                 ("substantive changes", "terminal evidence"),
+                 ("tool maximum", "capacity", "higher-level duration limits", "precedence"),
+                 ("original failure", "local reproduction", "root cause"))
+        require_local_prohibition(text, action="recommend", target="duration")
+        mutant = re.sub(r"\bnot a recommended duration\b", "a recommended duration", text)
+        with pytest.raises(AssertionError, match="local prohibition"):
+            require_local_prohibition(mutant, action="recommend", target="duration")
+    require_local_prohibition(value, action="bypass", target="hooks")
+    require_local_prohibition(value, action="poll", target="child")
+    with pytest.raises(AssertionError, match="local prohibition"):
+        require_local_prohibition(value.replace("Do not poll a finished child", "Do poll a finished child"), action="poll", target="child")
+    concepts(value, ("active/pending", "slot", "not a lifetime quota", "proved terminal completion"),
+             ("selected candidate", "criteria", "final product acceptance"),
+             ("complete normal task context", "retrieval cost", "quality"))
+    assert set(controller_instructions.RESIDENT_SECTIONS).isdisjoint({"task-recovery", "host-maintenance"})
+
+
+def test_selected_runner_quote_preserves_platform_shell_identity():
+    path = Path("selected home/quote'and;$literal/runner")
+    assert shlex.split(controller_instructions.runner_command(path, platform="posix")) == [str(path)]
+    assert controller_instructions.runner_command(path, platform="nt") == "& '" + str(path).replace("'", "''") + "'"
 
 
 @pytest.mark.parametrize("execution_constraint", [None, "luna-only"], ids=["default", "luna-only"])

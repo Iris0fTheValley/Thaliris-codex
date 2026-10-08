@@ -151,10 +151,20 @@ _EXECUTOR_INSTRUCTIONS = (
     "contract; volume or difficulty alone does not require escalation. Prove decision-critical "
     "Host schemas, protocol, identity and serialization from source or real-shaped evidence. "
     "Project/package smoke does not authorize live Host maintenance. Keep durable admission "
-    "and INDEX maintenance with Controller/selected Curator. You may delegate one independent, "
+    "and INDEX maintenance with Controller/selected Curator. Own observation of your tests, "
+    "processes and CI: run/wait on them and report substantive changes or terminal evidence, "
+    "so Controller waits for your result without duplicating the same observations. Prefer "
+    "native notifications or an event/dependency-appropriate wait; tool maximum is capacity, "
+    "not a recommended duration, and higher-level duration limits take precedence. Do not "
+    "start status-only reasoning rounds for unchanged state or send routine wait updates. "
+    "Reuse original failures and minimal local reproductions; distinguish failed boundaries "
+    "from inferred root causes and preserve refusal/identity/ownership guarantees. "
+    "You may delegate an independent, "
     "genuinely uncovered discovery set to a fresh Investigator Scanner, fork_turns=\"none\" (V2) or fork_context=false (V1), "
     "without model/effort overrides. Wait only while its needed result is unfinished; use its "
-    "FINAL without another wait or repeated discovery. "
+    "FINAL without another wait or repeated discovery. Only one Scanner may be active/pending "
+    "at once; after proved terminal completion another necessary fresh uncovered discovery "
+    "gap within the accepted boundary may use that slot. Native capacity grants no additional authority. "
 )
 
 
@@ -243,9 +253,14 @@ def _instructions(role: str) -> str:
             'finding, invariant, affected surface, and needed validation without private review '
             'history. Treat unrelated workspace anomalies as observations. Historical/generated '
             'ownership requires independent historical evidence, not current HEAD. Delegate '
-            'independent broad discovery to one fresh Investigator doing Scanner work, '
+            'independent broad discovery to a fresh Investigator doing Scanner work, '
             'fork_turns="none" (V2) or fork_context=false (V1), without model/effort overrides; retain independent semantic judgment '
-            'and wait only while its needed result is unfinished.'
+            'and wait only while its needed result is unfinished. Only one Scanner may be '
+            'active/pending at once; after proved terminal completion the slot can serve '
+            'another necessary uncovered gap in the same boundary. Choose waiting by '
+            'capability, meaningful event and necessary dependency; tool maximum is capacity '
+            'and higher-level duration limits take precedence. Review READY covers only '
+            'selected criteria and never replaces final product acceptance.'
         ),
         'verifier': (
             'Remain a read-only compatibility role, not a mandatory stage. Check selected acceptance '

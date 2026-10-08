@@ -308,7 +308,9 @@ def test_native_replay_diagnostic_identifies_swallowed_guard_without_recording_i
     before = snapshot(home)
     result = native(command, project, payload)
     assert result["permissionDecision"] == "deny"
-    diagnostic = json.loads(result["nativeReplayDiagnostic"])
+    records = [json.loads(line) for line in result["nativeReplayDiagnostic"].splitlines()]
+    diagnostic = next(item for item in records if "native_replay_trace" in item)
+    assert {"diagnostic": "thaliris-failure-v1", "stage": "dispatch"} in records
     events = diagnostic["native_replay_trace"]
     if defect == "state":
         assert any(item["function"] == "maintenance_replay_check" and
@@ -338,7 +340,9 @@ def test_replay_diagnostic_distinguishes_invalid_stdin_without_recording_content
     assert entry["main"]() == 0
     output = capsys.readouterr()
     assert json.loads(output.out)["hookSpecificOutput"]["permissionDecision"] == "deny"
-    events = json.loads(output.err)["native_replay_trace"]
+    records = [json.loads(line) for line in output.err.splitlines()]
+    events = next(item["native_replay_trace"] for item in records if "native_replay_trace" in item)
+    assert [item["stage"] for item in records if item.get("diagnostic") == "thaliris-failure-v1"] == ["json", "dispatch"]
     errors = [item for item in events if item.get("exception") == "JSONDecodeError"]
     assert len(errors) == 1
     assert errors[0]["input_char_count"] == len(raw.decode("utf-8-sig"))

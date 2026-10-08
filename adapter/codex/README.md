@@ -1,9 +1,11 @@
 # Codex Adapter: Runtime Layers and Mechanical Boundaries
 
 `thaliris_codex.roles` owns native role prompts and binding facts. Inherited global
-and project managed spans contain shared boundaries and retrieval pointers. Controller
-procedures come from the package's `controller_instructions.md`, explicitly retrieved
-on demand with the installed pinned runner's `controller-instructions --section <name>`.
+and project managed spans contain shared boundaries. Normal Controller procedures
+are delivered into Controller context by the already-required bootstrap response,
+sourced from the package's `controller_instructions.md`; shared inherited spans do
+not inject that full routine into every fresh child. Exceptional recovery/Host maintenance and missing
+context use the pinned runner's `controller-instructions --section <name>` on demand.
 The bare command returns the procedure index, without the full Controller manual.
 The [repository Controller document](../../docs/thaliris-controller.md) is rendered
 from that source, including registry bindings. Retrieval grants no authority; other
@@ -20,7 +22,10 @@ Authorized parent native spawn carries the sole task-specific input. Core does n
 construct or inject a child projection. Fresh roles use V2 fork_turns="none" or
 V1 fork_context=false. Controller
 routes registered roles; only Implementer, Focused Implementer and Reviewer may delegate
-one nested Investigator doing Scanner work. Maximum managed depth is two; exact bound
+one active/pending nested Investigator doing Scanner work under the one active/pending
+top-level child. The Scanner slot is simultaneous, not a lifetime quota; after proved
+terminal completion it can serve another necessary uncovered gap in the same boundary.
+Native capacity does not expand that authorization. Maximum managed depth is two; exact bound
 parent agent/role/session/turn is required. Missing/conflicting identity fails closed.
 Exact identity-bound native Completed establishes execution completion independently of
 optional SubagentStop observations. Missing/delayed Stop cannot block proved completion;
@@ -37,6 +42,23 @@ Other value types, extra-field and otherwise unsupported payload shapes remain
 UNKNOWN. Contradictory native statuses block new managed handoffs and closure.
 An unbound spawn can be recovered only from exact
 trusted name-bound native failure or spawn-failure callback, not timeout/not_found.
+
+Choose waiting by current capability, meaningful event and necessary dependency, with
+native notifications preferred. Tool maximum is capacity, never a required duration;
+higher-level limits take precedence. The Hook preserves caller wait arguments rather
+than promoting them to a capacity limit. Executors observe/wait on their own tests,
+processes and CI, reporting substantive changes or terminal evidence; Controller waits
+for the necessary child result without duplicating the same observations. No status-only
+reasoning round is justified by a timeout or unchanged deterministic state alone.
+
+Production Hook/maintenance diagnostics emit only allowlisted failed boundary labels
+on stderr: receive, decode, JSON syntax/shape, dispatch, maintenance-contract and
+runtime-identity. Stdout decisions stay separate. No payload, credential, raw contract
+or exception contents are serialized, and diagnostic sink failure cannot alter refusal.
+Labels describe observed boundaries, not an inferred root cause. Hook input still uses
+strict utf-8-sig: one document-leading BOM is accepted; repeated or misplaced
+signatures outside JSON content and malformed UTF-8 retain their prior rejection
+behavior. U+FEFF inside valid JSON strings/field names remains exact content.
 
 ## Enforcement and assurance
 

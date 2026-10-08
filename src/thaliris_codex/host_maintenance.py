@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import re
 
-from . import runtime_identity
+from . import runtime_identity, diagnostics
 
 RECEIPT_NAME = "thaliris-ownership.json"
 FORMAT = "thaliris-host-maintenance-v1"
@@ -34,6 +34,14 @@ def safe(path: Path) -> None:
 
 
 def selected_runtime(value: object) -> tuple[Path, bytes]:
+    try:
+        return _selected_runtime(value)
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        diagnostics.failure("runtime-identity")
+        raise
+
+
+def _selected_runtime(value: object) -> tuple[Path, bytes]:
     if not isinstance(value, dict) or set(value) != {"executable", "runtime_sha256", "source_pin"}:
         raise ValueError("maintenance requires an independently selected runtime identity and immutable source pin")
     source = value["source_pin"]
@@ -67,6 +75,28 @@ def selected_runtime(value: object) -> tuple[Path, bytes]:
 
 
 def contract(filename: str | Path | None, operation: str, home: Path, *, actor: dict | None = None) -> dict:
+    try:
+        value, raw = _contract_document(filename, operation, home, actor=actor)
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+        diagnostics.failure("maintenance-contract")
+        raise
+    selected_runtime(value.get("executor"))
+    if operation == "codex-install":
+        selected_runtime(value.get("candidate"))
+    legacy = value.get("legacy_owned_bytes", {})
+    if not isinstance(legacy, dict):
+        diagnostics.failure("maintenance-contract")
+        raise ValueError("legacy ownership approval must be an exact byte hash mapping")
+    if any(
+            not isinstance(name, str) or not isinstance(sha, str) or
+            not re.fullmatch(r"[0-9a-f]{64}", sha) for name, sha in legacy.items()):
+        diagnostics.failure("maintenance-contract")
+        raise ValueError("legacy ownership approval requires exact reviewed byte hashes")
+    value["contract_sha256"] = digest(raw)
+    return value
+
+
+def _contract_document(filename: str | Path | None, operation: str, home: Path, *, actor: dict | None = None) -> tuple[dict, bytes]:
     if filename is None:
         raise ValueError("HOST_MAINTENANCE_INTENT_REQUIRED: use --maintenance-contract FILE")
     path = Path(filename)
@@ -82,17 +112,7 @@ def contract(filename: str | Path | None, operation: str, home: Path, *, actor: 
     if actor and (actor.get("agent_id") is not None or actor.get("agent_type") is not None or
                   actor.get("readonly") is True or actor.get("fenced") is True):
         raise ValueError("HOST_MAINTENANCE_ACTOR_DENIED")
-    selected_runtime(value.get("executor"))
-    if operation == "codex-install":
-        selected_runtime(value.get("candidate"))
-    legacy = value.get("legacy_owned_bytes", {})
-    if not isinstance(legacy, dict):
-        raise ValueError("legacy ownership approval must be an exact byte hash mapping")
-    for name, sha in legacy.items():
-        if not isinstance(name, str) or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
-            raise ValueError("legacy ownership approval requires exact reviewed byte hashes")
-    value["contract_sha256"] = digest(raw)
-    return value
+    return value, raw
 
 
 def ownership(home: Path, installed: bytes | None, intent: dict) -> dict:

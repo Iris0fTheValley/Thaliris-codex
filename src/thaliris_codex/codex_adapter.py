@@ -460,6 +460,25 @@ for _profile_name, _profile_hashes in _NATIVE_INTEGRATION_PREDECESSOR_PROFILE_HA
 _KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'e59e6654cf81fb71bed838618a09dfc96a9709c5cc58a0077b09ea0ad76ae088'})
 _KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'3e96d0dfee9a246582269fb1951ce779c8970117ecddc2a6160162a6ad230c36'})
 
+# Independently rendered immutable 3d2d302 predecessor; see orchestration-before provenance.
+_ORCHESTRATION_PREDECESSOR_PROFILE_HASHES = {
+    'thaliris-curator.toml': frozenset(['1bf0a0422df0966c5ada8d37dc7311060efc20f381f48c8f60604a180c85a5f2']),
+    'thaliris-focused-implementer-astra-medium.toml': frozenset(['d3f739f0dcada7c9e473d1fa77250f2506b233866dae7e26e0ca14d580f81c1f']),
+    'thaliris-focused-implementer-xhigh.toml': frozenset(['df484eb48bfdad86314f87192a6bcb18abb25ac3d6c65dbdada40baf732c335e']),
+    'thaliris-focused-implementer.toml': frozenset(['411cda72bc89ea8f27d51acf6bdab17dc6a0bf24a1af99b67c9a0e8fccb04578', 'dfa358e95e92174ee2bf1fe462337aef6c8105aa070a94291f4ce4128d2ed5ab']),
+    'thaliris-implementer.toml': frozenset(['816434c50701253107e72d571c62c223f68378edc2a939a70d8003c6c4e07eec']),
+    'thaliris-investigator.toml': frozenset(['dd0075723ee9c5baba4c2b4fed35b94bfbc0173409209d8cd31719242df0d3e3']),
+    'thaliris-reasoning-specialist-astra-medium.toml': frozenset(['4ba6322a1391b24aa6358cf8c89ba0eb2f12daa7ddd84025a39cc6f0b05e73a1']),
+    'thaliris-reasoning-specialist-xhigh.toml': frozenset(['4a877a8e464c40fe82ee9e71bde3a6647799f8a9f5c8033bb7645d7d457a31d4']),
+    'thaliris-reasoning-specialist.toml': frozenset(['4348fd39f46791f31f483d45deed37769fcc7eab1ddc219bcc227ea0879a9033', '63847f63f04b5bfa9a6ce57c620030c7c37ec50c41765bcc498e67a51d28acd6']),
+    'thaliris-reviewer.toml': frozenset(['6dc05774bd2d443f4509758167da48c820c8db5d8718a8390dd68b728c72c826', 'cdb634485ed110e819c7c394377969705853c2ba9ee71351930a548f5f2fb951']),
+    'thaliris-verifier.toml': frozenset(['5897a210bda97a99ec1c019303b2923d085b74370f1d86b15629a115612b7be1']),
+}
+for _profile_name, _profile_hashes in _ORCHESTRATION_PREDECESSOR_PROFILE_HASHES.items():
+    _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | _profile_hashes
+_KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'b65f45a9335c174d542368a0ec69c1d10ea8b898cbdeefbf31b31ca5eee10bd6'})
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'3c54cb36dd73d82c180e8fe7b659d9a9a4c98f9c6ab1be148c8469b67c1eb526'})
+
 def _agent_profile(name: str, role: str, model: str, effort: str) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
     # isolation instructions contain quotes that must not terminate the value.
@@ -868,13 +887,14 @@ Workstream. Methods and ordinary local repair belong to the assigned executor.
 Return decision-changing unknowns to Controller. Rules are retrievable on demand
 within authority; contextual selection is not secrecy.
 
-The owning Controller selects the relevant procedure from [Controller instructions](docs/thaliris-controller.md)
-for startup/admission, routing, recovery, durable admission, closure or maintenance.
-The installed pinned runner's `controller-instructions` lists retrieval paths;
-`controller-instructions --section <name>` retrieves one procedure on demand.
+The owning Controller uses guidance delivered by normal bootstrap for startup/admission,
+routing, handoff, waiting, endpoints and acceptance. [Controller instructions](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/thaliris-controller.md)
+are the canonical full reference. The installed pinned runner's `controller-instructions`
+lists retrieval paths; `controller-instructions --section <name>` retrieves an exact
+missing section or exceptional recovery/Host maintenance procedure on demand.
 Role responsibilities are in native profiles and
 [role docs](docs/thaliris-role-packs.md); mechanical details are in
-[Codex protocol](adapter/codex/README.md).
+[Codex protocol](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/adapter/codex/README.md).
 {MANAGED_END}
 """
 
@@ -894,7 +914,8 @@ def _render_role_packs() -> str:
 Generated from `thaliris_codex.roles`; edit canonical role instructions and render
 this document and native TOMLs through the adapter. These prompts supply role-owned
 responsibility, working style, delegation, endpoint and output. Project routing
-selects roles; explicitly retrieved Controller instructions own startup/authority/recovery. Full mechanical
+selects roles; resident Controller instructions own normal orchestration, with exceptional
+recovery/Host maintenance retrieved on demand. Full mechanical
 design belongs to [Codex protocol](../adapter/codex/README.md), not repeated prompts.
 
 {_native_profile_facts()}
@@ -1344,12 +1365,12 @@ def _write_runtime_audit(home: Path, previous: bytes, old_executable: Path) -> P
 
 def _global_agents_block(executable: Path | None = None, executable_sha256: str | None = None,
                          codex_home: Path | None = None) -> bytes:
-    """Shared boundaries and a pre-admission Controller retrieval entry."""
+    """Cross-role boundaries and one-shot normal Controller startup entry."""
+    from . import controller_instructions
     if (executable is None) != (executable_sha256 is None):
         raise ValueError("global instruction executable and SHA-256 must be paired")
     script = _codex_home(codex_home) / HOST_RUN_SCRIPT_NAME
-    quoted = str(script).replace("'", "''")
-    route = f"& '{quoted}'" if os.name == "nt" else f"'{quoted}'"
+    route = controller_instructions.runner_command(script)
     return f"""<!-- thaliris:global:begin -->
 ## Thaliris shared entry
 
@@ -1362,15 +1383,19 @@ changes require an actual superior human decision. Isolation and readonly bounda
 hold in every mode. Live Host maintenance requires separate explicit authority;
 changed disk files do not prove native activation. Preserve unknown user-owned bytes.
 
-The owning Controller uses `{route} --root <repo> controller-instructions` for the
-procedure index and retrieves `controller-instructions --section <name>` for the
-next startup/admission, recovery, routing, durable admission, closure or Host
-maintenance operation. Follow the selected procedure and project entry.
+For substantive file-changing Git work, unless the human opts out, the owning
+Controller runs `{route} --root <repo> codex-bootstrap` directly once. Its normal
+response delivers resident Controller guidance for admission, routing, handoffs,
+waiting, endpoints, acceptance and causal diagnosis without another procedure get.
+Follow that guidance and the project entry. Use `{route} --root <repo> controller-instructions`
+only for a missing-context index or exceptional recovery/Host maintenance;
+`controller-instructions --section <name>` retrieves the exact procedure.
 Read-only/chat/non-Git work needs no startup.
 Managed children follow their selected handoff and current-role native instructions;
 do not bootstrap, task-start or task-abandon the parent's ACTIVE task. Rules remain
 retrievable on demand within authority. Source synchronization never changes a live
 task's security anchor or installs into Host.
+
 <!-- thaliris:global:end -->
 """.encode("utf-8")
 
@@ -1883,41 +1908,10 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
 
 
 def audit_hook(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
-    result = handle_hook(root, event, payload, managed_hook_abi)
-    if result or event != "PreToolUse" or not isinstance(payload, dict):
-        return result
-    root = core._repo_root(root)
-    parent = payload if payload.get("agent_id") is not None else None
-    if parent is not None and not lifecycle._bound_managed_child(root, parent):
-        return ""
-    tool = payload.get("tool_name") or payload.get("tool")
-    if not isinstance(tool, str) or lifecycle._tool_basename(tool) != "wait_agent":
-        return ""
-    if (
-        lifecycle._active_task_id(root) is None
-        or selected_continuation_mode(root) != "BLOCKING_WAIT"
-        or not lifecycle.managed_dependency_pending(root, parent)
-    ):
-        return ""
-    capability = host_explicit_blocking_wait()
-    if capability.get("status") != "PASS":
-        return ""
-    original = payload.get("tool_input")
-    if not isinstance(original, dict):
-        return ""
-    target = capability.get("effective_max_wait_timeout_ms")
-    if not isinstance(target, int) or isinstance(target, bool) or target < 0:
-        return ""
-    if original.get("timeout_ms") == target:
-        return ""
-    # Copy rather than reconstruct: future native arguments survive unchanged.
-    updated = dict(original)
-    updated["timeout_ms"] = target
-    return json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "allow",
-        "updatedInput": updated,
-    }}, ensure_ascii=False, separators=(",", ":"))
+    # Tool capacity cannot choose event/dependency waiting policy or override
+    # higher-level duration limits. Preserve the caller's native wait arguments;
+    # lifecycle admission, isolation and completion checks remain authoritative.
+    return handle_hook(root, event, payload, managed_hook_abi)
 
 
 def doctor(root: Path) -> dict[str, object]:

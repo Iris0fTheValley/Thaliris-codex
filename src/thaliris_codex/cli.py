@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 from . import __version__
-from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity
+from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics
 from thaliris.core import TaskStateSchemaIncompatible, artifact_get, catalog, document_get, milestone_check, rollback, stale, task_artifact, task_get, task_promote, task_show, task_status, task_update
 
 
@@ -223,8 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         root = args.root.resolve()
         if args.command == "controller-instructions":
             from . import controller_instructions
-            runner_path = str(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME).replace("'", "''")
-            runner = ("& " if sys.platform == "win32" else "") + f"'{runner_path}'"
+            runner = controller_instructions.runner_command(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME)
             content = (controller_instructions.render(runner, section=args.section) if args.section
                        else controller_instructions.index(runner))
             print(json.dumps({"ok": True, "content": content}, ensure_ascii=False))
@@ -235,12 +234,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.command not in {"audit-hook", "codex-bootstrap", "task-status", "doctor", "version", "codex-install", "codex-uninstall", "codex-maintenance-plan", "task-recover-authority"}:
             task_authority.check(root)
         if args.command == "audit-hook":
+            stage = "receive"
             try:
+                raw = sys.stdin.buffer.read()
                 # A single document-leading UTF-8 BOM is transport syntax,
                 # not actor data. Strict decoding preserves all JSON content.
-                payload = json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
+                stage = "decode"
+                decoded = raw.decode("utf-8-sig")
+                stage = "json"
+                payload = json.loads(decoded)
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                diagnostics.failure(stage)
                 payload = None
+            else:
+                if not isinstance(payload, dict):
+                    diagnostics.failure("json-shape")
             if args.maintenance_replay_contract is not None:
                 response = lifecycle.maintenance_replay_check(root, payload, args.maintenance_replay_contract)
             else:
@@ -301,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
                     "status": "BOOTSTRAP_UNAVAILABLE",
                     "error": str(exc),
                     "session_restart_required": False,
+                    "controller_guidance": codex_bootstrap.controller_guidance(),
                 }
         elif args.command == "doctor": out = codex_adapter.doctor(root)
         elif args.command == "stale": out = stale(root)
@@ -339,6 +348,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 3
     except (ValueError, OSError, RuntimeError, json.JSONDecodeError) as exc:
+        if args is not None and args.command == "audit-hook":
+            # Preserve Hook rejection without leaking payload-derived errors.
+            diagnostics.failure("dispatch")
+            print(json.dumps({"ok": False, "error": "HOOK_DISPATCH_FAILED"}, separators=(",", ":")))
+            return 2
         result = {"ok": False, "error": str(exc)}
         if bootstrap_requested or (args is not None and args.command == "codex-bootstrap"):
             result["session_restart_required"] = False

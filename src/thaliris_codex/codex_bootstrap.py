@@ -333,14 +333,27 @@ def _bootstrap(root: Path, hook_attestation: str | None = None) -> dict[str, obj
     }
 
 
+def controller_guidance() -> str:
+    """Deliver normal Controller context through the already-required startup.
+
+    This is selected procedure text, not authentication or admission evidence.
+    No new retrieval call, persistent control state or child projection is added.
+    """
+    from . import controller_instructions
+    runner = controller_instructions.runner_command(lifecycle._host_home_path() / lifecycle.HOST_RUN_SCRIPT_NAME)
+    return controller_instructions.resident(runner)
+
+
 def bootstrap(root: Path, hook_attestation: str | None = None) -> dict[str, object]:
     from . import host_transition
     if host_transition.pending(lifecycle._host_home_path()):
         return {"ok": False, "status": "HOST_TRANSITION_PENDING", "init_invoked": False,
                 "session_restart_required": False, "ordinary_workspace_work_allowed": True,
                 "controller_actor_assurance": "UNKNOWN",
-                "recovery_action": "Replay the original standalone maintenance contract"}
+                "recovery_action": "Replay the original standalone maintenance contract",
+                "controller_guidance": controller_guidance()}
     result = _bootstrap(root, hook_attestation)
+    result["controller_guidance"] = controller_guidance()
     assurance = lifecycle._controller_actor_assurance({})
     result.update(controller_actor_assurance=assurance, ordinary_workspace_work_allowed=True)
     if assurance != "CONTROLLER":

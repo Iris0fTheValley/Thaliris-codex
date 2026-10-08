@@ -73,16 +73,35 @@ This feature requires thaliris>=0.4.3. Development tests must install the Core c
 
 ## Runtime prompt layers
 
-Inherited global/project instructions carry shared authority/isolation boundaries
-and retrieval pointers. Controller selects the relevant [Controller procedure](docs/thaliris-controller.md)
-for startup/admission, routing, recovery, durable admission, closure or maintenance.
-The installed pinned runner's `controller-instructions` returns an index before
-project admission; `controller-instructions --section <name>` retrieves one procedure.
+Global instructions carry shared authority/isolation boundaries and the one-shot
+startup entry. The required bootstrap response delivers resident normal Controller guidance: startup/admission, routing, handoffs, evidence reuse, waiting,
+Workstream endpoints, acceptance/review selection, durable admission and causal diagnosis.
+Project instructions retain shared boundaries and canonical pointers; the normal
+Controller routine is not injected into every fresh child. The
+[Controller procedures](docs/thaliris-controller.md) are canonical; retrieve exceptional
+recovery/Host maintenance only when needed. The installed pinned runner's
+`controller-instructions` returns an index; `controller-instructions --section <name>`
+retrieves an exact missing section. Compare complete normal task context plus retrieval
+cost and delivered quality, rather than the shortest prompt.
 Native role prompts own current-role execution style, delegation and endpoints.
 Fresh selected handoffs keep unrelated Controller procedures out of child injection;
 rules remain retrievable on demand within authority. Each
 invariant has one normal runtime authority; rationale and mechanical design live in
 [Codex protocol](adapter/codex/README.md) and [Core prompt design](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md).
+
+Each necessary dependency has one observation owner: executors run/wait on their tests,
+processes and CI; Controller waits for the necessary child result without checking the
+same job again. Choose waiting by available capability, meaningful event and dependency;
+tool maximum is capacity and higher-level duration limits take precedence. The Hook
+preserves caller wait arguments. Managed authorization remains one active/pending
+top-level child and one active/pending nested Scanner; the Scanner slot may be reused
+after proved terminal completion for another necessary uncovered gap in the same boundary.
+
+Hook failures emit a bounded JSON diagnostic on stderr identifying the receive,
+strict decode, JSON syntax/shape, dispatch, maintenance-contract or runtime-identity
+boundary. They contain no payload or exception contents and do not establish a deeper
+root cause or change refusal/identity checks. One leading UTF-8 BOM is still accepted
+only at the Hook document boundary. Review READY never replaces final product acceptance.
 
 Controller supplies decision-complete selected handoffs; implementation methods belong
 to the executor. Ordinary Implementer owns stable direction and deterministic convergence.
@@ -108,6 +127,8 @@ preserve safe upgrades; user-edited bytes and project profile shadows retain fai
 behavior. [Profile document](docs/thaliris-role-packs.md) is generated. Source changes do
 not prove activation in a running Host and are not installed during an ACTIVE parent task.
 ABCD results below remain historical; this prompt normalization has no benchmark claim.
+
+Saved native Agent trees can be audited offline on demand. This read-only utility does not integrate with Hooks or runtime state; see the [audit usage and annotation format](docs/agent-tree-audit.md).
 
 ## ABCD benchmark results
 

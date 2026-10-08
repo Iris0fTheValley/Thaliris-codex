@@ -377,6 +377,22 @@
     "original_path": "src/thaliris/roles.py",
     "sha256": "573042edb47a43ab70380241ed7d933236e4bdf922e73a20e1396b8dda3f5aee"
   },
+  "3d2d3026c9a81790219040f926baa2f975f8bce1:AGENTS.md": {
+    "git_blob": "7683925218b7d8e5e8f82d9502212f0cd8247ff8",
+    "sha256": "a94927210d5682def5250a5e1dffbda1aaaf2951683112ef9dda96c138a15756"
+  },
+  "3d2d3026c9a81790219040f926baa2f975f8bce1:docs/thaliris-role-packs.md": {
+    "git_blob": "df84e3a74259e1ba4d15c0ebff9efd44be534f8f",
+    "sha256": "3c54cb36dd73d82c180e8fe7b659d9a9a4c98f9c6ab1be148c8469b67c1eb526"
+  },
+  "3d2d3026c9a81790219040f926baa2f975f8bce1:src/thaliris_codex/codex_adapter.py": {
+    "git_blob": "61db7389ac8e5563767f49689ee733db10424b03",
+    "sha256": "40f03ad6adaadf83cb0360b88fcc2f9dceaa00f3a44f48ef6fd5f95405964240"
+  },
+  "3d2d3026c9a81790219040f926baa2f975f8bce1:src/thaliris_codex/roles.py": {
+    "git_blob": "ba788795b87d418c9886e156fdccc2e4fb6bff93",
+    "sha256": "d77909757eff9e3eb73446230a71d25134905d5f5a3dc73f6a96f02215416369"
+  },
   "40fd5f2:.codex/agents/thaliris-focused-implementer-astra-medium.toml": {
     "commit": "40fd5f2bcb928f8f9443b01389168f6a1b8e3054",
     "git_blob": "197889999d829d301fd47b9eb48b3f64e0326680",

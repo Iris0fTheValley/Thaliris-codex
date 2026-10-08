@@ -125,6 +125,7 @@ def test_initialized_workspace_does_not_init(monkeypatch, tmp_path: Path):
     result = bootstrap.bootstrap(tmp_path)
     assert result == {"ok": True, "status": "READY", "project_definition_present": "YES", "init_invoked": False, "session_restart_required": False,
                       "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True,
+                      "controller_guidance": bootstrap.controller_guidance(),
                       "preserved_manual_followup": []}
     assert calls == ["bootstrap-check"]
 
@@ -328,6 +329,7 @@ def test_no_restart_init_ready_calibrates_false(monkeypatch, tmp_path: Path):
     result = bootstrap.bootstrap(tmp_path)
     assert result == {"ok": True, "status": "READY", "init_invoked": True, "session_restart_required": False,
                       "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True,
+                      "controller_guidance": bootstrap.controller_guidance(),
                       "preserved_manual_followup": []}
 
 
@@ -352,6 +354,7 @@ def test_cli_non_git_root_returns_structured_bootstrap_failure(tmp_path: Path, c
         "ok": False,
         "status": "BOOTSTRAP_UNAVAILABLE",
         "session_restart_required": False,
+        "controller_guidance": bootstrap.controller_guidance(),
     }
 
 
@@ -370,6 +373,7 @@ def test_cli_dispatch_exception_has_explicit_restart_boolean(monkeypatch, tmp_pa
         "ok": False,
         "status": "BOOTSTRAP_UNAVAILABLE",
         "session_restart_required": False,
+        "controller_guidance": bootstrap.controller_guidance(),
     }
 
 
@@ -649,7 +653,7 @@ def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_
     assert "controller_bridge_content" not in result
     rendered = codex_adapter._global_agents_block(Path("C:/installed/thaliris.exe"), digest).decode("utf-8")
     assert rendered.count("--root <repo> controller-instructions") == 1
-    assert "--root <repo> codex-bootstrap" not in rendered
+    assert rendered.count("--root <repo> codex-bootstrap") == 1
     assert "bootstrap-check" not in rendered and "Get-FileHash" not in rendered
     assert "--bootstrap-receipt" in controller_instructions.render()
     normalized = " ".join(rendered.lower().split())
@@ -658,6 +662,30 @@ def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_
     assert "managed children" in normalized and "parent" in normalized and "active task" in normalized
     assert "do not bootstrap, task-start or task-abandon" in normalized
     assert "report blocked work honestly" in normalized_controller
+
+
+@pytest.mark.parametrize("status", ["READY", "CURRENT_CONTINUATION", "MANUAL_ACTION_REQUIRED", "UNKNOWN", "INVALID_STATE"])
+def test_required_bootstrap_delivers_normal_guidance_without_extra_retrieval_or_authority(tmp_path, monkeypatch, status):
+    from thaliris_codex import host_transition
+    monkeypatch.setattr(host_transition, "pending", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_controller_actor_assurance", lambda _payload: "UNKNOWN")
+    calls = []
+    original = {"ok": status in {"READY", "CURRENT_CONTINUATION"}, "status": status,
+                "task_start_receipt": "a" * 64, "init_invoked": False, "session_restart_required": False}
+    monkeypatch.setattr(bootstrap, "_bootstrap", lambda root, attestation: calls.append((root, attestation)) or dict(original))
+    result = bootstrap.bootstrap(tmp_path)
+    assert calls == [(tmp_path, None)]
+    assert result["task_start_receipt"] == original["task_start_receipt"]
+    assert result["controller_actor_assurance"] == "UNKNOWN"
+    assert result["managed_control_authority"] == "EXPLICIT_CONTROLLER_ASSERTION_REQUIRED"
+    guidance = result["controller_guidance"]
+    for name in controller_instructions.RESIDENT_SECTIONS:
+        if name != "startup":
+            assert controller_instructions.render(section=name).strip() in guidance
+    for detail in ("task-recover-authority", "offline_recovery.py", "--maintenance-contract"):
+        assert detail not in guidance
+    assert "task_start_receipt" in guidance and "causal diagnosis" in guidance.lower()
+    assert "--maintenance-contract" not in codex_adapter._global_agents_block().decode()
 
 
 def test_cli_bootstrap_receipt_alias_is_passed_to_task_start(tmp_path: Path, monkeypatch, capsys):

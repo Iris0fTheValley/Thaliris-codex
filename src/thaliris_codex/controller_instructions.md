@@ -3,9 +3,14 @@
 Canonical package resource: `src/thaliris_codex/controller_instructions.md`.
 The installed pinned runner returns a procedure index with `controller-instructions`
 and one selected procedure with `controller-instructions --section <name>`.
-Read startup and authority for admission, routing for role selection, handoff for
-delegation, workstreams for endpoint/review decisions, durable for knowledge work,
-completion for closure, and task-recovery or host-maintenance only when needed.
+Normal Controller guidance is resident in the normal bootstrap response/context:
+startup, authority, routing, handoff, Workstream endpoints, durable selection,
+waiting/completion and causal diagnosis. Retrieve task-recovery or host-maintenance
+only when their exceptional operation is needed. Measure the complete normal task
+context plus retrieval cost and quality, not the shortest individual prompt. The
+required startup operation delivers it once; shared inherited instructions do not
+inject the full Controller routine into every fresh child. Missing context can
+retrieve an exact section.
 Repository docs are rendered from this resource. Assigned children follow their selected handoff and role; they
 may retrieve other rules on demand within their authority. Retrieval grants no authority.
 
@@ -181,9 +186,14 @@ explicitly deferred, or blocked by a decision-changing dependency.
 
 Fresh role sessions use V2 `fork_turns="none"` or V1 `fork_context=false` and only the authorized parent's native
 spawn message plus explicitly selected information. Controller may spawn registered
-roles; Implementer, Focused Implementer and Reviewer may spawn one fresh Investigator
-doing Scanner work. Other children cannot delegate. Maximum managed depth is two,
-one top-level child and its nested Investigator, never sibling workers.
+roles; Implementer, Focused Implementer and Reviewer may spawn a fresh Investigator
+doing Scanner work. The supported managed shape has one active/pending top-level
+child and at most one active/pending Scanner under its exact parent. This is a
+simultaneous slot, not a lifetime quota: after proved terminal completion, a fresh
+Scanner may cover another necessary uncovered gap within the same boundary.
+Other children cannot delegate. Maximum managed depth is two, never sibling workers.
+Native capacity does not expand managed authorization; UNKNOWN overlap evidence
+does not authorize bypassing Hooks or disabling all future supported delegation.
 Keep working sets private; return distilled conclusions, facts, unknowns,
 contradictions, verification and optional Artifact pointers. Child communication,
 mutation/verification practice and role endpoints are defined in native role prompts.
@@ -204,10 +214,17 @@ CHANGED is an observation, not semantic invalidation; Controller decides revalid
 Use only trusted direct runtime commands and native coordination allowed by the
 current execution mode. Pending-spawn recovery needs exact trusted native failure
 evidence; timeouts, not_found and prose cannot release a reservation. Wait only for
-a known unfinished necessary child, using the maximum in the current tool definition;
-do not infer a maximum or poll a finished child. Do not create repeated reasoning
-turns solely to observe unchanged deterministic state when the runtime can wait for
-a meaningful or terminal event. Use the native tool family available in the
+a known unfinished necessary child. Choose waiting from the available capability,
+expected meaningful event and necessary dependency; prefer native notifications.
+The tool maximum is capacity, not a recommended duration. Higher-level duration
+limits take precedence; do not impose a universal maximum or fixed wait duration.
+Give each necessary dependency one observation owner: executors run and wait on
+their own tests/processes/CI and report substantive changes or terminal evidence;
+Controller waits for the necessary child result without rechecking the same job.
+Do not poll a finished child or create repeated reasoning turns solely to observe
+unchanged deterministic state when the runtime can wait for a meaningful or terminal
+event. A timeout alone creates no new decision or evidence and does not justify
+another status-only reasoning round. Use the native tool family available in the
 current session: V1 `wait_agent` returns a status map keyed by the exact spawned
 agent ID; V2 `list_agents` returns status entries keyed by canonical task name.
 Either can prove native Completed; no V2 switch or second confirmation is required.
@@ -222,3 +239,17 @@ activation remains UNKNOWN without native evidence; changed disk files alone do 
 prove activation. Keep security/control-state mutations and live Host installation
 outside child source work. See [Codex protocol](../adapter/codex/README.md),
 [role profiles](thaliris-role-packs.md), and [task authority](thaliris-task-authority.md).
+
+## Causal diagnosis and acceptance
+
+Reuse the original failure and smallest local reproduction before changing behavior.
+Distinguish receive, strict decode, JSON syntax/shape, dispatch, maintenance contract
+and runtime identity failures at their actual boundaries. A diagnostic stage is a
+failed boundary observation, not proof of the deeper root cause; label guesses as
+inferences until source or reproduction supports them. Keep payloads, credentials,
+contract contents and unbounded exception objects out of diagnostics.
+Repair the supported cause without weakening refusal, identity, ownership, isolation,
+native completion or acceptance guarantees for CI. Review READY covers its selected
+candidate and criteria; it does not replace final product acceptance. Choose fresh
+sessions by remaining independence and total context reconstruction cost, never a
+mechanical duration/call threshold or a local PASS alone.

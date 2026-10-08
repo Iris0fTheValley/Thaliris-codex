@@ -270,7 +270,7 @@ def test_codex_install_updates_and_uninstall_removes_only_global_owned_span(tmp_
     expected = codex_adapter._global_agents_block(executable, digest)
     assert global_agents.read_bytes() == expected + original
     assert expected.count(b"--root <repo> controller-instructions") == 1
-    assert b"--root <repo> codex-bootstrap" not in expected
+    assert expected.count(b"--root <repo> codex-bootstrap") == 1
     assert str(home / lifecycle_module.HOST_RUN_SCRIPT_NAME).encode() in expected
     assert str(executable).encode() not in expected and digest.encode() not in expected
     controller_text = controller_instructions.render().encode()
@@ -1224,7 +1224,8 @@ def test_generated_instruction_full_equality_and_working_copy_ownership(tmp_path
         assert "AGENTS.md" in manual
 
 
-def test_blocking_wait_is_normalized_only_with_a_managed_dependency(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("timeout", [10_000, 30_000, 60_000, 120_000, 3_600_000])
+def test_wait_capacity_does_not_promote_caller_duration(tmp_path: Path, monkeypatch, timeout) -> None:
     root = repo(tmp_path)
     _owned_task_start(root, "wait mechanics", None, None)
     monkeypatch.setattr(codex_adapter, "selected_continuation_mode", lambda _root: "BLOCKING_WAIT")
@@ -1232,7 +1233,7 @@ def test_blocking_wait_is_normalized_only_with_a_managed_dependency(tmp_path: Pa
         "status": "PASS",
         "effective_max_wait_timeout_ms": 120_000,
     })
-    original_input = {"timeout_ms": 30_000, "reason": "wait for child", "future": {"keep": True}}
+    original_input = {"timeout_ms": timeout, "reason": "wait for child", "future": {"keep": True}}
     wait = hook_payload(tool_name="wait_agent", tool_input=original_input)
 
     assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
@@ -1243,16 +1244,14 @@ def test_blocking_wait_is_normalized_only_with_a_managed_dependency(tmp_path: Pa
         tool_input={"fork_turns": "none", "agent_type": "worker", "message": "explicit task"},
     )
     assert handle_hook(root, "PreToolUse", spawn) == ""
-    rewritten = json.loads(codex_adapter.audit_hook(root, "PreToolUse", wait))
-    assert rewritten["hookSpecificOutput"]["updatedInput"] == {
-        **original_input, "timeout_ms": 120_000,
-    }
+    assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
+    assert wait["tool_input"] == original_input
     assert handle_hook(root, "PostToolUse", hook_payload(
         tool_name="wait_agent", tool_input={"timeout_ms": 120_000},
         tool_response={"timed_out": True},
     )) == ""
-    repeated = json.loads(codex_adapter.audit_hook(root, "PreToolUse", wait))
-    assert repeated["hookSpecificOutput"]["updatedInput"]["timeout_ms"] == 120_000
+    assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
+    assert wait["tool_input"] == original_input
 
 
 def test_completed_child_does_not_trigger_another_managed_wait(tmp_path: Path, monkeypatch) -> None:

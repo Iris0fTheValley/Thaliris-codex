@@ -21,8 +21,7 @@ def test_controller_retrieval_is_readonly_before_admission_and_during_conflict(t
         assert cli.main(["--root", str(tmp_path), "controller-instructions", "--section", section]) == 0
         selected = json.loads(capsys.readouterr().out)["content"]
         assert selected == controller_instructions.render(
-            ("& " if __import__("sys").platform == "win32" else "") +
-            "'" + str(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME).replace("'", "''") + "'", section=section)
+            controller_instructions.runner_command(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME), section=section)
         assert selected.count("\n## ") == 0
     assert "@RUNNER@" not in text and "@ROLE_ROWS@" not in text
     assert list(tmp_path.iterdir()) == before

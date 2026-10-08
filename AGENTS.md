@@ -15,11 +15,12 @@ Workstream. Methods and ordinary local repair belong to the assigned executor.
 Return decision-changing unknowns to Controller. Rules are retrievable on demand
 within authority; contextual selection is not secrecy.
 
-The owning Controller selects the relevant procedure from [Controller instructions](docs/thaliris-controller.md)
-for startup/admission, routing, recovery, durable admission, closure or maintenance.
-The installed pinned runner's `controller-instructions` lists retrieval paths;
-`controller-instructions --section <name>` retrieves one procedure on demand.
+The owning Controller uses guidance delivered by normal bootstrap for startup/admission,
+routing, handoff, waiting, endpoints and acceptance. [Controller instructions](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/thaliris-controller.md)
+are the canonical full reference. The installed pinned runner's `controller-instructions`
+lists retrieval paths; `controller-instructions --section <name>` retrieves an exact
+missing section or exceptional recovery/Host maintenance procedure on demand.
 Role responsibilities are in native profiles and
 [role docs](docs/thaliris-role-packs.md); mechanical details are in
-[Codex protocol](adapter/codex/README.md).
+[Codex protocol](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/adapter/codex/README.md).
 <!-- thaliris:end -->

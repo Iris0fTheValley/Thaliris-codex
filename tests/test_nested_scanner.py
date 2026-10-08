@@ -361,21 +361,42 @@ def test_spawn_return_is_correlated_to_authorized_parent(active):
 
 
 @pytest.mark.parametrize("role", ["implementer", "focused-implementer", "reviewer"])
-def test_parent_wait_normalizes_only_its_pending_scanner(active, monkeypatch, role):
+def test_parent_wait_preserves_event_duration_with_pending_scanner(active, monkeypatch, role):
     monkeypatch.setattr(codex_adapter, "selected_continuation_mode", lambda root: "BLOCKING_WAIT")
     monkeypatch.setattr(codex_adapter, "host_explicit_blocking_wait", lambda: {"status": "PASS", "effective_max_wait_timeout_ms": 60000})
     parent = start(active, role)
-    wait_input = {"timeout_ms": 1, "future_argument": {"keep": True}}
+    wait_input = {"timeout_ms": 10_000, "future_argument": {"keep": True}}
     wait = {**parent, "tool_name": "wait_agent", "tool_input": wait_input}
     assert codex_adapter.audit_hook(active, "PreToolUse", wait) == ""
     assert wait["tool_input"] == wait_input
     scanner = start(active, "investigator", "scanner", parent)
-    result = json.loads(codex_adapter.audit_hook(active, "PreToolUse", wait))
-    assert result["hookSpecificOutput"]["updatedInput"] == {
-        **wait_input, "timeout_ms": 60000,
-    }
+    assert codex_adapter.audit_hook(active, "PreToolUse", wait) == ""
+    assert wait["tool_input"] == wait_input
     finish(active, scanner, parent)
     assert codex_adapter.audit_hook(active, "PreToolUse", wait) == ""
+
+
+@pytest.mark.parametrize("role", ["implementer", "focused-implementer", "reviewer"])
+def test_scanner_slot_reuse_requires_terminal_and_denies_pending_or_root_sibling(active, role):
+    parent = start(active, role)
+    # Parent ownership and one active/pending top-level slot remain enforced.
+    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(role="curator"))
+    assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
+    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
+    scanner = identity("investigator", "first-scanner")
+    assert lifecycle._record_subagent_start(active, scanner)
+    lifecycle.handle_hook(active, "PostToolUse", {**spawn(parent), "tool_response": {"task_name": "/root/first-scanner"}})
+    lifecycle.handle_hook(active, "SubagentStop", scanner)
+    # Optional Stop cannot release the slot without native terminal evidence.
+    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
+    finish(active, scanner, parent)
+    second = start(active, "investigator", "second-scanner", parent)
+    assert [child["depth"] for child in state(active)["children"]] == [1, 2, 2]
+    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
+    assert "DELEGATION" in lifecycle.handle_hook(active, "PreToolUse", spawn(second))
+    finish(active, second, parent)
+    finish(active, parent)
+    assert lifecycle.qualifying_child_completed(active)
 
 
 def test_active_or_pending_descendant_prevents_close(active):

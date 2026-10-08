@@ -1,5 +1,7 @@
 """Explicit retrieval of Controller procedures; never a child injection."""
 from pathlib import Path
+import os
+import shlex
 
 from . import roles
 
@@ -13,7 +15,18 @@ SECTIONS = {
     "workstreams": "Workstream endpoints and review",
     "durable": "Durable retrieval and knowledge admission",
     "completion": "Native completion and closure",
+    "diagnosis": "Causal diagnosis and acceptance",
 }
+
+# Frequency belongs to the canonical Controller layer, not to shared child prompts.
+RESIDENT_SECTIONS = tuple(name for name in SECTIONS if name not in {"task-recovery", "host-maintenance"})
+
+
+def runner_command(path: Path, *, platform: str | None = None) -> str:
+    """Quote a selected runner for the platform's documented shell syntax."""
+    if (platform or os.name) == "nt":
+        return "& '" + str(path).replace("'", "''") + "'"
+    return shlex.quote(str(path))
 
 
 def render(runner: str = "<installed pinned runner>", *, section: str | None = None) -> str:
@@ -32,8 +45,16 @@ def render(runner: str = "<installed pinned runner>", *, section: str | None = N
 
 
 def index(runner: str) -> str:
-    return "# Controller procedure index\n\nRetrieve only the procedure needed for the next operation. " \
+    return "# Controller procedure index\n\nNormal guidance is delivered in the required bootstrap response. " \
+        "Retrieve recovery/maintenance when needed, or an exact section when context is missing. " \
         "Retrieval grants no authority.\n\n" + "\n".join(
             f"- {title}: `{runner} controller-instructions --section {name}`"
             for name, title in SECTIONS.items()
         ) + "\n"
+
+
+def resident(runner: str) -> str:
+    """High-frequency guidance available directly without a procedure lookup."""
+    return "## Thaliris owning Controller\n\n" + "\n\n".join(
+        render(runner, section=name).strip() for name in RESIDENT_SECTIONS
+    ) + "\n"
