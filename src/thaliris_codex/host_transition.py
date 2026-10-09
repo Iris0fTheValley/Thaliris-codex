@@ -135,7 +135,7 @@ def _profile_name(name):
 
 
 def load(home, intent):
-    from . import host_maintenance as maintenance, runtime_identity, lifecycle, host_preflight, roles
+    from . import host_maintenance as maintenance, runtime_identity, lifecycle, host_preflight, roles, mode_hint_config
     path = home / NAME
     maintenance.safe(path)
     record = json.loads(path.read_bytes())
@@ -173,6 +173,9 @@ def load(home, intent):
     # Validate historical receipt structure independently of effective files.
     old_receipt = before.get(maintenance.RECEIPT_NAME)
     ownership = maintenance.validate_ownership(old_receipt, prior, intent)
+    mode_hint_config.validate(ownership.get(mode_hint_config.RECORD_KEY), home)
+    if "mode_hint_record" in finish:
+        mode_hint_config.validate(finish["mode_hint_record"], home)
     if intent["operation"] == "codex-install":
         executable, approved = maintenance.selected_runtime(intent["candidate"])
         if after.get(runtime_identity.MANIFEST_NAME) != approved or finish.get("candidate") != str(executable) or (
@@ -180,6 +183,23 @@ def load(home, intent):
                 finish.get("execution_constraint") != intent.get("execution_constraint")):
             raise ValueError("Host transition candidate differs from original approval")
         next_receipt = maintenance.validate_ownership(after.get(maintenance.RECEIPT_NAME), approved, intent)
+        mode_hint_config.validate(next_receipt.get(mode_hint_config.RECORD_KEY), home)
+        if "mode_hint_record" in finish and finish["mode_hint_record"] != next_receipt.get(mode_hint_config.RECORD_KEY):
+            raise ValueError("Host transition native mode hint differs from receipt")
+        if "mode_hint_status" in finish and (not isinstance(finish["mode_hint_status"], dict) or
+                finish["mode_hint_status"].get("status") not in {"PLANNED", "MANAGED", "USER_CHANGED_PRESERVED",
+                    "USER_EMPTY_PRESERVED", "USER_CUSTOM_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED"}):
+            raise ValueError("invalid Host transition native mode hint status")
+        if finish.get("mode_hint_status", {}).get("status") == "PLANNED" and ownership.get(mode_hint_config.RECORD_KEY) is not None:
+            raise ValueError("Host transition cannot reacquire a managed native mode hint")
+        if finish.get("mode_hint_status", {}).get("status") in {"PLANNED", "MANAGED"} and finish.get("mode_hint_record") is None:
+            raise ValueError("Host transition native mode hint lacks ownership evidence")
+        if "mode_hint_phase" in finish and (finish["mode_hint_phase"] not in {"ATTEMPTING", "APPLIED"} or
+                finish.get("mode_hint_status", {}).get("status") != "PLANNED"):
+            raise ValueError("invalid Host transition native mode hint attempt")
+        if finish.get("mode_hint_phase") == "APPLIED" and (not isinstance(finish.get("mode_hint_result"), dict) or
+                type(finish["mode_hint_result"].get("changed")) is not bool):
+            raise ValueError("invalid Host transition native mode hint result")
         migrations = maintenance.migrated_instructions(intent, home, before, executable, finish["sha"])
         if any(after.get(name) != value for name, value in migrations.items()):
             raise ValueError("Host transition instructions differ from original approval")
@@ -195,6 +215,8 @@ def load(home, intent):
                 raise ValueError("Host transition receipt differs from effective planned hooks")
     elif after.get(runtime_identity.MANIFEST_NAME) is not None:
         raise ValueError("uninstall transition retains an active runtime")
+    elif "mode_hint_record" in finish and finish["mode_hint_record"] != ownership.get(mode_hint_config.RECORD_KEY):
+        raise ValueError("uninstall transition native mode hint differs from prior receipt")
     allowed = {runtime_identity.MANIFEST_NAME, maintenance.RECEIPT_NAME, "AGENTS.md", "hooks.json",
                lifecycle.HOST_HOOK_SCRIPT_NAME, lifecycle.HOST_RUN_SCRIPT_NAME, host_preflight.NAME}
     allowed.update("agents/" + name for name in roles.agent_profiles())

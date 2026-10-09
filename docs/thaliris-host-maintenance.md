@@ -91,6 +91,63 @@ prior authorized receipt. A retired profile is deleted only when its exact old
 bytes still match that receipt. An edited retired profile blocks upgrade before
 writes; uninstall preserves edited profiles. Unrelated profiles are preserved.
 
+### Native multi-agent mode hint compatibility
+
+This narrow compatibility edit targets only the source-verified Codex CLI
+`0.162.0-alpha.2`: upstream tag `rust-v0.162.0-alpha.2`, peeled commit
+`74e804deeb1241d5fe699b31fb319f7d46454c42`. It writes the empty string to
+`features.multi_agent_v2.multi_agent_mode_hint_text` only when that user-level
+leaf is absent. At this CLI revision, the empty value suppresses the native
+default explicit-request-only mode hint. An unknown CLI version, an existing
+empty or custom value, or unsupported TOML structure is preserved. An existing
+`features.multi_agent_v2.enabled` value is retained.
+
+Safe insertion supports ordinary `[features.multi_agent_v2]` and
+`[features]`/root dotted boolean forms. Inline, quoted, special, or alternate
+legal layouts (including whitespace variants such as
+`[ features . multi_agent_v2 ]`) are conservatively reported as
+`STRUCTURE_UNSUPPORTED_PRESERVED`. If a migrated table later gains user
+structure, uninstall removes only the owned hint and preserves the current
+`enabled` value and surrounding content.
+
+For a first install or upgrade, use the existing immutable-candidate flow:
+create the normal `codex-maintenance-plan codex-install` intent, then run
+`codex-install --maintenance-contract FILE` with that exact approved contract
+and candidate, bound to the exact current installed-runtime identity as described
+above. No separate config editor or broader config ownership is added.
+The result reports `native_mode_hint_compatibility`; a completed managed value
+is `MANAGED` (an already managed value can report `changed: false`). Before
+relying on it, inspect the user `config.toml` leaf and the matching
+`native_mode_hint` record in `thaliris-ownership.json`: the record binds the
+absolute config path, `prior.present: false`, and the exact owned fragment.
+The whole config file is not added to `owned_bytes` or to generation rollback
+ownership. `thaliris-host-transition.json` must be absent after completion. If
+it remains, do not start a new maintenance operation; replay the original
+operation with its same contract and approved executor. During an interrupted
+install, the journal's `finish` record carries the field record, planned status,
+and write phase/result. If the outcome after an interruption is uncertain, the
+field is preserved with `APPLY_OUTCOME_UNKNOWN_PRESERVED` rather than reinserted.
+The field writer rereads bytes immediately before atomic replacement, but this
+does not provide compare-and-swap protection against an external editor racing
+that final check.
+
+For removal, use the existing `codex-maintenance-plan codex-uninstall` and
+`codex-uninstall --maintenance-contract FILE` path. Uninstall removes only a
+still-matching owned leaf and restores a migrated `enabled` boolean when the
+original TOML fragment is intact; user edits and later structure changes are
+preserved and reported. The install and uninstall contracts retain the normal
+trusted runtime, candidate, executor, installed-runtime and explicit-human-
+intent requirements described above.
+
+Disk evidence does not prove effective Host behavior. Restart Codex and use a
+new Host session, then observe that this default hint is absent. Exercise a real
+Fresh Child using V2 `fork_turns="none"` or V1 `fork_context=false` and verify
+its selected handoff while the existing admission, role, isolation and security
+behavior remains intact. Higher-priority project configuration or CLI `-c`
+values may override the user-level setting; report that effective state as
+unknown until observed. Tests and installed files alone do not establish this
+acceptance.
+
 Disk definitions change as one recoverable generation. Before the first managed
 write, `thaliris-host-transition.json` durably records exact before/after bytes
 and the original maintenance contract identity. The receipt is written last;
@@ -230,6 +287,50 @@ contract 保留证据并停止。trust 未完成会明确报告，用户配置�
 已加载的旧 Hook 不会因磁盘源码更新而获得新协议。若它阻止正常维护，实际用户可在
 终端调用已批准的独立 CLI，仍须通过准确维护意图和 legacy bytes 批准及全部验证；
 这不赋予自动 actor 绕过旧 Hook 的权限。之后按要求重启并重新观察加载结果。
+
+### 原生 multi-agent mode hint 兼容
+
+此字段级兼容修改只针对已通过源码核实的 Codex CLI
+`0.162.0-alpha.2`：上游 tag `rust-v0.162.0-alpha.2`，peeled commit
+`74e804deeb1241d5fe699b31fb319f7d46454c42`。仅当用户级
+`features.multi_agent_v2.multi_agent_mode_hint_text` 不存在时写入空字符串；
+在此 CLI 版本中，该空值会取消原生默认的 explicit-request-only mode hint。
+未知 CLI 版本、已有空值或自定义值、以及不支持安全编辑的 TOML 结构均原样保留。
+若已有 `features.multi_agent_v2.enabled`，其值继续保留。
+
+安全插入支持普通 `[features.multi_agent_v2]`、`[features]` 表和根 dotted
+布尔值形式。Inline、quoted、特殊或其他合法结构（包括
+`[ features . multi_agent_v2 ]` 这类空格表头）均保守报告
+`STRUCTURE_UNSUPPORTED_PRESERVED` 并保留。迁移表后来加入用户结构时，卸载只删除受管
+hint，保留当前 `enabled` 值及周边内容。
+
+首次安装和升级均使用既有不可变候选维护流程：通过
+`codex-maintenance-plan codex-install` 生成正常 intent，再用完全相同且已批准的
+contract 和 candidate 执行 `codex-install --maintenance-contract FILE`，并绑定上文所述
+准确的当前安装 runtime 身份。不新增独立
+config editor，也不扩大 config 文件 ownership。结果中的
+`native_mode_hint_compatibility` 报告状态；完成后的受管值为 `MANAGED`，幂等重跑可
+显示 `changed: false`。验收时检查用户 `config.toml` 目标字段，以及
+`thaliris-ownership.json` 中匹配的 `native_mode_hint` 记录：记录绑定绝对配置路径、
+`prior.present: false` 和准确受管片段。整个 config 文件不会加入 `owned_bytes`，
+也不会成为 generation rollback 的 ownership。操作完成后
+`thaliris-host-transition.json` 必须不存在；若仍存在，不开始新维护操作，而由已批准的
+executor 使用原 operation 和同一 contract 重放。安装中断时，journal 的 `finish`
+包含字段记录、计划状态和写入阶段/结果。若中断后无法确定字段写入结果，会保留字段并
+报告 `APPLY_OUTCOME_UNKNOWN_PRESERVED`，不会再次插入。
+字段写入在原子替换前会重读 bytes；这不能防止外部编辑器在最终检查期间并发写入。
+
+卸载仍使用既有 `codex-maintenance-plan codex-uninstall` 与
+`codex-uninstall --maintenance-contract FILE`。只有仍精确匹配的受管字段才会删除；原始
+TOML 片段完整时会恢复之前迁移的 `enabled` 布尔值。用户修改和后来发生的结构变化会被
+保留并报告。安装与卸载 contract 仍须满足上文的可信 runtime、candidate、executor、
+当前安装身份及明确人类意图要求。
+
+磁盘证据不能证明 Host 实际生效。重启 Codex 并使用新的 Host session，观察默认提示
+是否消失；随后用真实 Fresh Child 验收 V2 `fork_turns="none"` 或 V1
+`fork_context=false` 隔离，并确认仍只收到选定 handoff，同时既有任务准入、角色、
+隔离和安全行为保持正常。优先级更高的 project 配置或 CLI `-c` 可能覆盖用户级设置；
+实际观察前应把生效状态报告为 UNKNOWN。测试和安装文件本身不构成此项验收。
 
 未知 role 文档以 `preserved_manual_followup` 保留，不单独阻止项目 admission；
 真正 AGENTS、activation、hook 等控制冲突仍阻止 admission。磁盘安装、Hook 注册和

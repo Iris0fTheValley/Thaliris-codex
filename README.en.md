@@ -142,6 +142,14 @@ For an intentional custom location, pass `--runtime 'D:\chosen\runtime'`; that p
 
 Replace the adapter commit placeholder with the independently reviewed published revision. Host maintenance uses `codex-maintenance-plan` and an explicit `--maintenance-contract FILE`, independently of project init/task admission. Prior authorized installation receipts establish byte ownership; candidate equality does not. Unknown project role documentation is preserved without blocking admission, while unknown control instructions remain blocking. Supported uninstall and normal reinstall preserve user configuration and recovery evidence. See [Host maintenance](docs/thaliris-host-maintenance.md) for the public sequence and legacy approval boundary.
 
+The `multi_agent_mode_hint_text` compatibility edit supports only the
+source-verified Codex CLI `0.162.0-alpha.2` (tag `rust-v0.162.0-alpha.2`, peeled
+commit `74e804deeb1241d5fe699b31fb319f7d46454c42`) and writes an empty string
+only when the user-level leaf is absent; unknown versions and existing values
+are preserved. Higher-priority project configuration or CLI `-c` can still
+override it. Field ownership, the normal upgrade/uninstall entrypoints, and
+fresh-session/Fresh Child acceptance are documented in [Host maintenance](docs/thaliris-host-maintenance.md).
+
 
 Setup resolves the automatic Host LocalCache base through an OS handle before
 creating a candidate directory, then observes the final runtime directory before

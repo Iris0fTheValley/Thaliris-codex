@@ -147,6 +147,8 @@ def validate_ownership(contents: bytes | None, installed: bytes | None, intent: 
     if any(not isinstance(event, str) or not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
            for event, entries in record["hook_handlers"].items()):
         raise ValueError("invalid installed hook ownership structure")
+    from . import mode_hint_config
+    mode_hint_config.validate(record.get(mode_hint_config.RECORD_KEY))
     return record
 
 
@@ -360,7 +362,7 @@ def _failure(home: Path, error: Exception) -> dict:
 
 
 def install(home: Path, executable, executable_sha256, execution_constraint, filename) -> dict:
-    from . import codex_adapter as adapter, lifecycle, host_preflight, roles, host_transition
+    from . import codex_adapter as adapter, lifecycle, host_preflight, roles, host_transition, mode_hint_config
     # No disk, audit, profile or trust mutation occurs before this complete plan.
     try:
         intent = contract(filename, "codex-install", home)
@@ -383,6 +385,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         before.update(host_transition._observe(home, targets, targets=targets))
         safe(home / "config.toml")
         record = ownership(home, prior, intent)
+        hint_record, hint_status = mode_hint_config.plan_install(home, record)
         if record.get("execution_constraint") == "luna-only" and execution_constraint != "luna-only":
             raise ValueError("existing luna-only installation requires the same explicit constraint; omission cannot remove it")
         exe, sha, problem = adapter._host_install_executable(home, candidate, executable_sha256 or json.loads(approved)["executable_sha256"])
@@ -454,7 +457,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             if not hook_handlers[event]:
                 hook_handlers[event] = [entry for entry in merged.get("hooks", {}).get(event, [])
                     if entry in record.get("hook_handlers", {}).get(event, [])]
-        installation_changed = bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
+        installation_changed = hint_status["status"] == "PLANNED" or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
             before.get(name) != contents for name, contents in writes.items()
         )
         receipt = {"format": RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
@@ -467,6 +470,8 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
                                    and not name.startswith("instruction_migrations/")},
                    "hook_handlers": hook_handlers}
         receipt["owned_bytes"]["AGENTS.md#global"] = digest(_global_owned_bytes(writes["AGENTS.md"]))
+        if hint_record is not None:
+            receipt[mode_hint_config.RECORD_KEY] = hint_record
         writes[RECEIPT_NAME] = (json.dumps(receipt, sort_keys=True, ensure_ascii=False) + "\n").encode()
         observed = _files(home)
         observed.update(host_transition._observe(home, targets, targets=targets))
@@ -477,7 +482,8 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
 
     changed_files = sorted(set(deletes) | {name for name, contents in writes.items() if before.get(name) != contents})
     finish = {"candidate": str(candidate), "sha": sha, "runtime": runtime.decode(),
-              "execution_constraint": execution_constraint, "changed_files": changed_files}
+              "execution_constraint": execution_constraint, "changed_files": changed_files,
+              "mode_hint_record": hint_record, "mode_hint_status": hint_status}
     try:
         with host_transition.locked(home):
             transition = host_transition.begin(home, intent, before, writes, deletes, finish)
@@ -497,7 +503,7 @@ def _transition_failure(home, error):
 
 
 def _finish_install(home, transition):
-    from . import codex_adapter as adapter, lifecycle, codex_app_server, roles, host_transition
+    from . import codex_adapter as adapter, lifecycle, codex_app_server, roles, host_transition, mode_hint_config
     finish = transition["finish"]
     candidate, sha, runtime = Path(finish["candidate"]), finish["sha"], finish["runtime"].encode()
     execution_constraint, changed_files = finish["execution_constraint"], list(finish["changed_files"])
@@ -516,6 +522,11 @@ def _finish_install(home, transition):
         trust_error = str(exc)
         trust_status = "HOST_HOOK_TRUST_INSTALL_FAILED"
     ready = health["hooks_configured"] == "YES" and trust_status == "TRUSTED" and trusted_count == enabled_count == expected_count and adapter._host_profile_definition_present(home) == "YES"
+    hint = finish.get("mode_hint_status", mode_hint_config.status("LEGACY_UNMANAGED"))
+    if ready and hint["status"] in {"PLANNED", "MANAGED"}:
+        hint = mode_hint_config.finish_install(home, transition)
+        if hint["changed"]:
+            changed_files.append("config.toml")
     if ready:
         manual = []
         host_transition.complete(home, transition)
@@ -525,6 +536,8 @@ def _finish_install(home, transition):
         manual = ["one_or_more_Thaliris_Host_hooks_are_disabled_by_user_state"]
     else:
         manual = ["Host registration or trust incomplete"]
+    if hint["status"] in {"USER_CHANGED_PRESERVED", "USER_CUSTOM_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED", "APPLY_OUTCOME_UNKNOWN_PRESERVED"}:
+        manual.append("native_mode_hint_compatibility:" + hint["status"])
     return {"ok": ready, "changed": bool(changed_files), "target": str(home),
         "files": sorted(set(changed_files)), "manual_action_required": manual,
         "host_actor_assurance": "UNKNOWN", "maintenance_authority": "EXPLICIT_HUMAN_INTENT",
@@ -532,6 +545,7 @@ def _finish_install(home, transition):
         "host_hook_registration_present": health["hooks_configured"], "host_hook_trust_status": trust_status,
         "host_hook_trusted_count": trusted_count, "host_hook_enabled_count": enabled_count,
         "host_hook_expected_count": expected_count, "host_hook_trust_error": trust_error,
+        "native_mode_hint_compatibility": hint,
         "host_integration_ready": "YES" if ready else "NO", "global_instruction_ready": "YES",
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,
@@ -545,7 +559,7 @@ def _finish_install(home, transition):
 
 
 def uninstall(home: Path, filename) -> dict:
-    from . import codex_adapter as adapter, lifecycle, codex_app_server, host_transition
+    from . import codex_adapter as adapter, lifecycle, codex_app_server, host_transition, mode_hint_config
     import os
     try:
         intent = contract(filename, "codex-uninstall", home)
@@ -563,6 +577,10 @@ def uninstall(home: Path, filename) -> dict:
         if problem or probed != executor:
             raise ValueError(problem or "maintenance executor probe identity mismatch")
         record = ownership(home, prior, intent)
+        hint_record = record.get(mode_hint_config.RECORD_KEY)
+        mode_hint_config.validate(hint_record, home)
+        if hint_record is not None:
+            mode_hint_config.read(home)  # Reject malformed config before any disk transition.
         writes, deletes, preserved = {}, [], []
         current_global = before.get("AGENTS.md", b"")
         span = _global_owned_bytes(current_global)
@@ -628,6 +646,7 @@ def uninstall(home: Path, filename) -> dict:
     deletes += [name for name, contents in writes.items() if not contents]
     writes = {name: contents for name, contents in writes.items() if contents}
     finish = {"keys": keys, "inert": inert, "preserved": preserved,
+              "mode_hint_record": hint_record,
               "changed_files": sorted(set(writes) | set(deletes))}
     try:
         with host_transition.locked(home):
@@ -638,12 +657,13 @@ def uninstall(home: Path, filename) -> dict:
 
 
 def _finish_uninstall(home, transition):
-    from . import codex_app_server, lifecycle, codex_adapter as adapter, host_transition
+    from . import codex_app_server, lifecycle, codex_adapter as adapter, host_transition, mode_hint_config
     finish = transition["finish"]
     keys, inert, preserved = finish["keys"], finish["inert"], finish["preserved"]
     audits = [host_transition.archive_name(transition)]
     try:
         trust_removed = codex_app_server.remove_owned_hook_trust(home, keys) if keys else 0
+        hint = mode_hint_config.apply(home, finish.get("mode_hint_record"), remove=True)
     except (OSError, ValueError, RuntimeError) as exc:
         result = _failure(home, exc)
         result.update(status="HOST_TRANSITION_PENDING", changed=True, runtime_audit_records=audits,
@@ -651,10 +671,11 @@ def _finish_uninstall(home, transition):
                       host_hook_trust_cleanup_status="FAILED", host_hook_trust_cleanup_error=str(exc))
         return result
     host_transition.complete(home, transition)
-    return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed), "target": str(home),
+    return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed or hint["changed"]), "target": str(home),
         "status": "UNINSTALLED_INERT_RUNNER_RETAINED" if inert else "UNINSTALLED",
-        "files": finish["changed_files"], "preserved_files": preserved,
-        "manual_action_required": [], "retained_inert_runner": inert, "runtime_audit_records": audits,
+        "files": sorted(set(finish["changed_files"] + (["config.toml"] if hint["changed"] else []))), "preserved_files": preserved,
+        "native_mode_hint_compatibility": hint,
+        "manual_action_required": ["native_mode_hint_compatibility:USER_CHANGED_PRESERVED"] if hint["status"] == "USER_CHANGED_PRESERVED" else [], "retained_inert_runner": inert, "runtime_audit_records": audits,
         "host_hook_trust_cleanup_status": "CLEANED" if keys else "NOT_NEEDED",
         "host_hook_trusted_state_removed": trust_removed, "host_hook_trust_cleanup_error": None,
         "host_hook_registration_present": lifecycle.host_hooks_health(home)["hooks_configured"],

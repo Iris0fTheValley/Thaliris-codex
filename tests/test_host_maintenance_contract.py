@@ -289,14 +289,16 @@ def test_candidate_identity_failure_never_writes_profiles(tmp_path, monkeypatch,
     elif defect == "package":
         (exe.parent.parent / "Lib/site-packages/thaliris_codex/cli.py").write_bytes(b"changed package")
     elif defect == "manifest":
-        value = json.loads(path.read_bytes()); value["candidate"]["runtime_sha256"] = "a" * 64
+        value = json.loads(path.read_bytes())
+        value["candidate"]["runtime_sha256"] = "a" * 64
         path.write_text(json.dumps(value))
     elif defect == "pth":
         (exe.parent.parent / "Lib/site-packages/evil.pth").write_text("import external\n")
     elif defect == "probe":
         monkeypatch.setattr(adapter, "_host_install_executable", lambda *a: (None, None, "host_executable_current_hook_abi_probe_failed"))
     else:
-        value = json.loads(path.read_bytes()); value["candidate"]["source_pin"] = "sha256:" + "f" * 64
+        value = json.loads(path.read_bytes())
+        value["candidate"]["source_pin"] = "sha256:" + "f" * 64
         path.write_text(json.dumps(value))
     assert adapter.codex_install(maintenance_contract=path)["ok"] is False
     assert snapshot(home) == {}
@@ -351,7 +353,10 @@ def test_uninstall_reinstall_preserves_config_user_profiles_and_recovery_evidenc
     monkeypatch.delenv("THALIRIS_RUN_SCRIPT")
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert result["ok"] is True, result
-    assert (home / "config.toml").read_bytes() == b"user_setting = true\n"
+    from thaliris_codex import mode_hint_config
+    field = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())[mode_hint_config.RECORD_KEY]
+    # A fresh reinstall manages the absent leaf; all preceding user bytes survive.
+    assert (home / "config.toml").read_bytes().replace(field["fragment"].encode(), b"", 1) == b"user_setting = true\n"
     assert (home / "agents/user.toml").read_bytes() == b"user role\n"
     assert (home / "recovery-authority.json").read_bytes() == b"retained task recovery evidence"
     assert result["host_session_load_status"] == "UNKNOWN"
@@ -456,7 +461,8 @@ def test_unknown_actor_maintenance_does_not_drop_prior_luna_constraint(tmp_path,
     monkeypatch.setenv("CODEX_HOME", str(home))
     exe, _ = pinned_test_thaliris
     path = intent(tmp_path, home, exe)
-    value = json.loads(path.read_bytes()); value["execution_constraint"] = "luna-only"
+    value = json.loads(path.read_bytes())
+    value["execution_constraint"] = "luna-only"
     path.write_text(json.dumps(value))
     assert adapter.codex_install(execution_constraint="luna-only", maintenance_contract=path)["ok"] is True
     before = snapshot(home)
@@ -581,7 +587,12 @@ def test_generation_crash_replays_original_contract(operation, surface, tmp_path
     assert not host_transition.pending(home)
     assert (home / "user.txt").read_bytes() == b"user-owned content"
     assert (home / "agents/user.toml").read_bytes() == b"user role"
-    assert (home / "config.toml").read_bytes() == b"user_setting=true\n"
+    config_bytes = (home / "config.toml").read_bytes()
+    if operation == "fresh":
+        from thaliris_codex import mode_hint_config
+        field = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())[mode_hint_config.RECORD_KEY]
+        config_bytes = config_bytes.replace(field["fragment"].encode(), b"", 1)
+    assert config_bytes == b"user_setting=true\n"
     if operation == "uninstall":
         assert not (home / runtime_identity.MANIFEST_NAME).exists()
         assert not (home / maintenance.RECEIPT_NAME).exists()

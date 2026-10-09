@@ -10,7 +10,10 @@ import pytest
 @pytest.fixture
 def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Supply a fake exact executable identity for Host installer unit tests."""
-    from thaliris_codex import codex_adapter, codex_app_server, lifecycle
+    from thaliris_codex import codex_adapter, codex_app_server, lifecycle, mode_hint_config
+    # No production CLI capability probe in tests using this fake runtime.
+    # Model the source-verified CLI; unknown-version tests override this fact.
+    monkeypatch.setattr(mode_hint_config, "capability", lambda: "SUPPORTED")
 
     venv = tmp_path / "test-runtime"
     executable = venv / "Scripts" / "test-host-executable.exe"

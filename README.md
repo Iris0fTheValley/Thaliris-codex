@@ -137,6 +137,12 @@ $exe = $runtime.executable
 
 请将 adapter commit 占位符替换为独立审阅的已发布不可变版本。Host 维护使用 `codex-maintenance-plan` 和明确的 `--maintenance-contract FILE`，不依赖项目 init/task admission。原始授权安装记录证明 bytes ownership；候选内容相同不证明 ownership。未知项目 role 文档保留且不单独阻止 admission，真正控制指令冲突仍阻止。受支持的卸载和正常重装保留用户配置及恢复证据。公共流程和 legacy 批准边界见 [Host 维护](docs/thaliris-host-maintenance.md)。
 
+`multi_agent_mode_hint_text` 兼容项仅支持源码已核实的 Codex CLI
+`0.162.0-alpha.2`（tag `rust-v0.162.0-alpha.2`，commit
+`74e804deeb1241d5fe699b31fb319f7d46454c42`），且只在用户级字段缺失时写入空字符串；
+未知版本和用户已有值均保留。高优先级 project 配置或 CLI `-c` 仍可能覆盖它。字段
+ownership、正常升级/卸载入口和 fresh-session/Fresh Child 验收见 [Host 维护](docs/thaliris-host-maintenance.md)。
+
 
 setup 在创建候选目录前，通过 OS handle 解析自动发现的 Host LocalCache 物理 base，
 然后在创建 venv、安装包之前再次观察最终 runtime 目录。显式 `--runtime` 发生重定向时，
