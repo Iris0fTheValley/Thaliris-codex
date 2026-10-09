@@ -669,6 +669,92 @@ def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_
     assert "report blocked work honestly" in normalized_controller
 
 
+def test_global_renderer_carries_shared_working_principles_inside_owned_span():
+    digest = hashlib.sha256(b"managed text").hexdigest()
+    rendered = codex_adapter._global_agents_block(Path("C:/installed/thaliris.exe"), digest)
+    text = rendered.decode("utf-8")
+    normalized = " ".join(text.lower().split())
+
+    # The whole render is the installer-synchronized managed span; no manual
+    # edit of the protected global block is needed or permitted.
+    assert codex_adapter._global_agents_span(rendered) == (0, len(rendered))
+    assert "### thaliris shared working principles" in normalized
+    for heading in ("waiting and asynchronous work", "communication and context efficiency",
+                    "scope, execution, and verification", "evidence, ownership, and language precision",
+                    "durable knowledge and instruction consistency"):
+        assert f"#### {heading}" in normalized
+    for principle in ("one observation owner", "do not repeatedly wake a model to observe unchanged state",
+                      "neither progress nor completion evidence", "heartbeats",
+                      "reconstruct an already covered inventory", "smallest meaningful checks",
+                      "not automatically proof", "an active task by itself is not proof of a write conflict",
+                      "fixed token, tool-call, retry, file-count or elapsed-time thresholds",
+                      "cannot establish their own historical authority", "stable primary language",
+                      "index changes belong", "protected global instruction blocks"):
+        assert principle in normalized, principle
+    # Shared principles stay subordinate to the existing role, authority and
+    # isolation boundaries instead of granting a second authority layer.
+    assert "do not grant controller, task-admission, security-maintenance or host-administration authority" in normalized
+    assert "role-specific instructions and selected handoffs remain authoritative" in normalized
+    assert "human decision" in normalized and "isolation and readonly boundaries" in normalized
+    assert "preserve unknown user-owned bytes" in normalized
+
+
+def test_global_startup_entry_covers_new_projects_without_git_metadata():
+    normalized = " ".join(codex_adapter._global_agents_block().decode("utf-8").lower().split())
+    assert "for substantive file-changing git work" not in normalized
+    assert "read-only/chat/non-git work needs no startup" not in normalized
+    assert "including readme-only changes, configuration changes and new project creation" in normalized
+    assert "without git metadata" in normalized
+    assert "initialize git at the intended project root before bootstrap" in normalized
+    assert "do not initialize unrelated directories or create git metadata for read-only work" in normalized
+    assert "they do not initiate project bootstrap or task admission" in normalized
+    assert "do not bootstrap, task-start or task-abandon" in normalized
+    # The pinned runner, Controller instruction retrieval and authority
+    # boundaries stay unchanged by the startup correction.
+    assert "installed pinned runner" in normalized
+    assert normalized.count("codex-bootstrap") == 1
+    assert normalized.count("--root <repo> controller-instructions") == 1
+    assert "preserve unknown user-owned bytes" in normalized
+
+
+def test_new_non_git_project_reaches_existing_bootstrap_after_intended_root_init(tmp_path: Path, monkeypatch):
+    import subprocess
+
+    from thaliris_codex import host_transition
+
+    project = tmp_path / "new-project"
+    project.mkdir()
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "user-notes.txt").write_text("keep\n", encoding="utf-8")
+    monkeypatch.setattr(host_transition, "pending", lambda *_args: False)
+
+    # codex-bootstrap still requires Git metadata: the entry behavior is the
+    # owning Controller creating the repository at the intended project root,
+    # never the CLI initializing an arbitrary directory.
+    with pytest.raises(RuntimeError, match="not a Git workspace"):
+        bootstrap.bootstrap(project)
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    calls = []
+
+    def invoke(executable, root, command):
+        calls.append((Path(root), command))
+        if command == "bootstrap-check":
+            return {"ok": True, "project_definition_present": "NO"}
+        return {"ok": True, "project_definition_present": "YES", "manual_action_required": []}
+
+    monkeypatch.setattr(bootstrap, "_trusted_executable", lambda: ["installed"])
+    monkeypatch.setattr(bootstrap, "_invoke", invoke)
+    result = bootstrap.bootstrap(project)
+
+    assert result["status"] == "READY" and result["init_invoked"] is True
+    assert calls == [(project.resolve(), "bootstrap-check"), (project.resolve(), "init")]
+    assert (project / ".git").is_dir()
+    assert not (unrelated / ".git").exists()
+    assert [item.name for item in unrelated.iterdir()] == ["user-notes.txt"]
+
+
 @pytest.mark.parametrize("status", ["READY", "CURRENT_CONTINUATION", "MANUAL_ACTION_REQUIRED", "UNKNOWN", "INVALID_STATE"])
 def test_required_bootstrap_delivers_normal_guidance_without_extra_retrieval_or_authority(tmp_path, monkeypatch, status):
     from thaliris_codex import host_transition

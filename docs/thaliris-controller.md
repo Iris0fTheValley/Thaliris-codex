@@ -16,8 +16,14 @@ may retrieve other rules on demand within their authority. Retrieval grants no a
 
 ## Startup and admission
 
-For substantive file-changing Git work, unless the human opts out, the owning root
-Controller runs `<installed pinned runner> --root <repo> codex-bootstrap` directly once. Read-only/chat/non-Git work needs none.
+For substantive file-changing project work, including README-only changes,
+configuration changes and new project creation, unless the human opts out, the owning
+root Controller runs `<installed pinned runner> --root <repo> codex-bootstrap` directly once. Chatting
+and read-only work needs no project bootstrap. When a new project directory has no Git
+metadata, initialize Git at the intended project root before bootstrap if creating a
+repository is within the user's requested project scope; do not initialize unrelated
+directories or create Git metadata for read-only work. Bootstrap itself still requires
+Git metadata and never initializes arbitrary directories.
 Managed children follow their handoff; do not bootstrap, task-start or task-abandon
 the parent's ACTIVE task. Use this installed pinned runner for later operations;
 do not select alternate startup commands, shell-computed hashes or unknown runtime code.

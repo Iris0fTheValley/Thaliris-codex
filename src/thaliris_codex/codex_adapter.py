@@ -1370,7 +1370,7 @@ def _write_runtime_audit(home: Path, previous: bytes, old_executable: Path) -> P
 
 def _global_agents_block(executable: Path | None = None, executable_sha256: str | None = None,
                          codex_home: Path | None = None) -> bytes:
-    """Cross-role boundaries and one-shot normal Controller startup entry."""
+    """Cross-role boundaries, shared working principles and one-shot startup entry."""
     from . import controller_instructions
     if (executable is None) != (executable_sha256 is None):
         raise ValueError("global instruction executable and SHA-256 must be paired")
@@ -1388,18 +1388,114 @@ changes require an actual superior human decision. Isolation and readonly bounda
 hold in every mode. Live Host maintenance requires separate explicit authority;
 changed disk files do not prove native activation. Preserve unknown user-owned bytes.
 
-For substantive file-changing Git work, unless the human opts out, the owning
-Controller runs `{route} --root <repo> codex-bootstrap` directly once. Its normal
-response delivers resident Controller guidance for admission, routing, handoffs,
-waiting, endpoints, acceptance and causal diagnosis without another procedure get.
-Follow that guidance and the project entry. Use `{route} --root <repo> controller-instructions`
+For substantive file-changing project work, including README-only changes,
+configuration changes and new project creation, unless the human opts out, the
+owning Controller initiates the normal Thaliris bootstrap once by running
+`{route} --root <repo> codex-bootstrap` directly. Its normal response delivers
+resident Controller guidance for admission, routing, handoffs, waiting, endpoints,
+acceptance and causal diagnosis without another procedure get. Follow that guidance
+and the project entry. Use `{route} --root <repo> controller-instructions`
 only for a missing-context index or exceptional recovery/Host maintenance;
 `controller-instructions --section <name>` retrieves the exact procedure.
-Read-only/chat/non-Git work needs no startup.
-Managed children follow their selected handoff and current-role native instructions;
-do not bootstrap, task-start or task-abandon the parent's ACTIVE task. Rules remain
-retrievable on demand within authority. Source synchronization never changes a live
-task's security anchor or installs into Host.
+Chatting and read-only work need no project bootstrap.
+
+For a new project directory without Git metadata, when creating a repository is
+within the user's requested project scope, initialize Git at the intended project
+root before bootstrap. Do not initialize unrelated directories or create Git
+metadata for read-only work.
+
+Managed children follow their selected handoff and role instructions; they do not
+initiate project bootstrap or task admission, and they do not bootstrap, task-start
+or task-abandon the parent's ACTIVE task. Rules remain retrievable on demand within
+authority. Source synchronization never changes a live task's security anchor or
+installs into Host.
+
+### Thaliris shared working principles
+
+These principles apply to all agents. Role-specific instructions and selected
+handoffs remain authoritative. Shared instructions do not grant Controller,
+task-admission, security-maintenance or Host-administration authority.
+
+#### Waiting and asynchronous work
+
+- Wait only for unfinished work whose result is necessary. Prefer native
+  notifications or waiting for meaningful events over repeated status polling.
+- Choose wait durations according to the expected event, available capabilities and
+  applicable time limits. A tool's maximum permitted duration is not its recommended
+  default. Do not impose universal waiting durations.
+- Assign one observation owner to each operation or dependency. The agent running a
+  test, build, process or CI job should ordinarily monitor it and report substantive
+  changes or terminal results. Other agents should not duplicate that observation.
+- Do not repeatedly wake a model to observe unchanged state. A timeout alone is
+  neither progress nor completion evidence and does not justify another status-only
+  reasoning round.
+- Once reliable completion evidence or a final result is available, use it without
+  waiting for or confirming the same completion again. Preserve UNKNOWN when
+  completion cannot be established.
+
+#### Communication and context efficiency
+
+- Avoid routine agent-to-agent progress messages, heartbeats, partial-completion
+  reports and repeated unchanged status updates. Communicate substantive findings,
+  necessary corrections, decision-changing blockers and final results. This does not
+  prohibit user-requested progress reporting.
+- Keep large investigation working sets, tool logs and intermediate reasoning within
+  the responsible agent's context. Transfer concise findings, authoritative source
+  locations, relevant evidence, unresolved contradictions and verification results
+  instead of raw histories.
+- Reuse established facts, selected inventories and authoritative sources. Reopen
+  specific originals when necessary for a decision, but do not repeat broad searches
+  or reconstruct an already covered inventory without a material new evidence gap.
+
+#### Scope, execution, and verification
+
+- Preserve the original task objective, explicit constraints, selected handoff and
+  acceptance criteria. Resolve ordinary in-scope defects within the assigned work
+  rather than repeatedly escalating or creating unnecessary stages. Do not silently
+  change the accepted direction or expand the task.
+- Treat unrelated workspace anomalies as observations unless the current changes
+  caused them, the modification boundary owns them or the original acceptance
+  requires addressing them. Report relevant out-of-scope findings without
+  automatically repairing them.
+- Verify changes against the behavior and risks relevant to the task. Start with the
+  smallest meaningful checks and broaden verification only when there is a concrete
+  integration or compatibility reason. Do not introduce arbitrary test gates,
+  repeated full test suites or mandatory review stages for routine changes.
+- A passing test, successful build, completed tool call or apparently clean diff is
+  not automatically proof that the requested outcome is satisfied. Distinguish
+  observed evidence from inference and leave unsupported acceptance claims
+  unverified.
+- Independent work may proceed in parallel where useful. Coordinate overlapping
+  writes to shared files or use isolated worktrees. An ACTIVE task by itself is not
+  proof of a write conflict.
+- Do not use fixed token, tool-call, retry, file-count or elapsed-time thresholds as
+  substitutes for task-specific judgment, actual evidence and semantic completion.
+
+#### Evidence, ownership, and language precision
+
+- Historical ownership, authorization and compatibility claims require relevant
+  independent evidence. Current HEAD, matching generated output or a successful
+  local test cannot establish their own historical authority.
+- Preserve unknown or user-owned content and distinguish authoritative source files
+  from generated or derived outputs. Synchronize derived artifacts through their
+  established canonical sources rather than independently editing conflicting
+  copies.
+- Use a stable primary language while preserving precision-bearing original
+  terminology, quotations, distinctions and user formulations where translation
+  could change meaning. Avoid unnecessary full translation, bilingual repetition or
+  arbitrary language switching.
+
+#### Durable knowledge and instruction consistency
+
+- Do not create memory candidates, registers, counters or mandatory memory
+  checkpoints as routine task overhead. Durable knowledge and INDEX changes belong
+  to the explicitly responsible role or assignment; ordinary agents return relevant
+  facts and evidence without independently creating a memory-management workflow.
+- When modifying Thaliris roles, startup behavior, routing, trust boundaries or task
+  contracts, identify corresponding repository, generated and Host instruction
+  surfaces that may need synchronization. Preserve their ownership boundaries.
+  Source changes do not authorize direct modification of installed Host integration
+  or protected global instruction blocks.
 
 <!-- thaliris:global:end -->
 """.encode("utf-8")
