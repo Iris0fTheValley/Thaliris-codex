@@ -2,9 +2,119 @@
 
 Language: English | [简体中文](README.md)
 
+A lightweight, Git-native context and orchestration layer for AI coding workflows.
+
+Thaliris selects necessary facts, constraints and evidence to protect effective reasoning by high-capability models in focused contexts. Context quality is not context quantity; runtime prompts are part of the working context too. Irrelevant information, competing objectives and accumulated history can dilute or interfere with the evidence that actually needs reasoning.
+
+**Attention is the most expensive resource.** Here, attention means a capable model's effective cognitive budget for solving difficult problems in a clean, focused context. It is neither simply the price of tokens nor the Attention algorithm.
+
+Thaliris manages the conditions under which information enters a reasoning path rather than rebuilding a general-purpose Agent Framework. Evidence, freshness, memory, task state and adapter mechanisms serve correct information transfer and task execution, rather than adding process for its own sake. Cognitive isolation and appropriate allocation of model capabilities aim to improve complex-task quality and overall efficiency without sacrificing necessary reasoning or evidence.
+
+> **Status:** Beta. Design goals are not demonstrated gains. Historical ABCD results apply to their original setups; recent prompt, orchestration and waiting-rule changes have no new controlled quality or cost comparison.
+
+## Why this project exists
+
+Long coding tasks tend to accumulate context.
+
+A single agent may eventually carry:
+
+* repository exploration;
+* failed search paths;
+* implementation details;
+* test output;
+* debugging traces;
+* architectural reasoning;
+* reviewer criteria;
+* old decisions;
+* unrelated historical context.
+
+More context is not automatically better context.
+
+For strong reasoning models, the larger risk is often not the raw number of tokens but the number of competing objectives inside the same reasoning trajectory.
+
+An agent asked to simultaneously:
+
+* investigate,
+* design,
+* implement,
+* verify,
+* review its own design,
+* remember previous failures,
+* and satisfy a large procedural checklist
+
+is solving a different problem from an agent given a focused reasoning question with the necessary evidence.
+
+Thaliris is built around a simple idea:
+
+> **Preserve useful information without forcing every role to carry every piece of information.**
+
+The project therefore treats context boundaries as part of the engineering architecture.
+
+---
+
+## Why Thaliris
+
+**Thaliris** combines **Thalamus** and **Iris**.
+
+The thalamus filters and routes information entering cognition; the iris
+regulates how much light reaches vision. The name is an image for agent
+context: control what reaches a reasoning path, preserve evidence-backed
+information, and isolate unrelated working sets.
+
+---
+
+## How the principles shape work
+
+### Long-lived decisions, short-lived working contexts
+
+The long-lived Controller retains the user objective, scope, hard invariants, acceptance conditions and selected decision basis, then decides what work is needed next. Short-lived roles carry the investigation or implementation working set. Search paths, debugging traces and raw logs stay in the responsible context; the return carries conclusions, source locations, verification, contradictions and unknowns that could change a decision. The Controller need not carry the entire process again, and executors need not carry the project's entire history.
+
+A Fresh Child is a new native role session receiving the facts, constraints, sources and acceptance needed for its work through a selective Handoff. Isolating history does not discard evidence: necessary originals can be reopened at their source locations, while established inventories and facts should be reused. A working set is not a handoff set. Recording or retaining information does not automatically pass it to every role.
+
+| Role | Work it handles | Why separate it |
+| --- | --- | --- |
+| Investigator | Facts within the selected scope, exact sources, coverage, contradictions and unknowns | Keeps exploration history in the investigation context without deciding architecture for the Controller |
+| Implementer | An accepted, stable direction through necessary verification, local repair and assigned closure | Lets deterministic work reuse an explicit contract without reopening architectural decisions |
+| Focused Implementer | Sustained reasoning, implementation, runtime feedback and revision across coupled invariants until core semantics converge | Protects focused cognitive budget while the solution can still change; a fresh ordinary Implementer then handles assigned deterministic closure |
+| Reviewer | Independent, non-writing challenge of original acceptance, invariants and cross-boundary behavior after candidate convergence | Examines evidence without carrying the implementer's full debugging trajectory or continuing its code changes |
+
+Roles are capabilities selected by work shape, not stages every task must traverse. Multiple Agents, fixed review rounds and uniform steps are not mandatory; an explicit single-agent execution choice should also be preserved. Investigation, independent review and parallelism depend on evidence, decision coupling and actual write conflicts rather than file, call or elapsed-time thresholds. Native role bindings and execution modes belong to each Host adapter.
+
+### Evidence, task records and reusable knowledge
+
+Conclusions should identify their evidence and applicability. File hashes, Git blobs and test/runtime observations can identify the version observed. Freshness checks only declared sources for change; they cannot prove every dependency unchanged or decide whether a conclusion still applies. Insufficiently established conclusions remain `UNVERIFIED`; missing execution or identity observations remain `UNKNOWN`, rather than turning inference into confirmation. Existing records are retrievable material, not facts downstream roles must accept.
+
+Short-term records retain facts, pending work and evidence for the current Task ID rather than copying conversation transcripts. In Core project records, `.agent-memory/` holds selected knowledge reusable across tasks and `.milestones/` holds continuing project progress and verification. The Controller decides what merits long-term retention and what matters only to this task. Persistence and transmission to the next role are separate choices. Optional Host memory integrations have their own storage and authorization contracts.
+
+Each independent task has a UUID Task ID and its own local state file. Continuing a task means selecting its Task ID and relevant evidence; starting another creates a new Task ID rather than inferring the current task from old workspace state. Old `ACTIVE`, `UNKNOWN` or damaged records do not automatically occupy a singleton task slot. Actual overlapping writes to shared files still need coordination. Native session association, recovery and permission checks belong to adapters; a Task ID grants no authority and does not authenticate a Host actor.
+
+Completion requires Controller semantic acceptance against the user's original objective. A test `PASS` establishes the result of the checks run; child completion establishes execution termination; a clean diff does not establish the requested product behavior. Each necessary dependency has one observation owner. Use reliable results once available, without waiting for the same completion again or repeatedly waking a model to observe unchanged state. Verification and waiting serve actual unresolved questions.
+
+## A cross-module coding example
+
+Suppose a user requests cancellation for an export feature spanning an API, queue and storage layer while preserving older requests. This illustrates the mechanism, not a product test or performance experiment, and is not a mandatory workflow.
+
+1. The Controller establishes cancellation semantics, compatibility boundaries and acceptance scenarios. An Investigator maps request entry, queue transitions and storage writes, returning sourced call relationships, existing tests and unresolved races. Failed searches and raw logs stay in its working set.
+2. The Controller selects relevant facts, hard invariants and unknowns for the Handoff. Where cancellation, completion and writes are coupled, a Fresh Focused Implementer implements and verifies those invariants. Independent changes with stable direction can go to an ordinary Implementer.
+3. The executor returns the exact candidate, source versions, test coverage and uncovered cases. After core semantic convergence, a fresh ordinary Implementer can handle remaining deterministic synchronization, regression or Git closure without extending the original focused context.
+4. Where independent challenge could affect acceptance, a Fresh Reviewer examines boundaries such as simultaneous cancellation and completion or older API compatibility. Unverified runtime behavior remains unknown; findings return with evidence rather than becoming accepted conclusions automatically.
+5. The Controller compares the results with the original request and decides to repair, gather further evidence or accept. Only cancellation invariants or verified failure modes with value beyond this task enter project memory; other records remain with their Task ID.
+
+Source code, Git, tests, compilers and actual runtime behavior remain the basis for correctness. Thaliris reuses native sessions, Agents and execution in Codex and DSH, adding context selection, handoffs, records and evidence boundaries rather than constructing another Agent Runtime.
+
+## Codex runtime contracts and capabilities
+
 This is the Codex Host adapter for [shared Thaliris Core](https://github.com/Iris0fTheValley/Thaliris), not an independent Core. It imports Core rather than bundling a copy.
 
 The `thaliris-codex` distribution uses `thaliris_codex` and preserves the `thaliris` and `context` Codex commands. It owns native bootstrap, lifecycle, Hook trust, actor identity, doctor, recovery and generated model profiles. Core supplies the ledger, retrieval, evidence, memory and `thaliris.authority` API.
+
+Codex supplies native Controller and role sessions, tools and collaboration. The adapter connects shared role semantics to native profiles, selective Handoffs, explicit task association and Hook observations. Fresh Children use V2 `fork_turns="none"` or V1 `fork_context=false` and receive only parent-selected material. Native execution termination and Controller semantic acceptance remain separate records.
+
+Ordinary reads, edits, tests and Git work have different boundaries from managed controls such as establishing Authority, changing execution mode or disposing of dependencies. Missing observations stay `UNKNOWN`: they neither automatically deny unrelated ordinary work nor grant managed-control authority. Known read-only restrictions, identity conflicts and user-content protections still apply. Host installation and maintenance require separate authorization; source or disk changes alone do not prove activation in the current process.
+
+Global instructions also carry shared working principles: reuse selected evidence, coordinate writes by work dependencies, verify behavior with the smallest meaningful checks, and give each necessary dependency one observation owner. Bootstrap delivers normal Controller guidance; exceptional recovery and Host maintenance are retrieved when needed. See the [integration protocol](adapter/codex/README.md) and [Authority contract](docs/thaliris-task-authority.md).
+
+## Installation and local development
 
 pyproject.toml declares Python >=3.11 and thaliris>=0.4.4,<0.5.
 
@@ -48,11 +158,17 @@ relocation, even when the old interpreter still exists. Preserve any candidate t
 fails after the redirect check, and create a new runtime directly at the correct
 final location.
 
-For local development install `../Thaliris[test]`, then this repository with `--no-deps -e '.[test]'`, and run `pytest`. The installer creates the dedicated runtime without ensurepip and installs both selected packages through the bootstrap's pip. pip, setuptools and build dependencies stay outside the runtime; no manual `.pth` repair is required. System site packages stay disabled and executable or path-extending `.pth` files remain rejected without exceptions. Verified local wheels are also accepted as `absolute-wheel-path#sha256=<reviewed-digest>`. The entire environment, including shared Core, remains pinned by the runtime manifest. Keep the pinned directory immutable; use a new directory for upgrades. Installing packages does not prove Host enablement, authorization or health.
+Setup and installation also exercise the independent PowerShell runtime guard before switching the Host generation. For explicitly authorized maintenance when the ordinary entrypoints fail, see [launcher preflight recovery](docs/host-preflight-recovery.md).
+
+For local development install the reviewed `../Thaliris[test]` checkout, then this repository with `--no-deps -e '.[test]'`. Before running `pytest`, set `THALIRIS_CORE_SOURCE` to the Core checkout root containing `src/thaliris/core.py`; offline recovery source-runner tests load that source explicitly rather than treating an installed package as reviewed source. In PowerShell use `$env:THALIRIS_CORE_SOURCE = (Resolve-Path '../Thaliris').Path`; in a POSIX shell export `THALIRIS_CORE_SOURCE=../Thaliris`. CI points it at the shared-core checkout.
+
+The installer creates the dedicated runtime without ensurepip and installs both selected packages through the bootstrap's pip. pip, setuptools and build dependencies stay outside the runtime; no manual `.pth` repair is required. System site packages stay disabled and executable or path-extending `.pth` files remain rejected without exceptions. Verified local wheels are also accepted as `absolute-wheel-path#sha256=<reviewed-digest>`. The entire environment, including shared Core, remains pinned by the runtime manifest. Keep the pinned directory immutable; use a new directory for upgrades. Installing packages does not prove Host enablement, authorization or health.
 
 ## Starting and recovering project tasks
 
-After Host installation, the owning Controller runs `codex-bootstrap` once for substantive Git work using the installed pinned runner and target repository. Make this a separate invocation:
+After Host installation, unless the user opts out of Thaliris, the owning Controller runs `codex-bootstrap` once for substantive project file changes, including README-only work, configuration changes and new project creation, using the installed pinned runner and target repository. Chatting and read-only work need no project Bootstrap.
+
+If a new directory lacks Git metadata, initialize Git at the intended project root first only when creating a repository is within the user's task scope. Do not initialize unrelated directories or create Git metadata for read-only work. `codex-bootstrap` itself still requires Git metadata and never initializes arbitrary directories. Make this a separate invocation:
 
 ```powershell
 & '<installed pinned runner>' --root '<repo>' codex-bootstrap
@@ -288,8 +404,4 @@ See [DESIGN.md](DESIGN.md) and
 
 ## README maintenance
 
-Setup and installation also exercise the independent PowerShell runtime guard
-before switching the Host generation. For explicitly authorized maintenance when
-the ordinary entrypoints fail, see [launcher preflight recovery](docs/host-preflight-recovery.md).
-
-The [Thaliris Core Chinese README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) and [English README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.en.md) are canonical for shared explanations and full ABCD results. Keep Codex-specific features, dependencies, and limits here; update both Core language variants for shared changes and keep this repository's English and Chinese READMEs aligned.
+The [Thaliris Core Chinese README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) and [English README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.en.md) are canonical for shared semantics and full ABCD results. All three repositories retain the complete shared project narrative. Synchronize shared changes across both languages in each repository, while keeping runtime capabilities and limits grounded in each adapter's own contract.
