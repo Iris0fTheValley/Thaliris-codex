@@ -6,7 +6,7 @@ Codex 的 Host 适配器，依赖共享 [Thaliris Core](https://github.com/Iris0
 
 `thaliris-codex` 发布 `thaliris_codex` 命名空间及 `thaliris` / `context` 命令。原生引导、角色配置、生命周期、Hook 信任、运行时身份、诊断和恢复由本适配器负责。共享记录、检索、证据、记忆与 authority API 来自 `thaliris`。
 
-pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.3,<0.5。
+pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.4,<0.5。
 
 Windows Python 3.11+ 的正常安装先创建临时 bootstrap 环境，再使用包内的
 runtime installer。请独立选择已审阅的 adapter 完整 commit。省略 `--runtime` 时，
@@ -20,7 +20,7 @@ $bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
 $adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
 & $bootstrap -m pip install --no-deps $adapterSource
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@575652df9d1ebc45c6aa51609db67945e40e6c44' --adapter-source $adapterSource | ConvertFrom-Json)
+$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@56e48ac299dd2c5c4b16c992db732a55b7790893' --adapter-source $adapterSource | ConvertFrom-Json)
 if (-not $runtime.ok) { throw $runtime.error }
 $exe = $runtime.executable
 & $exe version
@@ -72,7 +72,7 @@ Host 安装后，实质性 Git 工作由 owning Controller 使用已安装 pinne
 
 `READY`（旧版 `DEFINITION_READY_ACTOR_UNKNOWN` 也可继续处理）表示项目定义可用；它不认证 Host actor，也不证明角色配置已由当前进程加载。若项目定义缺失，先按 bootstrap 结果处理，而不要绕过 adapter 直接创建另一个任务账本。
 
-任务准入使用单独的 UTF-8 JSON contract 文件，包含非空 `human_instruction`、`boundary`、`invariants`、`acceptance` 字符串，以及 `execution_mode`（`delegated`、`controller-direct` 或 `single-agent`）：
+任务准入使用单独的 UTF-8 JSON contract 文件，包含非空 `human_instruction`、`boundary`、`invariants`、`acceptance` 字符串，以及可选 `execution_mode`（`delegated`、`controller-direct` 或 `single-agent`）。未指定时默认 `delegated`：Controller 负责长期决策，短期 Investigator/Implementer 负责主要调查和实施。`controller-direct` 允许 Controller 自行读取、修改、测试、提交和结束工作，并可按需使用辅助角色；`single-agent` 表示不使用子代理的普通单 Agent 工作。明确用户选择优先于效率默认，但不能扩大任务范围，也不能突破角色只读限制或用户文件保护。
 
 ```json
 {"human_instruction":"<actual user instruction>","boundary":"<selected scope>","invariants":"<hard constraints>","acceptance":"<acceptance conditions>","execution_mode":"delegated"}
@@ -84,11 +84,19 @@ Host 安装后，实质性 Git 工作由 owning Controller 使用已安装 pinne
 & '<installed pinned runner>' --root '<repo>' task-start '<goal>' --authority-contract '<absolute-contract-file>'
 ```
 
-显式 contract admission 不依赖 bootstrap receipt 或一次性 Hook bearer。若显式提供 legacy proof，adapter 仍严格验证它。contract 记录 Controller 选择的人类任务意图；Host Root actor assurance 仍为 `UNKNOWN`，这不是通用身份认证。已知 child、readonly、fenced、retired 或冲突状态不能建立或扩展 authority。
+`delegated` 下，经 Codex 原生 `functions.exec_command` 直接读取证据，仅限一次或极少数互相关联、准确定位的读取。`cmd` 必须严格匹配单路径形式之一：`Get-Content [-LiteralPath] PATH -TotalCount N` 或 `Get-Content [-LiteralPath] PATH | Select-Object [-Skip S] -First N`，其中 `N` 为 1 到 200；工具的 `max_output_tokens` 必须显式设为 1 到 4096。原生上限限制返回 token，不限制源文件字节；长行可能被截断，因此仅有限行数不等于字节有界。该例外不允许无上限读取或默认 Bash。开放式迭代、跨文件调查、长输出分析，以及连续小查询拼成的大调查仍必须委派；这是一项强制的 Controller 工作规范，Hook 无法可靠证明所有第三方 MCP 调用的累计语义。
 
-有效 ACTIVE anchor 可在 turn、网络、Hook 或 session 中断后继续，无需重新证明 Root session 身份。缺少 contract、无 anchor 的历史 ACTIVE task、状态冲突或不可验证的 security bytes 不会自动放行。先用有界 `task-status` 查看路由状态；只有明确诊断时使用 `task-show`。原生 child 完成与 Core/lifecycle 状态都是执行证据，最终语义验收仍由 Controller 决定。
+显式 contract admission 不依赖 bootstrap receipt 或一次性 Hook bearer。若显式提供 legacy proof，adapter 仍严格验证它。contract 记录 Controller 选择的人类任务意图；Host Root actor assurance 仍为 `UNKNOWN`，这不是通用身份认证。已知 child、readonly、fenced、retired 或冲突状态不能建立或扩展 authority。普通 repo work 可依据精确原生 Agent-to-Task map 或 active handoff 中的已知 role；缺失 session、turn、profile 等非关键字段保持 `UNKNOWN`，不据此拒绝普通 work，也不授予 managed-control 资格。已提供的身份矛盾仍阻止依赖该证据的操作；即使 Authority 或可选字段不完整，已知 readonly role 仍拒绝 Bash/MCP mutation。
 
-Authority 冲突恢复必须使用单独的精确恢复流程：它归档证据、恢复记录的受保护 bytes 并隔离已知旧 child；无法证明的终止状态仍为 `UNKNOWN`，恢复不能批准改变过的 security baseline，也不能移除 fence。Host 文件修改、安装记录或一次 bootstrap 都不证明当前 Codex 进程已加载更新。详细操作见 [task authority](docs/thaliris-task-authority.md) 和 [runtime recovery](docs/thaliris-runtime-recovery.md)。
+每个 Task ID 独立保存任务状态、Authority、lifecycle reservations、子代理绑定和恢复证据。`task-start` 创建并选中新的 Task ID；同一仓库中的旧任务仍为 `ACTIVE` 或 `UNKNOWN`，不会被继承或阻止新任务。恢复已有任务必须显式选择其 Task ID。当前 Codex session 也必须通过 `task-associate` 明确关联；该操作以 task ID、session ID 和 Authority revision/hash 建立导航，不证明 Host actor 身份，Host assurance 仍为 `UNKNOWN`。Hook 只使用当前 session/agent-task 的显式映射或精确 Task ID selector；仅仓库路径不足以确定当前任务。
+
+默认执行模式是 `delegated`：长期 Controller 负责方向、范围、验收和后续路由，将开放式、广泛或连续调查交给 Investigator，并将稳定方向的实现交给 Implementer。Controller 可以直接读取一次或极少数互相关联、准确定位且对当前决策必要的证据；开放式迭代和连续小查询仍是应委派的一项调查。用户明确选择 `controller-direct` 或 `single-agent` 时，执行选择优先于效率默认。任务范围、角色只读限制和用户内容保护继续有效。任务中的模式切换通过 `task-mode` 对已选 Task ID、Authority digest 和 revision 执行 CAS，只更新 `execution_mode`；未处置的工作依赖必须先通过明确的取消或放弃路径处理。
+
+有效的 task-scoped ACTIVE anchor 可在 turn、网络或 Hook 中断后继续，不需重复证明 Root session 身份。缺少 contract、无 anchor 的历史 ACTIVE task、Authority 冲突或不可验证的 security bytes 仍会阻止依赖该 Authority 的受管控制操作；它们不应连带禁止与之无关的普通工作、读取和诊断。真实身份冲突、fenced/abandoned 子代理和只读角色限制仍然生效。先用有界 `task-status` 查看路由状态；完整 `task-show` 只用于明确诊断。原生 child 状态、Core/lifecycle 记录和 Controller 对结果的语义验收是分开的事实。
+
+Authority 恢复必须通过显式 Task ID，或已经关联到该任务的 session 选择目标，并保留该任务的来源证据和受保护用户 bytes；它不能批准已变化的 security baseline，也不能移除已知旧 child 的 fence。`task-recover-state` 必须提供 `--task-id` 或已有映射的 `--session-id`。legacy state 只能通过显式诊断/恢复路径访问，不会自动 adopt；未选择的旧 bytes 保持不变。`UNKNOWN` 仍保持 UNKNOWN；Controller 可按有界路径结束或放弃旧任务并隔离迟到结果，无需伪造 child Completed。已知可能仍在写入共享文件时，仍需按实际冲突处理。Host 文件修改、安装记录或一次 bootstrap 都不证明当前 Codex 进程已加载更新。详细操作见 [task authority](docs/thaliris-task-authority.md) 和 [runtime recovery](docs/thaliris-runtime-recovery.md)。
+
+任务进行中若用户明确切换执行方式，可通过 `task-mode` 更新选定 Task ID 的执行模式。该操作要求当前 Authority digest 和任务 revision 的 CAS，并单独提供用户新指令；它只修改 `execution_mode`，不会重写目标、边界、不变量或验收。活动依赖可通过 `task-dispose-dependency` 在同一 Task ID 下明确放弃：命令要求当前 handoff ID、任务 revision、生命周期摘要和理由；它记录 `ABANDONED_DEPENDENCY` 与风险，不会伪造子代理终态，并隔离该 handoff 的迟到结果。若可能仍有共享文件写入，Controller 必须先处理该实际冲突。处置后可在同一任务内通过双 CAS 切换模式。当前 session 关联使用 `task-associate`，显式给出 Task ID、session ID 和预期 Authority digest；它只建立导航，不证明 Host actor 身份。`task-start` 也可接收当前 `--session-id` 以建立任务导航。
 
 [共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 基准结果](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
 
@@ -109,23 +117,23 @@ Authority 冲突恢复必须使用单独的精确恢复流程：它归档证据�
 
 Core 将该可选非空字符串作为不可变 intent 保存；适配器只接受 luna-only，并验证每个执行绑定。外部 anchor 固定已校验的 profile/config hashes，子角色与可变配置不能扩展或解除约束。安装后需要新的 Host session。Admission 比较 SessionStart 时记录的 role profile 和公开 config 文件快照；磁盘快照不能证明 Host 实际加载的 role map 或 CLI -c 覆盖。SubagentStart 核对受约束子角色的 Host model；缺失或不匹配时 handoff 不绑定，之后该子角色的工具会被拒绝，但 hook 无法阻止模型调用。约束禁止 Astra profile 和每次 spawn 的模型覆盖；未启用约束时默认绑定不变。详细迁移说明见 [执行约束移植说明](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md)。
 
-该功能需要 thaliris>=0.4.3。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
+该功能需要 thaliris>=0.4.4。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
 
 ## CI 与平台兼容范围
 
-CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使用 Core 固定 revision `70128abd223ecdf789fd9e8ee3b1bafceec0dd70`，仅手动 workflow 可显式改选 `core_ref`。POSIX runtime identity 检查仅接受 `lib64 -> lib` 的精确虚拟环境别名，并验证目标漂移会被拒绝。Hook transport 只把一个文档起始 UTF-8 BOM 当作传输标记；重复/错位 BOM 与无效 UTF-8/JSON 仍拒绝。Hook 诊断只输出有界 JSON boundary label，不输出 payload，也不推断更深根因。CI 和源测试不证明某个当前安装的 Codex 进程已经加载这些内容。
+CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使用 Core 固定 revision `56e48ac299dd2c5c4b16c992db732a55b7790893`，仅手动 workflow 可显式改选 `core_ref`。POSIX runtime identity 检查仅接受 `lib64 -> lib` 的精确虚拟环境别名，并验证目标漂移会被拒绝。Hook transport 只把一个文档起始 UTF-8 BOM 当作传输标记；重复/错位 BOM 与无效 UTF-8/JSON 仍拒绝。Hook 诊断只输出有界 JSON boundary label，不输出 payload，也不推断更深根因。CI 和源测试不证明某个当前安装的 Codex 进程已经加载这些内容。
 
 ## 运行时提示词层
 
 全局指令保留共享授权/隔离边界与一次性启动入口；必要的 bootstrap 响应将正常 Controller 指导直接交付到任务上下文，包括启动/准入、路由、交接、证据复用、等待、Workstream 终点、验收/独立 review 选择、持久知识准入与因果诊断。项目指令保留共享边界和 canonical 指针；完整 Controller routine 不重复注入每个 fresh child。[Controller 操作程序](docs/thaliris-controller.md) 是权威源；异常恢复、Host 维护按需检索。安装的 pinned runner 的 `controller-instructions` 返回程序索引，`controller-instructions --section <name>` 获取缺失的精确章节。评价完整正常任务上下文、检索成本与交付质量，而非单个最短 prompt。原生角色提示词负责当前角色的执行风格、委派和终点；新鲜 handoff 不向子角色批量注入无关 Controller 程序。所有角色仍可在自身权限内按需检索规则。设计理由与机械实现见 [Codex 协议](adapter/codex/README.md)与 [Core 提示词设计](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)。
 
-每个必要依赖有一个观察 owner：执行角色运行并等待自己的测试、process 与 CI，Controller 等待必要 child 结果，不重复查同一作业。等待按当前能力、实质事件和必要依赖选择，工具最长等待是 capacity，高层时长限制优先；Hook 保留调用者的等待参数。等待成本尚无受控的新比较；五分钟监控周期只是可选的替代观察方式，不是当前功能或要求。受管形状仍是一个 active/pending 顶层 child 与其一个 active/pending Scanner；证明原生终态后，可在同一边界内复用 Scanner 槽处理另一个必要的未覆盖 gap。
+每个必要依赖有一个观察 owner：执行角色运行并等待自己的测试、process 与 CI；Controller 只在已知 child 尚未结束且其结果仍属必要依赖时等待，不重复查同一作业。child 返回 FINAL 或 decision-changing unknown 后，该 slice 已结束，不继续等待。等待按当前能力、实质事件和必要依赖选择，工具最长等待是 capacity，不是默认时长；高层时长限制优先，Hook 保留调用者的等待参数。等待成本尚无受控的新比较；五分钟监控周期只是可选的替代观察方式，不是当前功能或要求。不同 Task ID 可独立并行；单个 Task ID 可同时包含多个已绑定的活动 child，但一次只保留一个待关联预约。是否并行由 Controller 按工作依赖决定；同一工作树中重叠写入需协调，独立 worktree 可承载独立修改。
 
 Hook 失败在 stderr 输出有界 JSON，区分 receive、严格 decode、JSON syntax/shape、dispatch、maintenance-contract 与 runtime-identity 的真实边界。诊断不含 payload 或异常内容，不证明更深根因，也不改变拒绝/身份检查。Hook 文档只接受一个起始 UTF-8 BOM 的边界保持不变。Review READY 不替代最终产品验收。
 
 Controller 提供决策完备且经过选择的交接；实现方法由执行角色决定。普通 Implementer 负责稳定方向下的工作和确定性收敛。面对相互耦合的不变量时，Focused Implementer 负责完整的推理、实现、运行时反馈和修订循环；当聚焦证据支持核心语义，且剩余任务不会改变决策依据时，它返回 FINAL 并释放该工作上下文。
 新的普通 Implementer 负责剩余回归、构建与同步、确定性缺陷、安装和 Git 收尾。通用执行说明不会延长 Focused Implementer 的语义终点。Reviewer 是新建的独立只读角色；READY 需要支持关键验收的证据，不能仅因没有发现阻塞项就判为 READY。Core 和 lifecycle 的观察结果不决定验收。
-精确身份绑定的原生 Completed、已授权 handoff/身份关系以及没有 pending/active 后代共同证明执行关闭。V1 wait_agent 的 status map 使用已生成 agent 的精确 ID，V2 list_agents 使用 canonical task name；不要求切换 V2 或再次确认完成。Completed 证据为精确的单键 `{"completed": <string or null>}` 形式；null 证明执行完成，但不提供结果文字，也不决定语义验收。其他值类型和不支持的形状保持 UNKNOWN。矛盾的原生状态会阻止新的托管 handoff 和任务关闭。SubagentStop 只是可选观察证据；缺失或延迟不能阻止已证明的原生完成。未绑定或冲突的身份、缺失原生终态证据继续 fail closed。Controller 的语义验收独立保留。实验功能默认值与实时 Host 安装不变；未验证兼容性保持 UNKNOWN。
+V1 wait_agent 的 status map 使用已生成 agent 的精确 ID，V2 list_agents 使用 canonical task name；不要求切换 V2 或重复确认已证明的完成。受支持的 Completed 证据为精确的单键 `{"completed": <string or null>}`；null 表示执行终止但不提供结果文字，也不决定语义验收。其他值类型和不支持的形状保持 UNKNOWN。原生执行终止、Controller 结果验收和任务取消/放弃是分开的事实；Controller 可通过有界路径结束管理任务，即使某个 child 的终止仍为 UNKNOWN。迟到结果不能重新进入已终止的任务；已知共享文件写入风险仍需处理。SubagentStop 是可选观察，缺失或延迟不推翻其他已支持证据。矛盾或身份冲突只限制依赖该证据的操作；它们不会把无关普通工作一并拒绝。Host 原生身份字段在 SubagentStart 与 PreToolUse 之间的真实稳定性仍为 UNKNOWN；合成测试不证明 Host 协议。Controller 独立进行语义验收；未经验证的兼容性保持 UNKNOWN。
 
 `thaliris_codex.roles` 是原生 profile 生成的规范来源。精确历史哈希用于安全升级；用户编辑过的字节和项目内 profile shadow 继续按 fail-closed 方式处理。[角色 profile 文档](docs/thaliris-role-packs.md)由源文件生成。源码变更不能证明运行中的 Host 已激活这些内容；父级任务处于 ACTIVE 时也不会在此安装。下方 ABCD 结果仍是历史证据；本次提示词规范化没有基准测试结论。
 
