@@ -319,8 +319,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "catalog": out = catalog(root, args.path)
         elif args.command == "document-get": out = document_get(root, args.path)
         elif args.command == "task-start":
-            receipt = args.bootstrap_receipt or args.controller_bridge_sha256
-            if args.bootstrap_receipt and args.controller_bridge_sha256 and args.bootstrap_receipt != args.controller_bridge_sha256:
+            receipt = args.bootstrap_receipt if args.bootstrap_receipt is not None else args.controller_bridge_sha256
+            if args.bootstrap_receipt is not None and args.controller_bridge_sha256 is not None and args.bootstrap_receipt != args.controller_bridge_sha256:
                 raise ValueError("conflicting bootstrap receipts")
             start_args = (root, args.goal, args.milestone, args.input, args.hook_attestation, receipt)
             out = codex_adapter.task_start(*start_args, authority_contract=args.authority_contract) if args.authority_contract else codex_adapter.task_start(*start_args)

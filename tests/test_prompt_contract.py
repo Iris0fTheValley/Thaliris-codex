@@ -73,15 +73,17 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
     concepts(global_text, ("installed pinned runner", "controller-instructions"),
              ("human decision", "isolation", "readonly boundaries"),
              ("unknown user-owned bytes", "native activation"))
-    for controller_detail in ("task_start_receipt", "authority-contract", "task-recover-state", "task-recover-authority", "offline_recovery.py"):
+    for controller_detail in ("authority-contract", "task-recover-state", "task-recover-authority", "offline_recovery.py"):
         assert controller_detail not in normalized(global_text)
         assert controller_detail in normalized(controller)
+    for obsolete_admission_detail in ("task_start_receipt", "--bootstrap-receipt"):
+        assert obsolete_admission_detail not in normalized(controller)
     for name in controller_instructions.RESIDENT_SECTIONS:
         # Necessary normal bootstrap returns the canonical guidance; no extra get
         # or full Controller injection into each fresh native child is required.
         section = controller_instructions.render(section=name)
         if name == "startup":
-            concepts(resident, ("codex-bootstrap", "task_start_receipt", "authority-contract"))
+            concepts(resident, ("codex-bootstrap", "authority-contract", "explicit contract admission"))
         else:
             assert section.strip() in resident
             assert section.strip() not in global_text

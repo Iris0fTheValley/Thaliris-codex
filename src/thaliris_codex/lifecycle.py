@@ -100,6 +100,12 @@ PRE_TOOL_MATCHER = "*"
 _DELEGATION_TOOL_NAMES = frozenset({"spawn_agent", "Agent", "followup_task", "send_input", "send_message"})
 _FRESH_CHILD_REUSE_TOOL_NAMES = frozenset({"followup_task", "send_input", "send_message"})
 _ROOT_MANAGED_TOOL_NAMES = frozenset({"spawn_agent", "wait_agent", "list_agents", "interrupt_agent", "close_agent"})
+# Exact Codex app surfaces for selecting and opening a separate task/session.
+# These coordinate work without executing source or reusing a bound role child.
+# Do not classify arbitrary MCP suffixes as Controller control-plane tools.
+_ROOT_CODEX_APP_CONTROL_TOOLS = frozenset({
+    "mcp__codex_app__list_projects", "mcp__codex_app__create_thread",
+})
 _CONTROLLER_BOUNDARY_REASON = "THALIRIS_CONTROLLER_BOUNDARY: delegate investigation to a fresh Investigator session and edits to a fresh Implementer session; the Controller may run only bounded control-plane or acceptance checks."
 _OBVIOUS_WRITE = re.compile(
     r"(?i)(?:apply_patch|git\s+(?:apply|commit|reset|checkout|restore|rebase)|(?:set|add|clear|out|remove|move|copy|rename|new)-content|(?:set|add|remove|move|copy|rename|new)-item|\b(?:ni|mkdir)\b|(?<![<>])>{1,2}(?![&]))"
@@ -1297,6 +1303,17 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
         if event not in HOOK_EVENTS or not isinstance(payload, dict):
             return ""
         root = _hook_repository_root(root, payload)
+        if event == "PreToolUse":
+            if payload.get("fenced") is True:
+                return _permission_deny("THALIRIS_FENCED_ACTOR")
+            tool = payload.get("tool_name") or payload.get("tool")
+            normalized = _tool_basename(tool) if isinstance(tool, str) else ""
+            if payload.get("readonly") is True and (
+                _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
+                or _context_operation(payload) in _CHILD_CONTEXT_MUTATIONS
+                or normalized in _DELEGATION_TOOL_NAMES
+            ):
+                return _permission_deny("THALIRIS_READONLY_ACTOR")
         try:
             anchor = task_authority.read(root)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
@@ -3506,6 +3523,11 @@ def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_h
         contract_path = Path(str(payload.get("cwd") or root)) / contract_path
     if _controller_actor_assurance(payload) != "CONTROLLER" and not (explicit and _controller_actor_assurance(payload) == "UNKNOWN"):
         return _permission_deny("THALIRIS_CONTROLLER_ACTOR_UNKNOWN") if event == "PreToolUse" else ""
+    if explicit and event == "PreToolUse":
+        # Selected human intent is the admission contract. A Hook bearer or
+        # instruction digest cannot authenticate its author on a shared OS.
+        # CLI validation and the external anchor retain the actual boundary.
+        return ""
     session_hash = _session_id_hash(payload)
     if session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI:
         return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED") if event == "PreToolUse" else ""
@@ -3867,6 +3889,8 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
 
     if state_status == "ACTIVE":
         if operation == "codex-bootstrap":
+            if anchor is not None:
+                return ""
             return _issue_bootstrap_observation(root, _task_id, payload, managed_hook_abi)
         if operation in {"codex-install", "codex-uninstall"} and _trusted_host_maintenance_route(payload):
             _best_effort_record(_record_controller_guard_event, root, payload, f"HOST_{operation}", "allowed")
@@ -3902,7 +3926,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             if operation in {"task-start", "init", "rollback", "task-recover-state"}:
                 return _permission_deny("THALIRIS_TASK_AUTHORITY_REPLACEMENT_REQUIRES_CONTROLLER_DECISION")
             return ""
-        if normalized in _ROOT_MANAGED_TOOL_NAMES:
+        if normalized in _ROOT_MANAGED_TOOL_NAMES or tool in _ROOT_CODEX_APP_CONTROL_TOOLS:
             _best_effort_record(_record_controller_guard_event, root, payload, normalized, "allowed")
             return ""
         if operation in _ACTIVE_ROOT_CONTEXT_OPERATIONS:
@@ -3930,7 +3954,7 @@ def _permission_deny(reason: str) -> str:
 
 
 def _controller_actor_assurance(payload: dict[str, Any]) -> str:
-    """Current Host source contract supplies no universal positive Root proof.
+    """Observe known delegation, without authorizing persistent task intent.
 
     ThreadSpawn supplies agent_id/type positively. Built-in Review shares the
     owner's session_id but omits those fields. No user input, inherited env,

@@ -47,7 +47,7 @@ def contract(filename: str) -> dict:
     return _validate_contract(json.loads(Path(filename).read_text(encoding="utf-8")))
 
 
-def establish(root: Path, state: dict, intent: dict, session_hash: str) -> dict:
+def establish(root: Path, state: dict, intent: dict, session_hash: str | None) -> dict:
     prior = read(root)
     if prior is not None and prior["status"] == "ACTIVE":
         raise ValueError("TASK_AUTHORITY_ALREADY_ACTIVE")

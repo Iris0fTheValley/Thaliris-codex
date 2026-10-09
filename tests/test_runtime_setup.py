@@ -97,7 +97,8 @@ def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, mo
     # Bootstrap executes the installed console launcher and installed Core,
     # rather than a development _invoke or executable substitute.
     ready = codex_bootstrap.bootstrap(project)
-    assert ready["status"] == "DEFINITION_READY_ACTOR_UNKNOWN", ready
+    assert ready["status"] == "READY", ready
+    assert ready["controller_actor_assurance"] == "UNKNOWN"
     assert (project / "docs/thaliris-role-packs.md").read_bytes() == b"user-owned role description"
     assert runtime_identity.manifest_bytes(executable) == before
     with pytest.raises(ValueError, match="already exists"):

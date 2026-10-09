@@ -655,7 +655,7 @@ def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_
     assert rendered.count("--root <repo> controller-instructions") == 1
     assert rendered.count("--root <repo> codex-bootstrap") == 1
     assert "bootstrap-check" not in rendered and "Get-FileHash" not in rendered
-    assert "--bootstrap-receipt" in controller_instructions.render()
+    assert "Explicit contract admission needs no bootstrap receipt" in controller_instructions.render()
     normalized = " ".join(rendered.lower().split())
     normalized_controller = " ".join(controller_instructions.render().lower().split())
     assert "owning root" in normalized_controller and "controller runs" in normalized_controller
@@ -684,7 +684,10 @@ def test_required_bootstrap_delivers_normal_guidance_without_extra_retrieval_or_
             assert controller_instructions.render(section=name).strip() in guidance
     for detail in ("task-recover-authority", "offline_recovery.py", "--maintenance-contract"):
         assert detail not in guidance
-    assert "task_start_receipt" in guidance and "causal diagnosis" in guidance.lower()
+    assert "--authority-contract" in guidance and "causal diagnosis" in guidance.lower()
+    if status == "READY":
+        assert result["status"] == "READY"
+        assert result["managed_control_authority"] == "EXPLICIT_CONTROLLER_ASSERTION_REQUIRED"
     assert "--maintenance-contract" not in codex_adapter._global_agents_block().decode()
 
 

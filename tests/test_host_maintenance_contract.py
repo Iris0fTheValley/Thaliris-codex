@@ -33,6 +33,159 @@ def snapshot(home):
     return {p.relative_to(home).as_posix(): p.read_bytes() for p in home.rglob("*") if p.is_file()} if home.exists() else {}
 
 
+def instruction_migration(path, before, after, start, end, kind):
+    return {"path": str(path), "before_sha256": maintenance.digest(before),
+        "after_sha256": maintenance.digest(after), "remove_spans": [{"offset": start,
+        "length": end-start, "sha256": maintenance.digest(before[start:end]), "kind": kind}]}
+
+
+def migration_intent(tmp_path, home, exe, monkeypatch):
+    """Portable two-global fixture with exact approved legacy spans."""
+    global_file = home / "AGENTS.md"
+    prefix = b"User preferences\r\n\r\n"
+    obsolete = b"## Durable Thaliris synchronization\r\n\r\n- old maximum wait rule\r\n\r\n"
+    suffix = b"## Remote workstation\r\n\r\nPreserve user bytes: \xe7\x94\xa8\xe6\x88\xb7\r\n"
+    current = global_file.read_bytes() + prefix + obsolete + suffix
+    global_file.write_bytes(current)
+    external = tmp_path / "user" / "AGENTS.md"
+    external.parent.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: external.parent))
+    router = b"<!-- thaliris:global:begin -->\r\nOld long Router / receipt instructions\r\n<!-- thaliris:global:end -->\r\n"
+    external_before = prefix + router + suffix
+    external.write_bytes(external_before)
+    canonical_after = adapter._global_agents_update(current.replace(obsolete, b""), executable=exe,
+        executable_sha256=maintenance.digest(exe.read_bytes()), codex_home=home)
+    migrations = [instruction_migration(global_file, current, canonical_after,
+        current.index(obsolete), current.index(obsolete)+len(obsolete), "durable-section"),
+        instruction_migration(external, external_before, prefix+suffix,
+            len(prefix), len(prefix)+len(router), "global-block")]
+    path = intent(tmp_path, home, exe)
+    value = json.loads(path.read_bytes())
+    value["instruction_migrations"] = migrations
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return path, external, canonical_after, prefix+suffix
+
+
+def test_explicit_two_global_migration_preserves_all_other_bytes(tmp_path, monkeypatch, installed):
+    home, exe = installed
+    path, external, home_after, external_after = migration_intent(tmp_path, home, exe, monkeypatch)
+    result = adapter.codex_install(maintenance_contract=path)
+    assert result["ok"], result
+    assert (home / "AGENTS.md").read_bytes() == home_after
+    assert external.read_bytes() == external_after
+    assert b"Old long Router" not in external.read_bytes()
+    receipt = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())
+    assert not any(name.startswith("instruction_migrations/") for name in receipt["owned_bytes"])
+    archive = list((home / "thaliris-host-generations").glob("*.json"))
+    assert any(json.loads(item.read_bytes()).get("instruction_targets", {}).get("instruction_migrations/1") == str(external)
+               for item in archive)
+    assert result["host_session_load_status"] == "UNKNOWN"
+
+
+def test_default_install_does_not_claim_or_remove_user_tail(tmp_path, installed):
+    home, exe = installed
+    global_file = home / "AGENTS.md"
+    user_tail = b"## Durable Thaliris synchronization\nOld user-selected guidance\n"
+    global_file.write_bytes(global_file.read_bytes()+user_tail)
+    assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))["ok"]
+    assert global_file.read_bytes().endswith(user_tail)
+
+
+@pytest.mark.parametrize("defect", ["before", "after", "span", "overlap", "not_thaliris", "unsafe_name", "duplicate"])
+def test_instruction_migration_conflict_never_partially_writes(tmp_path, monkeypatch, installed, defect):
+    home, exe = installed
+    path, external, _, _ = migration_intent(tmp_path, home, exe, monkeypatch)
+    value = json.loads(path.read_bytes())
+    selected = value["instruction_migrations"][1]
+    if defect in {"before", "after"}:
+        selected[defect+"_sha256"] = "a"*64
+    elif defect == "span":
+        selected["remove_spans"][0]["sha256"] = "a"*64
+    elif defect == "overlap":
+        selected["remove_spans"] *= 2
+    elif defect == "not_thaliris":
+        span = selected["remove_spans"][0]
+        span.update(offset=0, length=4, sha256=maintenance.digest(external.read_bytes()[:4]))
+    elif defect == "unsafe_name":
+        selected["path"] = str(external.with_name("OTHER.md"))
+        Path(selected["path"]).write_bytes(external.read_bytes())
+    else:
+        value["instruction_migrations"].append(selected)
+    path.write_text(json.dumps(value))
+    before, external_before = snapshot(home), external.read_bytes()
+    calls = []
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *a: calls.append(a))
+    result = adapter.codex_install(maintenance_contract=path)
+    assert not result["ok"] and not result["changed"], result
+    assert snapshot(home) == before and external.read_bytes() == external_before
+    assert calls == []
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_instruction_migration_interruption_replays_exact_selected_files(tmp_path, monkeypatch, installed, drift):
+    from thaliris_codex import host_transition
+    home, exe = installed
+    path, external, home_after, external_after = migration_intent(tmp_path, home, exe, monkeypatch)
+    original = adapter._atomic_host_write
+    hits = []
+    def interrupted(target, contents):
+        if target == external and not hits:
+            hits.append(target)
+            raise SimulatedProcessExit()
+        return original(target, contents)
+    monkeypatch.setattr(adapter, "_atomic_host_write", interrupted)
+    with pytest.raises(SimulatedProcessExit):
+        adapter.codex_install(maintenance_contract=path)
+    monkeypatch.setattr(adapter, "_atomic_host_write", original)
+    assert host_transition.pending(home)
+    if drift:
+        external.write_bytes(b"User changed after interruption")
+        before = snapshot(home)
+        result = adapter.codex_install(maintenance_contract=path)
+        assert not result["ok"] and host_transition.pending(home)
+        assert snapshot(home) == before
+        assert external.read_bytes() == b"User changed after interruption"
+    else:
+        result = adapter.codex_install(maintenance_contract=path)
+        assert result["ok"], result
+        assert not host_transition.pending(home)
+        assert (home / "AGENTS.md").read_bytes() == home_after
+        assert external.read_bytes() == external_after
+
+
+@pytest.mark.parametrize("tamper", [False, True])
+def test_committed_instruction_migration_retains_exact_target_identity(tmp_path, monkeypatch, installed, tamper):
+    from thaliris_codex import host_transition
+    home, exe = installed
+    path, external, home_after, external_after = migration_intent(tmp_path, home, exe, monkeypatch)
+    trust = adapter._install_host_hook_trust
+    def failed_trust(*args):
+        raise ValueError("native trust unavailable")
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", failed_trust)
+    result = adapter.codex_install(maintenance_contract=path)
+    assert not result["ok"] and result["transition_pending"]
+    assert (home / "AGENTS.md").read_bytes() == home_after
+    assert external.read_bytes() == external_after
+    journal_path = home / host_transition.NAME
+    if tamper:
+        user_file = external.with_name("untouched.md")
+        user_file.write_bytes(b"Unrelated user-owned bytes")
+        record = json.loads(journal_path.read_bytes())
+        record["instruction_targets"]["instruction_migrations/1"] = str(user_file)
+        journal_path.write_text(json.dumps(record))
+    before = snapshot(home)
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", trust)
+    result = adapter.codex_install(maintenance_contract=path)
+    if tamper:
+        assert not result["ok"] and result["transition_pending"]
+        assert snapshot(home) == before
+        assert user_file.read_bytes() == b"Unrelated user-owned bytes"
+    else:
+        assert result["ok"] and not host_transition.pending(home), result
+        assert (home / "AGENTS.md").read_bytes() == home_after
+        assert external.read_bytes() == external_after
+
+
 def test_candidate_platform_failure_preserves_previous_generation(tmp_path, monkeypatch, installed):
     from thaliris_codex import host_preflight
     home, exe = installed
@@ -76,7 +229,9 @@ def test_unknown_with_intent_clean_install_and_project_admission(tmp_path, monke
     monkeypatch.setattr(codex_bootstrap, "_trusted_executable", lambda: [str(exe)])
     monkeypatch.setattr(codex_bootstrap, "_invoke", lambda _e, r, command: adapter.bootstrap_check(r) if command == "bootstrap-check" else adapter.init(r))
     ready = codex_bootstrap.bootstrap(project)
-    assert ready["status"] == "DEFINITION_READY_ACTOR_UNKNOWN"
+    assert ready["status"] == "READY"
+    assert ready["controller_actor_assurance"] == "UNKNOWN"
+    assert ready["managed_control_authority"] == "EXPLICIT_CONTROLLER_ASSERTION_REQUIRED"
     assert ready["host_role_catalog_status"] == "UNKNOWN" if "host_role_catalog_status" in ready else True
 
 

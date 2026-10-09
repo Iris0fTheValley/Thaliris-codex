@@ -21,12 +21,14 @@ Controller runs `<installed pinned runner> --root <repo> codex-bootstrap` direct
 Managed children follow their handoff; do not bootstrap, task-start or task-abandon
 the parent's ACTIVE task. Use this installed pinned runner for later operations;
 do not select alternate startup commands, shell-computed hashes or unknown runtime code.
-On READY or DEFINITION_READY_ACTOR_UNKNOWN, create a separate UTF-8 JSON authority
+On READY (or legacy DEFINITION_READY_ACTOR_UNKNOWN), create a separate UTF-8 JSON authority
 contract file selecting the actual human instruction, boundary, invariants,
 acceptance and execution_mode: delegated, controller-direct or single-agent.
 Non-mode fields are nonempty strings. Then in a separate standalone direct tool call
-run `<installed pinned runner> --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-file-path>'`, using the returned task_start_receipt and quoted absolute file path.
+run `<installed pinned runner> --root '<repo>' task-start '<goal>' --authority-contract '<absolute-file-path>'`, using the quoted absolute file path.
 The contract argument is a file path, never inline JSON; do not combine invocations.
+Explicit contract admission needs no bootstrap receipt or single-use Hook bearer.
+Legacy receipt/proof arguments remain compatibility inputs, not human authentication.
 After admission follow the effective project router and selected execution mode.
 
 ## Persistent authority
@@ -86,6 +88,14 @@ cross that boundary; source changes use managed roles. Self-uninstall reports an
 retained runner for later direct cleanup/reinstall. Changed installation requires a fresh
 Host session where needed; disk registration does not prove loaded instruction/catalog
 activation. Never change a live task's security anchor as part of source synchronization.
+The exact Codex app list_projects/create_thread tools are Controller coordination
+for selecting and opening a separately authorized session, not source execution.
+This classification does not authorize arbitrary MCP tools, shell work, bound-child
+reuse or sending messages to existing chats without human authorization.
+An explicit codex-install contract may select exact obsolete global instruction
+spans and complete before/after hashes through instruction_migrations; default
+installation preserves unmarked user tails. Use the existing maintenance
+generation and ownership checks, never a second install into user home.
 In user-facing status describe work and concrete blockers plainly; keep receipts,
 hashes, attestations and lifecycle details out of that prose and report blocked work honestly.
 

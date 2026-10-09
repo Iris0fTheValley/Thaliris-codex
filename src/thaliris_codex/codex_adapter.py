@@ -1639,10 +1639,14 @@ def task_start(
     # attestation path is the startup boundary whose trusted executable must
     # be explicit.
     bridge = _controller_bridge()
-    if hook_attestation is not None and controller_bridge_sha256 != bridge["controller_bridge_sha256"]:
+    if (hook_attestation is not None or controller_bridge_sha256 is not None) and controller_bridge_sha256 != bridge["controller_bridge_sha256"]:
         return {"ok": False, "status": "CONTROLLER_BRIDGE_REQUIRED", "expected_controller_bridge_sha256": bridge["controller_bridge_sha256"], "host_instruction_activation": "UNKNOWN"}
-    session_hash = lifecycle.consume_task_start_attestation(root, hook_attestation, controller_bridge_sha256,
-        task_authority.digest(Path(authority_contract)) if authority_contract else None)
+    # The explicit human contract, not a single-use Hook/session receipt,
+    # admits current tasks. Preserve strict legacy proof validation whenever
+    # a caller actually supplies one; missing observation stays unknown.
+    session_hash = (None if intent is not None and hook_attestation is None else
+        lifecycle.consume_task_start_attestation(root, hook_attestation, controller_bridge_sha256,
+            task_authority.digest(Path(authority_contract)) if authority_contract else None))
     installed_constraint = _installed_execution_constraint()
     if (intent is not None and intent.get("execution_constraint") is not None) or installed_constraint is not None:
         profiles = execution_profile_snapshot(root, intent.get("execution_constraint") if intent else None)

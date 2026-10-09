@@ -274,7 +274,8 @@ def test_codex_install_updates_and_uninstall_removes_only_global_owned_span(tmp_
     assert str(home / lifecycle_module.HOST_RUN_SCRIPT_NAME).encode() in expected
     assert str(executable).encode() not in expected and digest.encode() not in expected
     controller_text = controller_instructions.render().encode()
-    assert b"task_start_receipt" in controller_text and b"--bootstrap-receipt" in controller_text
+    assert b"authority-contract" in controller_text
+    assert b"task_start_receipt" not in controller_text and b"--bootstrap-receipt" not in controller_text
     assert b"--controller-bridge-sha256" not in expected
     assert b"bootstrap-check" not in expected and b" --root <repo> init" not in expected
     assert b"Get-FileHash" not in expected

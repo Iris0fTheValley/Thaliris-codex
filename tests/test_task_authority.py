@@ -32,13 +32,10 @@ def start(root, mode="delegated"):
     filename = root / "authority.json"
     filename.write_text(json.dumps({"human_instruction": "Repair the example", "boundary": "Example module",
         "invariants": "Keep public behavior", "acceptance": "Focused checks pass", "execution_mode": mode}))
-    bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
-    command = f'thaliris task-start "Repair the example" --bootstrap-receipt {bridge} --authority-contract "{filename}"'
+    command = f'thaliris task-start "Repair the example" --authority-contract "{filename}"'
     output = lifecycle.handle_hook(root, "PreToolUse", payload(root, command), lifecycle.MANAGED_HOOK_ABI)
-    assert "updatedInput" in output, output
-    rewritten = json.loads(output)["hookSpecificOutput"]["updatedInput"]["command"]
-    token = rewritten.split("--hook-attestation ", 1)[1]
-    result = codex_adapter.task_start(root, "Repair the example", None, None, token, bridge, str(filename))
+    assert output == "", output
+    result = codex_adapter.task_start(root, "Repair the example", None, None, authority_contract=str(filename))
     assert result["ok"], result
     return result
 
@@ -51,6 +48,8 @@ def test_unknown_controller_explicit_task_authority_is_reachable(workspace):
     assert anchor["contract"]["execution_mode"] == "delegated"
     assert anchor["provenance"] == "CONTROLLER_ASSERTED_HUMAN_INSTRUCTION"
     assert anchor["host_actor_assurance"] == "UNKNOWN"
+    assert anchor["origin_session_hash"] is None
+    assert not (workspace / ".context/audit/task-start-attestations").exists()
     assert task_authority.path(workspace).parent != workspace
     if os.name == "nt":
         assert task_authority.check(Path(str(workspace).lower()))["task_id"] == result["task_id"]
@@ -76,6 +75,7 @@ def test_reconnect_and_daemon_turn_changes_preserve_authority(workspace, monkeyp
     result = codex_bootstrap.bootstrap(workspace)
     assert result["status"] == "CURRENT_CONTINUATION"
     assert result["controller_actor_assurance"] == "UNKNOWN"
+    assert lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, "thaliris codex-bootstrap", session="reconnected")) == ""
     assert lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, "thaliris task-update --role controller --base-revision 1 --input packet.json", session="reconnected"), lifecycle.MANAGED_HOOK_ABI) == ""
     spawn = {"cwd": str(workspace), "session_id": "reconnected", "turn_id": "new-turn", "tool_name": "spawn_agent",
              "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "Implement the accepted repair"}}
@@ -179,6 +179,8 @@ def test_abandoned_authority_is_not_reactivated_by_state_or_prompt(workspace):
 
 def test_checked_abandon_retires_external_authority_and_preserves_fence(workspace):
     result = start(workspace)
+    # Exercise a known owner observation separately from contract admission.
+    lifecycle.record_task_start_owner(workspace, result["task_id"], lifecycle._identity_hash("first"))
     state_path = core._state_path(workspace)
     ledger_path = lifecycle._lifecycle_path(workspace, result["task_id"])
     command = (f'thaliris task-abandon --task-id {result["task_id"]} --revision 1 '
@@ -202,3 +204,90 @@ def test_command_updates_checkpoint_without_expanding_contract(workspace, capsys
     capsys.readouterr()
     assert task_authority.check(workspace)["contract"]["boundary"] == "Example module"
     assert core._load_state(workspace)["revision"] == 2
+
+
+def test_explicit_contract_cli_admission_requires_no_hook_or_receipt(workspace, capsys):
+    filename = workspace / "contract.json"
+    filename.write_text(json.dumps({"human_instruction": "Repair", "boundary": "Example",
+        "invariants": "Preserve bytes", "acceptance": "Checks pass", "execution_mode": "single-agent"}))
+    assert cli.main(["--root", str(workspace), "task-start", "Repair", "--authority-contract", str(filename)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["task_authority"]["host_actor_assurance"] == "UNKNOWN"
+    assert result["managed_readiness"]["HOST_INSTRUCTION_ACTIVE"] == "UNKNOWN"
+    assert result["managed_readiness"]["controller_activation_bridge"] == "NOT_APPLICABLE"
+
+
+@pytest.mark.parametrize("option", ["--bootstrap-receipt", "--controller-bridge-sha256"])
+@pytest.mark.parametrize("proof", ["0" * 64, "", "invalid"])
+def test_optional_incorrect_bridge_is_rejected_without_bearer(workspace, capsys, option, proof):
+    filename = workspace / "contract.json"
+    filename.write_text(json.dumps({"human_instruction": "Repair", "boundary": "Example",
+        "invariants": "Preserve bytes", "acceptance": "Checks pass", "execution_mode": "single-agent"}))
+    assert cli.main(["--root", str(workspace), "task-start", "Repair", "--authority-contract", str(filename),
+                     option, proof]) == 3
+    assert "CONTROLLER_BRIDGE_REQUIRED" in capsys.readouterr().out
+    assert task_authority.read(workspace) is None
+    assert not core._state_path(workspace).exists()
+
+
+def test_optional_correct_bridge_without_bearer_preserves_unknown_observation(workspace):
+    filename = workspace / "contract.json"
+    filename.write_text(json.dumps({"human_instruction": "Repair", "boundary": "Example",
+        "invariants": "Preserve bytes", "acceptance": "Checks pass", "execution_mode": "single-agent"}))
+    bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
+    result = codex_adapter.task_start(workspace, "Repair", None, None,
+        authority_contract=str(filename), controller_bridge_sha256=bridge)
+    assert result["ok"]
+    assert result["managed_readiness"]["HOST_INSTRUCTION_ACTIVE"] == "UNKNOWN"
+
+
+def test_optional_bearer_remains_strict_even_with_explicit_human_contract(workspace, monkeypatch):
+    filename = workspace / "contract.json"
+    filename.write_text(json.dumps({"human_instruction": "Repair", "boundary": "Example",
+        "invariants": "Preserve bytes", "acceptance": "Checks pass", "execution_mode": "single-agent"}))
+    calls = []
+    def reject(*args):
+        calls.append(args)
+        raise ValueError("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
+    monkeypatch.setattr(lifecycle, "consume_task_start_attestation", reject)
+    with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
+        codex_adapter.task_start(workspace, "Repair", None, None, hook_attestation="invalid-proof",
+            controller_bridge_sha256=codex_adapter._controller_bridge()["controller_bridge_sha256"],
+            authority_contract=str(filename))
+    assert len(calls) == 1
+    assert task_authority.read(workspace) is None
+
+
+@pytest.mark.parametrize("tool", ["mcp__codex_app__list_projects", "mcp__codex_app__create_thread"])
+def test_delegated_controller_can_coordinate_separate_codex_session(workspace, tool):
+    start(workspace)
+    value = {"cwd": str(workspace), "session_id": "new-turn", "tool_name": tool,
+             "tool_input": {"prompt": "Authorized independent Host maintenance", "target": {"type": "projectless"}}}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", value, lifecycle.MANAGED_HOOK_ABI) == ""
+    for actor in ({"readonly": True}, {"agent_id": "known-child", "agent_type": "thaliris-implementer"}):
+        observed = lifecycle.handle_hook(workspace, "PreToolUse", {**value, **actor}, lifecycle.MANAGED_HOOK_ABI)
+        # Listing is an ordinary read. Creating a separate executing task is
+        # coordination authority and remains unavailable to known children.
+        assert ("deny" in observed) if tool.endswith("create_thread") or "agent_id" in actor else observed == ""
+    impostor = {**value, "tool_name": "mcp__unrelated__" + tool.rsplit("__", 1)[-1]}
+    assert "CONTROLLER_BOUNDARY" in lifecycle.handle_hook(workspace, "PreToolUse", impostor, lifecycle.MANAGED_HOOK_ABI)
+    for denied in ("Bash", "send_message", "mcp__codex_app__send_message_to_thread"):
+        assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", {**value, "tool_name": denied}, lifecycle.MANAGED_HOOK_ABI)
+
+
+@pytest.mark.parametrize("actor", [{"readonly": True}, {"fenced": True}])
+def test_explicit_contract_does_not_override_known_actor_restrictions(workspace, actor):
+    command = 'thaliris task-start repair --authority-contract contract.json'
+    assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, command, **actor))
+    assert task_authority.read(workspace) is None
+    start(workspace, "single-agent")
+    assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, "Set-Content example.py changed", **actor))
+
+
+def test_unknown_actor_invalid_contract_is_not_admitted(workspace, capsys):
+    filename = workspace / "invalid.json"
+    filename.write_text('{"human_instruction": "repair"}')
+    assert cli.main(["--root", str(workspace), "task-start", "repair", "--authority-contract", str(filename)]) == 2
+    assert "TASK_AUTHORITY_CONTRACT_REQUIRED" in capsys.readouterr().out
+    assert task_authority.read(workspace) is None
+    assert not core._state_path(workspace).exists()

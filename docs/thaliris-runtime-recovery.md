@@ -40,8 +40,11 @@ agent fields while sharing that session. Thus absence of fields or a matching
 owner session alone cannot authorize Controller control. Actor assurance
 remains UNKNOWN. An explicit Controller selection of actual human task intent
 can establish a persistent external anchor under the accepted governance
-boundary; the Hook witnesses the operation, never human authorship. Definition
-readiness remains `DEFINITION_READY_ACTOR_UNKNOWN` until that selection.
+boundary; the Hook observes the operation, never human authorship. Definition
+readiness is `READY` while actor assurance stays UNKNOWN; admission still requires
+the selected human contract. Legacy `DEFINITION_READY_ACTOR_UNKNOWN` responses
+carry the same separation. A bootstrap digest or single-use Hook bearer is not
+required for explicit contract admission.
 See [persistent task authority](thaliris-task-authority.md) for admission,
 reconnect recovery, tampering protection and execution modes. Bound children retain their existing
 identity, isolation, and readonly rules. The fixture

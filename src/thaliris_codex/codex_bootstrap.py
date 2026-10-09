@@ -358,9 +358,7 @@ def bootstrap(root: Path, hook_attestation: str | None = None) -> dict[str, obje
     result.update(controller_actor_assurance=assurance, ordinary_workspace_work_allowed=True)
     if assurance != "CONTROLLER":
         result["managed_control_authority"] = "PERSISTENT_TASK_INTENT" if result.get("task_authority") else "EXPLICIT_CONTROLLER_ASSERTION_REQUIRED"
-        if result.get("status") == "READY":
-            result["status"] = "DEFINITION_READY_ACTOR_UNKNOWN"
-        elif result.get("status") == "CURRENT_CONTINUATION" and not result.get("task_authority"):
+        if result.get("status") == "CURRENT_CONTINUATION" and not result.get("task_authority"):
             result["status"] = "UNKNOWN"
             result["session_owner_hash_match"] = "YES"
     return result

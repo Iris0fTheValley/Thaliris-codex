@@ -62,6 +62,34 @@ CI 将该变量指向 shared-core checkout。
 
 安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。installer 创建不含 ensurepip 的专用环境，再通过 bootstrap 的 pip 安装两个已选择的包；pip、setuptools 和构建依赖留在 runtime 之外，无需手工修复 `.pth`。system site packages 禁用，可执行或扩展导入路径的 `.pth` 仍无例外地拒绝。也支持 `absolute-wheel-path#sha256=<reviewed-digest>` 形式的已校验本地 wheel。整个环境的文件（含共享 Core）被纳入 manifest；固定目录保持不可变，升级使用新的 runtime 目录。
 
+## 项目任务的启动与恢复
+
+Host 安装后，实质性 Git 工作由 owning Controller 使用已安装 pinned runner 对目标仓库运行一次 `codex-bootstrap`。这是单独的一次调用：
+
+```powershell
+& '<installed pinned runner>' --root '<repo>' codex-bootstrap
+```
+
+`READY`（旧版 `DEFINITION_READY_ACTOR_UNKNOWN` 也可继续处理）表示项目定义可用；它不认证 Host actor，也不证明角色配置已由当前进程加载。若项目定义缺失，先按 bootstrap 结果处理，而不要绕过 adapter 直接创建另一个任务账本。
+
+任务准入使用单独的 UTF-8 JSON contract 文件，包含非空 `human_instruction`、`boundary`、`invariants`、`acceptance` 字符串，以及 `execution_mode`（`delegated`、`controller-direct` 或 `single-agent`）：
+
+```json
+{"human_instruction":"<actual user instruction>","boundary":"<selected scope>","invariants":"<hard constraints>","acceptance":"<acceptance conditions>","execution_mode":"delegated"}
+```
+
+创建该文件后，再用另一次独立调用开始任务：
+
+```powershell
+& '<installed pinned runner>' --root '<repo>' task-start '<goal>' --authority-contract '<absolute-contract-file>'
+```
+
+显式 contract admission 不依赖 bootstrap receipt 或一次性 Hook bearer。若显式提供 legacy proof，adapter 仍严格验证它。contract 记录 Controller 选择的人类任务意图；Host Root actor assurance 仍为 `UNKNOWN`，这不是通用身份认证。已知 child、readonly、fenced、retired 或冲突状态不能建立或扩展 authority。
+
+有效 ACTIVE anchor 可在 turn、网络、Hook 或 session 中断后继续，无需重新证明 Root session 身份。缺少 contract、无 anchor 的历史 ACTIVE task、状态冲突或不可验证的 security bytes 不会自动放行。先用有界 `task-status` 查看路由状态；只有明确诊断时使用 `task-show`。原生 child 完成与 Core/lifecycle 状态都是执行证据，最终语义验收仍由 Controller 决定。
+
+Authority 冲突恢复必须使用单独的精确恢复流程：它归档证据、恢复记录的受保护 bytes 并隔离已知旧 child；无法证明的终止状态仍为 `UNKNOWN`，恢复不能批准改变过的 security baseline，也不能移除 fence。Host 文件修改、安装记录或一次 bootstrap 都不证明当前 Codex 进程已加载更新。详细操作见 [task authority](docs/thaliris-task-authority.md) 和 [runtime recovery](docs/thaliris-runtime-recovery.md)。
+
 [共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 基准结果](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
 
 共享语义保持模型负责判断：INDEX 是由模型维护的薄语义导航地图，Core 只执行路径、CAS、大小与链接检查。Controller 选择要保留的知识，角色结果不会自动成为持久记忆。
@@ -83,11 +111,15 @@ Core 将该可选非空字符串作为不可变 intent 保存；适配器只接�
 
 该功能需要 thaliris>=0.4.3。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
 
+## CI 与平台兼容范围
+
+CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使用 Core 固定 revision `70128abd223ecdf789fd9e8ee3b1bafceec0dd70`，仅手动 workflow 可显式改选 `core_ref`。POSIX runtime identity 检查仅接受 `lib64 -> lib` 的精确虚拟环境别名，并验证目标漂移会被拒绝。Hook transport 只把一个文档起始 UTF-8 BOM 当作传输标记；重复/错位 BOM 与无效 UTF-8/JSON 仍拒绝。Hook 诊断只输出有界 JSON boundary label，不输出 payload，也不推断更深根因。CI 和源测试不证明某个当前安装的 Codex 进程已经加载这些内容。
+
 ## 运行时提示词层
 
 全局指令保留共享授权/隔离边界与一次性启动入口；必要的 bootstrap 响应将正常 Controller 指导直接交付到任务上下文，包括启动/准入、路由、交接、证据复用、等待、Workstream 终点、验收/独立 review 选择、持久知识准入与因果诊断。项目指令保留共享边界和 canonical 指针；完整 Controller routine 不重复注入每个 fresh child。[Controller 操作程序](docs/thaliris-controller.md) 是权威源；异常恢复、Host 维护按需检索。安装的 pinned runner 的 `controller-instructions` 返回程序索引，`controller-instructions --section <name>` 获取缺失的精确章节。评价完整正常任务上下文、检索成本与交付质量，而非单个最短 prompt。原生角色提示词负责当前角色的执行风格、委派和终点；新鲜 handoff 不向子角色批量注入无关 Controller 程序。所有角色仍可在自身权限内按需检索规则。设计理由与机械实现见 [Codex 协议](adapter/codex/README.md)与 [Core 提示词设计](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)。
 
-每个必要依赖有一个观察 owner：执行角色运行并等待自己的测试、process 与 CI，Controller 等待必要 child 结果，不重复查同一作业。等待按当前能力、实质事件和必要依赖选择，工具最长等待是 capacity，高层时长限制优先；Hook 保留调用者的等待参数。受管形状仍是一个 active/pending 顶层 child 与其一个 active/pending Scanner；证明原生终态后，可在同一边界内复用 Scanner 槽处理另一个必要的未覆盖 gap。
+每个必要依赖有一个观察 owner：执行角色运行并等待自己的测试、process 与 CI，Controller 等待必要 child 结果，不重复查同一作业。等待按当前能力、实质事件和必要依赖选择，工具最长等待是 capacity，高层时长限制优先；Hook 保留调用者的等待参数。等待成本尚无受控的新比较；五分钟监控周期只是可选的替代观察方式，不是当前功能或要求。受管形状仍是一个 active/pending 顶层 child 与其一个 active/pending Scanner；证明原生终态后，可在同一边界内复用 Scanner 槽处理另一个必要的未覆盖 gap。
 
 Hook 失败在 stderr 输出有界 JSON，区分 receive、严格 decode、JSON syntax/shape、dispatch、maintenance-contract 与 runtime-identity 的真实边界。诊断不含 payload 或异常内容，不证明更深根因，也不改变拒绝/身份检查。Hook 文档只接受一个起始 UTF-8 BOM 的边界保持不变。Review READY 不替代最终产品验收。
 

@@ -199,7 +199,7 @@ def test_constrained_child_model_mismatch_or_missing_leaves_handoff_unbound(cons
 
 
 @pytest.mark.parametrize("config_change", ["added", "removed"])
-def test_constrained_admission_requires_sessionstart_config_snapshot(tmp_path, monkeypatch, pinned_test_thaliris, config_change):
+def test_constrained_contract_anchors_current_config_without_session_receipt(tmp_path, monkeypatch, pinned_test_thaliris, config_change):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -220,21 +220,30 @@ def test_constrained_admission_requires_sessionstart_config_snapshot(tmp_path, m
     contract = tmp_path / "authority-contract.json"
     contract.write_text(json.dumps(dict(
         human_instruction="Use the constrained role profiles", boundary="test repository",
-        invariants="Preserve semantic roles", acceptance="Reject stale public configuration",
+        invariants="Preserve semantic roles", acceptance="Anchor current public configuration",
         execution_mode="delegated", execution_constraint="luna-only",
     )), encoding="utf-8")
-    bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
-    command = f'thaliris task-start goal --controller-bridge-sha256 {bridge} --authority-contract "{contract}"'
+    command = f'thaliris task-start goal --authority-contract "{contract}"'
     request = dict(session_id=session_id, turn_id="start-turn", cwd=str(root), tool_name="Bash", tool_input={"command": command})
-    output = lifecycle._issue_task_start_attestation(root, request, lifecycle.MANAGED_HOOK_ABI)
-    rewritten = json.loads(output)["hookSpecificOutput"]["updatedInput"]["command"]
-    token = rewritten.rsplit("--hook-attestation ", 1)[1]
+    assert lifecycle.handle_hook(root, "PreToolUse", request, lifecycle.MANAGED_HOOK_ABI) == ""
+    # A caller supplying a legacy proof still gets the exact old snapshot
+    # check, rather than turning an invalid supplied proof into UNKNOWN/PASS.
+    bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
+    request["tool_input"]["command"] += f" --bootstrap-receipt {bridge}"
+    proof = lifecycle._issue_task_start_attestation(root, request, lifecycle.MANAGED_HOOK_ABI, event="PostToolUse")
+    token = json.loads(proof)["hookSpecificOutput"]["additionalContext"].split("--hook-attestation ")[1].split(". Use ")[0]
+    observed = lifecycle.managed_executable_health()
+    monkeypatch.setattr(lifecycle, "managed_executable_health", lambda: {**observed, "canonical_executable_available": "YES"})
     with pytest.raises(ValueError, match="EXECUTION_CONFIGS_REQUIRE_FRESH_HOST_SESSION"):
         codex_adapter.task_start(root, "goal", None, None, token, bridge, str(contract))
-    assert not (root / ".context" / "state.json").exists()
+    assert not core._state_path(root).exists()
+    result = codex_adapter.task_start(root, "goal", None, None, authority_contract=str(contract))
+    assert result["ok"]
+    assert result["managed_readiness"]["HOST_INSTRUCTION_ACTIVE"] == "UNKNOWN"
+    assert task_authority.check(root)["execution_profiles"]["files"][str(config)] == task_authority.digest(config)
 
 
-def test_policy_is_bound_to_one_shot_contract_digest(constrained):
+def test_legacy_optional_proof_is_bound_to_exact_contract_digest(constrained):
     root, _ = constrained
     path = root / "selected.json"
     selected = task_authority.check(root)["contract"]
@@ -242,8 +251,8 @@ def test_policy_is_bound_to_one_shot_contract_digest(constrained):
     bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
     request = dict(session_id="other", turn_id="other-turn", cwd=str(root), tool_name="Bash", tool_input=dict(
         command=f'thaliris task-start test --bootstrap-receipt {bridge} --authority-contract "{path}"'))
-    output = lifecycle._issue_task_start_attestation(root, request, lifecycle.MANAGED_HOOK_ABI)
-    token = json.loads(output)["hookSpecificOutput"]["updatedInput"]["command"].split("--hook-attestation ")[1]
+    output = lifecycle._issue_task_start_attestation(root, request, lifecycle.MANAGED_HOOK_ABI, event="PostToolUse")
+    token = json.loads(output)["hookSpecificOutput"]["additionalContext"].split("--hook-attestation ")[1].split(". Use ")[0]
     path.write_text(json.dumps({key:value for key,value in selected.items() if key != "execution_constraint"}))
     with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
         lifecycle.consume_task_start_attestation(root, token, bridge, task_authority.digest(path))

@@ -128,6 +128,30 @@ snapshot as an automatic approval. Unknown control bytes are preserved and the
 affected operation stops before writes. Historical fixtures remain independent
 witnesses, not a place to add the next candidate's bytes to an old release.
 
+For an explicitly requested global instruction migration, the same
+`codex-install --maintenance-contract FILE` accepts an optional
+`instruction_migrations` array. Each entry selects an existing absolute
+`path` to either the selected Codex home's `AGENTS.md` or the current user's
+home `AGENTS.md`, the complete `before_sha256` and reviewed candidate
+`after_sha256`, and `remove_spans`. Each span has exact byte `offset`, `length`,
+`sha256`, and `kind`. The only supported kinds are `durable-section` (the
+complete `## Durable Thaliris synchronization` section in Codex home) and
+`global-block` (the complete marked redundant Thaliris global block in user
+home). Exact human selection approves only those obsolete fragments; it does
+not establish ownership of the surrounding file. Existing Codex-home marked
+block ownership must still pass the normal receipt or legacy approval checks.
+
+The approved candidate renders the canonical Codex-home entry with that home's
+pinned runner, removes the selected obsolete spans, and preserves every other
+byte. The result must match the explicitly selected complete after hash.
+Omitting this array preserves all existing unmarked tail bytes. The planner's
+ordinary ownership snapshot never opts into migration. All selected files and
+candidate hashes pass preflight before writes; they participate in the same
+recoverable generation, original-contract replay and drift refusal as other
+Host files. The receipt owns only the canonical marked entry, and the archived
+generation retains exact migrated before/after bytes. A fully redundant user-home
+file becomes an empty file; no second Host integration is installed there.
+
 For normal cleanup, plan `codex-uninstall` with the approved maintenance executor,
 save its intent object, and run `codex-uninstall --maintenance-contract FILE`.
 The operation preserves user configuration, other hook trust keys, user profiles,
@@ -210,3 +234,15 @@ contract 保留证据并停止。trust 未完成会明确报告，用户配置�
 未知 role 文档以 `preserved_manual_followup` 保留，不单独阻止项目 admission；
 真正 AGENTS、activation、hook 等控制冲突仍阻止 admission。磁盘安装、Hook 注册和
 信任、原生角色可用性、指令加载、task admission 与 managed readiness 必须分别验证。
+
+显式要求迁移 global 指令时，仍使用既有 `codex-install --maintenance-contract FILE`。
+可选 `instruction_migrations` 逐项绑定 Codex home 或当前用户 home 中已有的
+`AGENTS.md` 绝对路径、完整 `before_sha256` 和已审阅候选 `after_sha256`，以及
+`remove_spans` 中的准确 byte `offset`、`length`、`sha256`、`kind`。
+仅支持删除 Codex-home 的完整 `durable-section`（Durable Thaliris synchronization
+section）或 user-home 的完整 marked `global-block`。这些选择只批准具体旧
+Thaliris 片段，周围所有 bytes 保留；Codex-home marked 入口仍须通过既有 ownership。
+候选生成唯一正确 pinned-runner 入口，最终完整 hash 必须一致。不提供迁移数组
+就原样保留 tail；普通 plan snapshot 不自动批准迁移。两文件先全部 preflight，
+再进入同一既有 generation/replay/drift 检查；冗余 user-home 文件可变为空文件，
+不会在 user-home 额外安装 Host，也不把用户内容记为受管 ownership。

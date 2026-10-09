@@ -50,6 +50,8 @@ than promoting them to a capacity limit. Executors observe/wait on their own tes
 processes and CI, reporting substantive changes or terminal evidence; Controller waits
 for the necessary child result without duplicating the same observations. No status-only
 reasoning round is justified by a timeout or unchanged deterministic state alone.
+No new controlled comparison measures wait cost; a five-minute monitoring cadence is
+only an optional observation alternative, not a current feature or requirement.
 
 Production Hook/maintenance diagnostics emit only allowlisted failed boundary labels
 on stderr: receive, decode, JSON syntax/shape, dispatch, maintenance-contract and
@@ -61,6 +63,10 @@ signatures outside JSON content and malformed UTF-8 retain their prior rejection
 behavior. U+FEFF inside valid JSON strings/field names remains exact content.
 
 ## Enforcement and assurance
+
+Project bootstrap `READY` means definitions are available, not that a Host actor is authenticated. An explicit Controller-selected UTF-8 contract (`human_instruction`, `boundary`, `invariants`, `acceptance`, and `execution_mode`) admits task intent without requiring a bootstrap receipt or one-shot Hook bearer. Optional legacy proofs remain strictly checked when supplied. The contract is governance, not universal authentication; Host Root assurance remains `UNKNOWN`.
+
+An intact ACTIVE anchor reconnects without fresh session proof. Missing contract, historical ACTIVE state without an anchor, and known child/readonly/fenced/retired or conflicting state cannot admit or expand authority. Native execution association remains exact and separate from semantic acceptance. `task-status` is a bounded routing observation; use `task-show` only for explicit diagnostics.
 
 Task intent is an external governance anchor; Host Root identity can remain UNKNOWN.
 Known child/readonly/fenced identities cannot establish or expand authority. Delegated

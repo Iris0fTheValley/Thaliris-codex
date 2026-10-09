@@ -93,17 +93,17 @@ def _write(home, record):
     _atomic_host_write(home / NAME, (json.dumps(record, sort_keys=True) + "\n").encode())
 
 
-def _observe(home, names):
+def _observe(home, names, *, targets=None):
     from .host_maintenance import safe
     result = {}
     for name in names:
-        path = home / name
+        path = Path(targets[name]) if targets and name in targets else home / name
         safe(path)
         result[name] = path.read_bytes() if path.exists() else None
     return result
 
 
-def _apply(home, values, *, rollback=False):
+def _apply(home, values, *, rollback=False, targets=None):
     from .codex_adapter import _atomic_host_write
     from .host_maintenance import RECEIPT_NAME, safe
     from . import lifecycle, host_preflight
@@ -116,7 +116,7 @@ def _apply(home, values, *, rollback=False):
             return (2 if rollback else 0, guards.index(name), name)
         return (1, 1 if name == RECEIPT_NAME else 0, name)
     for name in sorted(values, key=order):
-        path = home / name
+        path = Path(targets[name]) if targets and name in targets else home / name
         safe(path)
         value = values[name]
         if (path.read_bytes() if path.exists() else None) == value:
@@ -157,6 +157,9 @@ def load(home, intent):
             any(not isinstance(name, str) for name in finish["preserved"])):
         raise ValueError("invalid uninstall transition finalization record; preserve for review")
     before, after = _decode(record.get("before")), _decode(record.get("after"))
+    targets = maintenance.instruction_targets(intent, home)
+    if record.get("instruction_targets", {}) != targets:
+        raise ValueError("Host transition instruction targets differ from original approval")
     if set(before) != set(after):
         raise ValueError("invalid Host transition surface")
     prior = before.get(runtime_identity.MANIFEST_NAME)
@@ -177,6 +180,9 @@ def load(home, intent):
                 finish.get("execution_constraint") != intent.get("execution_constraint")):
             raise ValueError("Host transition candidate differs from original approval")
         next_receipt = maintenance.validate_ownership(after.get(maintenance.RECEIPT_NAME), approved, intent)
+        migrations = maintenance.migrated_instructions(intent, home, before, executable, finish["sha"])
+        if any(after.get(name) != value for name, value in migrations.items()):
+            raise ValueError("Host transition instructions differ from original approval")
         for name, identity in next_receipt.get("owned_bytes", {}).items():
             contents = (maintenance._global_owned_bytes(after.get("AGENTS.md", b""))
                         if name == "AGENTS.md#global" else after.get(name))
@@ -193,9 +199,10 @@ def load(home, intent):
                lifecycle.HOST_HOOK_SCRIPT_NAME, lifecycle.HOST_RUN_SCRIPT_NAME, host_preflight.NAME}
     allowed.update("agents/" + name for name in roles.agent_profiles())
     allowed.update(name for name in ownership.get("owned_bytes", {}) if _profile_name(name))
+    allowed.update(targets)
     if set(before) - allowed:
         raise ValueError("Host transition contains an unapproved surface")
-    observed = _observe(home, before)
+    observed = _observe(home, before, targets=targets)
     for name, contents in observed.items():
         accepted = (after[name],) if record["phase"] == "COMMITTED" else (before[name], after[name])
         if contents not in accepted:
@@ -214,22 +221,27 @@ def resume(home, intent, finalize):
         record, before, after = load(home, intent)
         if record["phase"] == "COMMITTED":
             return finalize(home, record)
-        _apply(home, before, rollback=True)
-        if _observe(home, before) != before:
+        targets = record.get("instruction_targets", {})
+        _apply(home, before, rollback=True, targets=targets)
+        if _observe(home, before, targets=targets) != before:
             raise ValueError("Host transition rollback verification failed")
         (home / NAME).unlink()
     return None
 
 
 def begin(home, intent, before, writes, deletes, finish):
+    from .host_maintenance import instruction_targets
+    targets = instruction_targets(intent, home)
     names = set(before) | set(writes) | set(deletes)
     previous = {name: before.get(name) for name in names}
     after = previous | writes | {name: None for name in deletes}
-    if _observe(home, names) != previous:
+    if _observe(home, names, targets=targets) != previous:
         raise ValueError("maintenance input changed before transition preparation")
     record = {"format": FORMAT, "phase": "PREPARED", "operation": intent["operation"],
               "contract_sha256": intent["contract_sha256"], "before": _encode(previous),
               "after": _encode(after), "finish": finish}
+    if targets:
+        record["instruction_targets"] = targets
     from .host_maintenance import selected_runtime
     _, executor_runtime = selected_runtime(intent["executor"])
     record["executor_runtime"] = base64.b64encode(executor_runtime).decode("ascii")
@@ -245,8 +257,8 @@ def begin(home, intent, before, writes, deletes, finish):
     # Publish complete bytes exclusively. An interrupted preparation cannot
     # leave a truncated recovery record in front of otherwise unchanged files.
     _publish(home / NAME, (json.dumps(record, sort_keys=True) + "\n").encode())
-    _apply(home, after)
-    if _observe(home, names) != after:
+    _apply(home, after, targets=targets)
+    if _observe(home, names, targets=targets) != after:
         raise ValueError("Host transition generation verification failed")
     record["phase"] = "COMMITTED"
     _write(home, record)
@@ -263,7 +275,7 @@ def complete(home, record):
     """Retain exact authorized before/after generations outside the active path."""
     from . import codex_adapter, host_maintenance, runtime_identity
     after = _decode(record["after"])
-    if _observe(home, after) != after:
+    if _observe(home, after, targets=record.get("instruction_targets", {})) != after:
         raise ValueError("Host generation changed during finalization; preserve for review")
     manifest = after.get(runtime_identity.MANIFEST_NAME)
     if manifest is not None:

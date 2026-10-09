@@ -33,12 +33,15 @@ not inline JSON. Then invoke the installed runner directly in its own tool call:
 ```
 
 ```text
-& '<installed thaliris-run.cmd>' --root '<repo>' task-start '<goal>' --bootstrap-receipt '<receipt>' --authority-contract '<absolute-contract-file-path>'
+& '<installed thaliris-run.cmd>' --root '<repo>' task-start '<goal>' --authority-contract '<absolute-contract-file-path>'
 ```
 
-The Hook witnesses this explicit operation with a one-shot receipt and binds
-the selected file bytes; it does not attest human authorship or promote the
-actor to CONTROLLER. The external anchor lives under the platform user's
+The selected contract admits the task without a bootstrap digest or one-shot
+Hook bearer. The Hook rejects known child, readonly and fenced actors; it does
+not attest human authorship or promote an unknown actor to CONTROLLER.
+Optional legacy proofs remain strictly checked when supplied. Missing session
+observation stays absent; it does not revoke the selected human intent.
+The external anchor lives under the platform user's
 `.thaliris/task-authority/`, independently of CODEX_HOME and repository config.
 It binds resolved project path, task UUID, goal, boundary, invariants,
 acceptance, mode and lifecycle, retaining state/lifecycle snapshots, security
@@ -189,8 +192,10 @@ requires a dedicated `codex-install --execution-constraint luna-only`
 installation. Core 0.4.3 retains the selected constraint as immutable intent;
 Codex validates the matching ordinary role profiles and freezes their public
 configuration hashes. The same role IDs, instructions, routing and readonly
-restrictions apply. SessionStart hashes require a fresh session, while the
-effective Host role map and CLI overrides remain UNKNOWN. Missing or
+restrictions apply. Explicit contract admission anchors current public configuration;
+an old SessionStart snapshot does not prove a contract violation. Optional legacy
+proof admission retains its exact session snapshot checks. The effective Host role
+map and CLI overrides remain UNKNOWN. Missing or
 mismatching SubagentStart models leave the child unbound with tools denied;
 the hook cannot prevent the first model invocation. Astra profiles and
 per-spawn model/effort overrides remain denied under this constraint.

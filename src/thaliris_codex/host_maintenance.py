@@ -77,6 +77,7 @@ def _selected_runtime(value: object) -> tuple[Path, bytes]:
 def contract(filename: str | Path | None, operation: str, home: Path, *, actor: dict | None = None) -> dict:
     try:
         value, raw = _contract_document(filename, operation, home, actor=actor)
+        instruction_targets(value, home)
     except (OSError, RuntimeError, ValueError, TypeError, KeyError):
         diagnostics.failure("maintenance-contract")
         raise
@@ -224,6 +225,93 @@ def _global_owned_bytes(current: bytes) -> bytes | None:
     return current[span[0]:span[1]] if span else None
 
 
+def instruction_targets(intent: dict, home: Path) -> dict[str, str]:
+    """Resolve only explicitly selected existing global instruction files.
+
+    An exact fragment approval is separate from installation ownership and
+    never approves the rest of a user's file. No migration is inferred.
+    """
+    migrations = intent.get("instruction_migrations", [])
+    if not isinstance(migrations, list) or migrations and intent.get("operation") != "codex-install":
+        raise ValueError("instruction migrations require explicit codex-install intent")
+    targets, seen = {}, set()
+    for index, item in enumerate(migrations):
+        if not isinstance(item, dict) or set(item) != {"path", "before_sha256", "after_sha256", "remove_spans"}:
+            raise ValueError("instruction migration requires exact before/after identities and selected spans")
+        if not isinstance(item["path"], str):
+            raise ValueError("invalid instruction migration path")
+        path = Path(item["path"])
+        safe(path)
+        if path.name != "AGENTS.md" or not path.is_file():
+            raise ValueError("instruction migration requires an existing AGENTS.md")
+        identity = path.resolve()
+        if identity not in {(home / "AGENTS.md").resolve(), (Path.home() / "AGENTS.md").resolve()}:
+            raise ValueError("instruction migration must select a Codex-home or user-home global AGENTS.md")
+        if identity in seen:
+            raise ValueError("duplicate instruction migration target")
+        seen.add(identity)
+        if any(not isinstance(item[key], str) or re.fullmatch(r"[0-9a-f]{64}", item[key]) is None
+               for key in ("before_sha256", "after_sha256")):
+            raise ValueError("instruction migration requires exact reviewed byte hashes")
+        spans = item["remove_spans"]
+        if not isinstance(spans, list) or not spans:
+            raise ValueError("instruction migration requires explicitly selected Thaliris spans")
+        for span in spans:
+            if not isinstance(span, dict) or set(span) != {"offset", "length", "sha256", "kind"} or (
+                    type(span["offset"]) is not int or span["offset"] < 0 or
+                    type(span["length"]) is not int or span["length"] <= 0 or
+                    not isinstance(span["sha256"], str) or re.fullmatch(r"[0-9a-f]{64}", span["sha256"]) is None or
+                    span["kind"] not in {"global-block", "durable-section"}):
+                raise ValueError("invalid selected Thaliris instruction span")
+        name = "AGENTS.md" if path.resolve() == (home / "AGENTS.md").resolve() else f"instruction_migrations/{index}"
+        targets[name] = str(path)
+    return targets
+
+
+def migrated_instructions(intent: dict, home: Path, before: dict[str, bytes | None],
+                          executable: Path, sha: str) -> dict[str, bytes]:
+    """Remove exact approved obsolete spans and render the single home entry."""
+    from . import codex_adapter as adapter
+    targets = instruction_targets(intent, home)
+    writes = {}
+    for item in intent.get("instruction_migrations", []):
+        name = next(name for name, target in targets.items() if Path(target) == Path(item["path"]))
+        current = before.get(name)
+        if current is None or digest(current) != item["before_sha256"]:
+            raise ValueError("instruction migration before bytes changed; preserve for review")
+        last_end = 0
+        pieces = []
+        for selected in sorted(item["remove_spans"], key=lambda selected: selected["offset"]):
+            start, end = selected["offset"], selected["offset"] + selected["length"]
+            if start < last_end or end > len(current) or digest(current[start:end]) != selected["sha256"]:
+                raise ValueError("instruction migration selected span changed or overlaps")
+            if selected["kind"] == "global-block":
+                if name == "AGENTS.md" or adapter._global_agents_span(current) != (start, end):
+                    raise ValueError("only a redundant external global Thaliris block can be removed")
+            else:
+                # The exact complete Markdown section is required. A heading
+                # recognizer does not itself authorize any bytes.
+                heading = b"## Durable Thaliris synchronization"
+                if name != "AGENTS.md" or current[start:end].splitlines()[0] != heading or (start and current[start-1:start] != b"\n"):
+                    raise ValueError("only the selected home Durable Thaliris section can be removed")
+                following = re.search(rb"(?m)^## ", current[start + len(heading):])
+                section_end = start + len(heading) + following.start() if following else len(current)
+                if end != section_end:
+                    raise ValueError("instruction migration must select the complete Durable Thaliris section")
+            pieces.append(current[last_end:start])
+            last_end = end
+        pieces.append(current[last_end:])
+        result = b"".join(pieces)
+        if name == "AGENTS.md":
+            result = adapter._global_agents_update(result, executable=executable, executable_sha256=sha, codex_home=home)
+        elif adapter._global_agents_span(result) is not None:
+            raise ValueError("redundant global Thaliris entry remains")
+        if digest(result) != item["after_sha256"]:
+            raise ValueError("instruction migration after candidate differs from explicit intent")
+        writes[name] = result
+    return writes
+
+
 def _files(home: Path) -> dict[str, bytes]:
     from . import lifecycle, host_preflight, roles, host_transition
     if any(character in str(home) for character in ('"', "%", "!", "\r", "\n")):
@@ -291,6 +379,8 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         if expected_prior != (digest(prior) if prior is not None else "ABSENT"):
             raise ValueError("current installed runtime differs from approved maintenance identity")
         before = _files(home)
+        targets = instruction_targets(intent, home)
+        before.update(host_transition._observe(home, targets, targets=targets))
         safe(home / "config.toml")
         record = ownership(home, prior, intent)
         if record.get("execution_constraint") == "luna-only" and execution_constraint != "luna-only":
@@ -319,6 +409,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             "AGENTS.md": adapter._global_agents_update(current_global, executable=candidate,
                 executable_sha256=sha, codex_home=home),
         }
+        writes.update(migrated_instructions(intent, home, before, candidate, sha))
         for name, (model, effort, role) in roles.agent_profiles(execution_constraint).items():
             writes["agents/" + name] = adapter._agent_profile(name.removesuffix(".toml"), role, model, effort)
         deletes = []
@@ -328,7 +419,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
                     raise ValueError(f"edited retired Host profile: {name}; preserve and review exact bytes")
                 deletes.append(name)
         for name in writes:
-            if name in {runtime_identity.MANIFEST_NAME, "AGENTS.md"}:
+            if name in {runtime_identity.MANIFEST_NAME, "AGENTS.md"} or name.startswith("instruction_migrations/"):
                 continue
             if name in before and not owned(record, name, before[name]):
                 raise ValueError(f"unowned Host control file: {home / name}; preserve and review exact bytes")
@@ -372,11 +463,14 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
                    "source_pin": intent["candidate"]["source_pin"] if installation_changed else record.get("source_pin", intent["candidate"]["source_pin"]),
                    "human_instruction": intent["human_instruction"] if installation_changed else record["human_instruction"],
                    "owned_bytes": {name: digest(value) for name, value in writes.items()
-                                   if name not in {"AGENTS.md", "hooks.json", runtime_identity.MANIFEST_NAME}},
+                                   if name not in {"AGENTS.md", "hooks.json", runtime_identity.MANIFEST_NAME}
+                                   and not name.startswith("instruction_migrations/")},
                    "hook_handlers": hook_handlers}
         receipt["owned_bytes"]["AGENTS.md#global"] = digest(_global_owned_bytes(writes["AGENTS.md"]))
         writes[RECEIPT_NAME] = (json.dumps(receipt, sort_keys=True, ensure_ascii=False) + "\n").encode()
-        if _files(home) != before or runtime_identity.manifest_bytes(candidate) != runtime:
+        observed = _files(home)
+        observed.update(host_transition._observe(home, targets, targets=targets))
+        if observed != before or runtime_identity.manifest_bytes(candidate) != runtime:
             raise ValueError("maintenance input changed during preflight")
     except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
         return _failure(home, exc)
@@ -442,6 +536,8 @@ def _finish_install(home, transition):
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,
         "native_profile_names": sorted(roles.native_profile_names()), "project_files_touched": [],
+        "instruction_files_touched": [path for name, path in transition.get("instruction_targets", {}).items()
+                                      if name in changed_files],
         "transition_pending": not ready,
         "recovery_action": None if ready else "Replay the original codex-install --maintenance-contract FILE",
         "install_status": "RESTART_CODEX_ONCE" if ready and changed_files else "HOST_INTEGRATION_UNCHANGED" if ready else "INSTALL_INCOMPLETE",

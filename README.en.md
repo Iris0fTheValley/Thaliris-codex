@@ -50,6 +50,34 @@ final location.
 
 For local development install `../Thaliris[test]`, then this repository with `--no-deps -e '.[test]'`, and run `pytest`. The installer creates the dedicated runtime without ensurepip and installs both selected packages through the bootstrap's pip. pip, setuptools and build dependencies stay outside the runtime; no manual `.pth` repair is required. System site packages stay disabled and executable or path-extending `.pth` files remain rejected without exceptions. Verified local wheels are also accepted as `absolute-wheel-path#sha256=<reviewed-digest>`. The entire environment, including shared Core, remains pinned by the runtime manifest. Keep the pinned directory immutable; use a new directory for upgrades. Installing packages does not prove Host enablement, authorization or health.
 
+## Starting and recovering project tasks
+
+After Host installation, the owning Controller runs `codex-bootstrap` once for substantive Git work using the installed pinned runner and target repository. Make this a separate invocation:
+
+```powershell
+& '<installed pinned runner>' --root '<repo>' codex-bootstrap
+```
+
+`READY` (legacy `DEFINITION_READY_ACTOR_UNKNOWN` is also accepted) means project definitions are available; it does not authenticate a Host actor or prove that the current process loaded role configuration. If definitions are missing, follow the bootstrap result instead of bypassing the adapter to create a separate task ledger.
+
+Task admission uses a separate UTF-8 JSON contract file with non-empty `human_instruction`, `boundary`, `invariants`, and `acceptance` strings, plus `execution_mode` (`delegated`, `controller-direct`, or `single-agent`):
+
+```json
+{"human_instruction":"<actual user instruction>","boundary":"<selected scope>","invariants":"<hard constraints>","acceptance":"<acceptance conditions>","execution_mode":"delegated"}
+```
+
+After creating that file, start the task in another separate invocation:
+
+```powershell
+& '<installed pinned runner>' --root '<repo>' task-start '<goal>' --authority-contract '<absolute-contract-file>'
+```
+
+Explicit contract admission does not require a bootstrap receipt or one-shot Hook bearer. If a legacy proof is explicitly supplied, the adapter still validates it strictly. The contract records the Controller's selection of human task intent; Host Root actor assurance remains `UNKNOWN`, so it is not general identity authentication. Known child, readonly, fenced, retired, or conflicting states cannot establish or expand authority.
+
+An intact ACTIVE anchor can continue across turn, network, Hook, or session interruption without proving Root session identity again. A missing contract, historical ACTIVE task without an anchor, conflicting state, or unverifiable security bytes does not automatically pass. Use bounded `task-status` for routing observations and `task-show` only for explicit diagnostics. Native child completion and Core/lifecycle state are execution evidence; the Controller still decides semantic acceptance.
+
+Conflicting authority requires the separate exact recovery procedure: it archives evidence, restores recorded protected bytes, and fences known old children. Unproven termination remains `UNKNOWN`; recovery cannot approve changed security bytes or remove a fence. Host file changes, installation records, or a bootstrap run do not prove that the current Codex process loaded an update. See [task authority](docs/thaliris-task-authority.md) and [runtime recovery](docs/thaliris-runtime-recovery.md) for the exact procedure.
+
 See [integration](adapter/codex/README.md), [authority](docs/thaliris-task-authority.md), and [recovery](docs/thaliris-runtime-recovery.md). The [shared documentation](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs), [Core canonical README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) and [English version](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.en.md) stay in main. [Thaliris-DSH](https://github.com/Iris0fTheValley/Thaliris-DSH) is a sibling Host adapter using the same Core.
 
 Shared semantics leave judgment with models: INDEX is model-maintained semantic navigation; Core only checks paths, CAS, size and links. The Controller selects retained knowledge, and role results never automatically become durable memory.
@@ -70,6 +98,10 @@ Semantic roles, responsibilities, routing, and readonly limits remain separate f
 Core stores this optional non-empty string as immutable intent. The adapter accepts only luna-only and validates each execution binding. The external anchor freezes validated profile and configuration hashes; children and mutable configuration cannot expand or remove the constraint. A fresh Host session is required after installation. Admission compares role-profile and public-config snapshots recorded at SessionStart; those disk observations do not prove the effective Host role map or CLI -c overrides. SubagentStart checks the Host-reported model for a constrained child. Missing or mismatched values leave the handoff unbound and deny later child tools, but the Hook cannot prevent the model invocation. The constraint forbids Astra profiles and per-spawn model overrides; default bindings stay unchanged when it is absent. See the [execution-constraint port notes](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md).
 
 This feature requires thaliris>=0.4.3. Development tests must install the Core checkout used for this fix; the older monolithic wheel does not satisfy the split-package boundary.
+
+## CI and platform compatibility
+
+The CI matrix covers Ubuntu and Windows with Python 3.11, 3.12, and 3.13. It uses the fixed Core revision `70128abd223ecdf789fd9e8ee3b1bafceec0dd70` by default; only a manually dispatched workflow may select another `core_ref`. POSIX runtime-identity checks accept only the exact virtual-environment alias `lib64 -> lib` and verify that target drift is rejected. Hook transport treats only one document-leading UTF-8 BOM as transport syntax; repeated or misplaced BOMs and invalid UTF-8/JSON remain denied. Hook diagnostics emit bounded JSON boundary labels without payload or inferred deeper causes. CI and source tests do not prove that a currently installed Codex process loaded these contents.
 
 ## Runtime prompt layers
 
@@ -93,7 +125,9 @@ Each necessary dependency has one observation owner: executors run/wait on their
 processes and CI; Controller waits for the necessary child result without checking the
 same job again. Choose waiting by available capability, meaningful event and dependency;
 tool maximum is capacity and higher-level duration limits take precedence. The Hook
-preserves caller wait arguments. Managed authorization remains one active/pending
+preserves caller wait arguments. No new controlled comparison measures wait cost; a
+five-minute monitoring cadence is only an optional observation alternative, not a
+current feature or requirement. Managed authorization remains one active/pending
 top-level child and one active/pending nested Scanner; the Scanner slot may be reused
 after proved terminal completion for another necessary uncovered gap in the same boundary.
 
