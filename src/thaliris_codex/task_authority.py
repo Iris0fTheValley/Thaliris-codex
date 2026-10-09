@@ -20,8 +20,8 @@ def directory() -> Path:
     return Path.home() / ".thaliris" / "task-authority"
 
 
-def _store(root: Path) -> authority.AuthorityStore:
-    return authority.AuthorityStore(root, directory(), protected_paths=SECURITY_PATHS)
+def _store(root: Path, task_id: str | None = None) -> authority.AuthorityStore:
+    return authority.AuthorityStore(root, directory(), protected_paths=SECURITY_PATHS, task_id=task_id)
 
 
 def path(root: Path) -> Path:
@@ -29,7 +29,7 @@ def path(root: Path) -> Path:
 
 
 def read(root: Path) -> dict | None:
-    return _store(root).read()
+    return _store(root).read() if core.selected_task(root) is not None else None
 
 
 def write(root: Path, record: dict) -> None:
@@ -48,7 +48,7 @@ def contract(filename: str) -> dict:
 
 
 def establish(root: Path, state: dict, intent: dict, session_hash: str | None) -> dict:
-    prior = read(root)
+    prior = _store(root, state["task_id"]).read()
     if prior is not None and prior["status"] == "ACTIVE":
         raise ValueError("TASK_AUTHORITY_ALREADY_ACTIVE")
     intent = _validate_contract(intent)
@@ -71,6 +71,8 @@ def _evidence(root: Path, record: dict) -> dict:
 
 
 def check(root: Path) -> dict | None:
+    if core.selected_task(root) is None:
+        return None
     store = _store(root)
     record = store.check()
     if record is None:
@@ -101,7 +103,7 @@ def capture(path_: Path, value: dict) -> None:
             record["lifecycle_snapshot"] = value
             write(root, record)
     elif path_.name in {"session-fence.json", "abandoned-child-fence.json"}:
-        root = path_.parents[3] if path_.name == "session-fence.json" else path_.parents[2]
+        root = next(parent.parent for parent in path_.parents if parent.name == ".context")
         record = read(root)
         if record is not None:
             if path_.name == "session-fence.json":
@@ -143,3 +145,11 @@ def recover(root: Path, expected: str, reason: str) -> dict:
     result = _store(root).recover(expected, reason, archive_paths=archive_paths,
                                   restore_adapter=restore_adapter, evidence=lambda record: _evidence(root, record))
     return {**result, "host_actor_assurance": "UNKNOWN", "child_death_proof": "UNKNOWN"}
+
+
+def switch_mode(root: Path, expected: str, base_revision: int, mode: str, human_instruction: str) -> dict:
+    from . import lifecycle
+    check(root)
+    if lifecycle.managed_dependency_pending(root):
+        raise ValueError("TASK_MODE_SWITCH_DEPENDENCIES_PENDING: cancel or abandon selected dependencies before changing execution responsibility; native death remains UNKNOWN")
+    return _store(root).switch_mode(expected, base_revision, mode, human_instruction)

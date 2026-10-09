@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thaliris-codex"
-version = "0.4.3"
+version = "0.4.4"
 description = "Codex Host adapter for the shared Thaliris Core"
-dependencies = ["thaliris>=0.4.3,<0.5"]
+dependencies = ["thaliris>=0.4.4,<0.5"]
 requires-python = ">=3.11"
 readme = "README.md"
 license = "MIT"

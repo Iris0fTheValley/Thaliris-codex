@@ -32,6 +32,7 @@ def _fixture(tmp_path):
         "session_id": "old-controller-session",
         "turn_id": "turn",
         "tool_name": "spawn_agent",
+        "tool_use_id": "old-native-call",
         "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "old handoff"},
     }
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
@@ -41,7 +42,8 @@ def _fixture(tmp_path):
     initial = json.loads(initial_path.read_text(encoding="utf-8"))
     initial.pop("owner_session_id_hash")
     initial_path.write_text(json.dumps(initial), encoding="utf-8")
-    state_path = tmp_path / ".context" / "state.json"
+    core.select_task(tmp_path, started["task_id"])
+    state_path = core._state_path(tmp_path, started["task_id"])
     lifecycle_path = lifecycle._lifecycle_path(tmp_path, started["task_id"])
     state_raw, lifecycle_raw = state_path.read_bytes(), lifecycle_path.read_bytes()
     expected = {
@@ -58,7 +60,7 @@ def _proof(root, session="new-controller-session"):
         "session_id": session,
         "turn_id": "recovery-turn",
         "tool_name": "Bash",
-        "tool_input": {"command": "thaliris task-abandon --task-id x --revision 1 --state-sha256 x --lifecycle-sha256 x --reason takeover"},
+        "tool_input": {"command": f"thaliris task-abandon --task-id {core.selected_task(root)} --revision 1 --state-sha256 x --lifecycle-sha256 x --reason takeover"},
     }
     result = json.loads(lifecycle.handle_hook(root, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI))
     assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
@@ -72,14 +74,18 @@ def _abandon(root, expected, token):
     )
 
 
-def test_requires_proof_and_rejects_same_session(tmp_path):
+def test_requires_proof_but_owner_can_dispose_unknown_child_state(tmp_path):
     expected, state_raw, lifecycle_raw = _fixture(tmp_path)
     with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
         _abandon(tmp_path, expected, None)
-    with pytest.raises(ValueError, match="unbound pending spawn"):
-        _abandon(tmp_path, expected, _proof(tmp_path, "old-controller-session"))
-    assert (tmp_path / ".context" / "state.json").read_bytes() == state_raw
-    assert lifecycle._lifecycle_path(tmp_path, expected["task_id"]).read_bytes() == lifecycle_raw
+    result = _abandon(tmp_path, expected, _proof(tmp_path, "old-controller-session"))
+    archive = tmp_path / result["archive"]
+    manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
+    assert result["status"] == manifest["status"] == "ABANDONED"
+    assert manifest["lifecycle_status"] == "RECOVERED_INCOMPLETE"
+    assert (archive / "state.json").read_bytes() == state_raw
+    assert (archive / "lifecycle.json").read_bytes() == lifecycle_raw
+    assert not core._state_path(tmp_path, expected["task_id"]).exists()
 
 
 @pytest.mark.parametrize("changed", ["task_id", "revision", "state_sha256", "lifecycle_sha256"])
@@ -89,7 +95,7 @@ def test_exact_cas_rejects_changed_identity_or_bytes(tmp_path, changed):
     wrong[changed] = ("0" * 64 if changed.endswith("sha256") else (2 if changed == "revision" else "00000000-0000-0000-0000-000000000000"))
     with pytest.raises(ValueError, match="changed"):
         _abandon(tmp_path, wrong, _proof(tmp_path))
-    assert (tmp_path / ".context" / "state.json").read_bytes() == state_raw
+    assert core._state_path(tmp_path, expected["task_id"]).read_bytes() == state_raw
     assert lifecycle._lifecycle_path(tmp_path, expected["task_id"]).read_bytes() == lifecycle_raw
 
 
@@ -113,7 +119,7 @@ def test_archives_raw_evidence_and_allows_fresh_task(tmp_path, capsys):
     assert (archive / "lifecycle.json").read_bytes() == lifecycle_raw
     assert manifest["old_controller_owner_provenance"] == "DEPTH_ONE_PENDING_RESERVATION"
     assert manifest["fenced_old_session_provenance"]
-    assert not (tmp_path / ".context" / "state.json").exists()
+    assert not core._state_path(tmp_path, expected["task_id"]).exists()
     assert lifecycle._lifecycle_path(tmp_path, expected["task_id"]).read_bytes() == lifecycle_raw
     old_call = {"session_id": "old-controller-session", "tool_name": "Bash", "tool_input": {"command": "echo late"}}
     assert json.loads(lifecycle.handle_hook(tmp_path, "PreToolUse", old_call))["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -186,7 +192,7 @@ def test_hook_recognizes_powershell_task_abandon_with_single_quoted_semicolon_re
     assert proof is not None
     assert rewritten == f"{command} --hook-attestation {proof.group(1)}"
     assert f"--reason '{reason}'" in rewritten
-    assert (tmp_path / ".context" / "state.json").read_bytes() == state_raw
+    assert core._state_path(tmp_path, expected["task_id"]).read_bytes() == state_raw
     assert lifecycle._lifecycle_path(tmp_path, expected["task_id"]).read_bytes() == lifecycle_raw
 
 
@@ -207,7 +213,7 @@ def test_hook_denies_unquoted_separator_in_task_abandon_command(tmp_path):
 
     denied = json.loads(lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI))
     assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert (tmp_path / ".context" / "state.json").read_bytes() == state_raw
+    assert core._state_path(tmp_path, expected["task_id"]).read_bytes() == state_raw
     assert lifecycle._lifecycle_path(tmp_path, expected["task_id"]).read_bytes() == lifecycle_raw
     attestation_dir = tmp_path / ".context" / "audit" / "task-start-attestations"
     assert not attestation_dir.exists() or not list(attestation_dir.glob("*.json"))
@@ -251,7 +257,8 @@ def test_before_first_spawn_and_absent_lifecycle_are_recoverable(tmp_path):
     codex_adapter.init(tmp_path)
     started = core.task_start(tmp_path, "unspawned", None, None)
     path = lifecycle._lifecycle_path(tmp_path, started["task_id"])
-    expected = {"task_id": started["task_id"], "revision": started["revision"], "state_sha256": hashlib.sha256((tmp_path / ".context" / "state.json").read_bytes()).hexdigest(), "lifecycle_sha256": "ABSENT"}
+    state_path = core._state_path(tmp_path, started["task_id"])
+    expected = {"task_id": started["task_id"], "revision": started["revision"], "state_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(), "lifecycle_sha256": "ABSENT"}
     result = _abandon(tmp_path, expected, _proof(tmp_path))
     archive = tmp_path / result["archive"]
     manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
@@ -275,7 +282,8 @@ def test_attested_managed_start_records_owner_before_first_spawn(tmp_path, monke
     record = json.loads(path.read_text(encoding="utf-8"))
     assert record["owner_session_id_hash"] == hashlib.sha256(b"old-controller-session").hexdigest()
     assert record["pending_authorized_spawn"] is None
-    expected = {"task_id": started["task_id"], "revision": started["revision"], "state_sha256": hashlib.sha256((tmp_path / ".context" / "state.json").read_bytes()).hexdigest(), "lifecycle_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    state_path = core._state_path(tmp_path, started["task_id"])
+    expected = {"task_id": started["task_id"], "revision": started["revision"], "state_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(), "lifecycle_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     result = _abandon(tmp_path, expected, _proof(tmp_path, "old-controller-session"))
     manifest = json.loads((tmp_path / result["archive"] / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["old_controller_owner_provenance"] == "TASK_START"
@@ -303,27 +311,63 @@ def test_owner_abort_fences_bound_old_child_identity_but_retains_owner(tmp_path)
     owner = {"session_id": "old-controller-session", "tool_name": "Bash", "tool_input": {"command": "thaliris task-status"}}
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", owner) == ""
     spawn = {"session_id": "old-controller-session", "turn_id": "fresh-turn", "tool_name": "spawn_agent",
-             "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff"}}
+             "tool_use_id": "fresh-native-call", "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff"}}
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
     fresh_path = lifecycle._lifecycle_path(tmp_path, fresh["task_id"])
-    before = fresh_path.read_bytes()
+    before = json.loads(fresh_path.read_text(encoding="utf-8"))
     # The old callback keeps its original turn and handoff. It cannot attach
     # an old native name to the fresh reservation in the reused owner session.
-    old_spawn = {**spawn, "turn_id": "turn", "tool_input": {**spawn["tool_input"], "message": "old handoff"}}
+    old_spawn = {**spawn, "turn_id": "turn", "tool_use_id": "old-native-call", "tool_input": {**spawn["tool_input"], "message": "old handoff"}}
     lifecycle.handle_hook(tmp_path, "PostToolUse", {**old_spawn, "tool_response": {"task_name": "/root/old-child"}})
-    assert fresh_path.read_bytes() == before
+    after_old_callback = json.loads(fresh_path.read_text(encoding="utf-8"))
+    assert after_old_callback["pending_authorized_spawn"] == before["pending_authorized_spawn"]
+    assert after_old_callback["children"] == before["children"]
+    lifecycle.handle_hook(tmp_path, "PostToolUse", {**spawn, "tool_use_id": "fresh-native-call", "tool_response": {"agent_id": "fresh-child-id", "nickname": "fresh-child"}})
+    pending_after_fresh_post = json.loads(fresh_path.read_text(encoding="utf-8"))["pending_authorized_spawn"]
+    assert pending_after_fresh_post["native_agent_id_hash"] == lifecycle._identity_hash("fresh-child-id")
     fresh_child = {"session_id": "old-controller-session", "turn_id": "fresh-child-turn", "agent_id": "fresh-child-id", "agent_type": "thaliris-implementer"}
     assert lifecycle.handle_hook(tmp_path, "SubagentStart", fresh_child) == ""
-    lifecycle.handle_hook(tmp_path, "PostToolUse", {**spawn, "tool_response": {"task_name": "/root/fresh-child"}})
     current = json.loads(fresh_path.read_text(encoding="utf-8"))
-    assert current["children"][-1]["task_name_hash"] == lifecycle._identity_hash("/root/fresh-child")
+    assert current["children"][-1]["handoff_bound"] is True
+    assert current["children"][-1]["agent_id_hash"] == lifecycle._identity_hash("fresh-child-id")
     assert lifecycle.handle_hook(tmp_path, "SubagentStop", fresh_child) == ""
     lifecycle.handle_hook(tmp_path, "PostToolUse", {
         "session_id": "old-controller-session", "turn_id": "fresh-turn", "tool_name": "list_agents",
-        "tool_response": {"agents": [{"agent_name": "/root/fresh-child", "agent_status": {"completed": "done"}}]},
+        "tool_response": {"agents": [{"agent_name": "fresh-child-id", "agent_status": {"completed": "done"}}]},
     })
     child_state = json.loads(fresh_path.read_text(encoding="utf-8"))["children"][-1]
     assert child_state["native_terminal_status"] == "completed"
+
+
+def test_late_posttooluse_collision_cannot_attach_old_result_to_fresh_reservation(tmp_path):
+    expected, _, _ = _fixture(tmp_path)
+    _abandon(tmp_path, expected, _proof(tmp_path, "old-controller-session"))
+    fresh = core.task_start(tmp_path, "fresh task", None, None)
+    lifecycle.record_task_start_owner(tmp_path, fresh["task_id"], hashlib.sha256(b"old-controller-session").hexdigest())
+    spawn = {
+        "session_id": "old-controller-session",
+        "turn_id": "fresh-turn",
+        "tool_name": "spawn_agent",
+        "tool_use_id": "fresh-native-call",
+        "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff"},
+    }
+    assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
+    fresh_path = lifecycle._lifecycle_path(tmp_path, fresh["task_id"])
+    before = json.loads(fresh_path.read_text(encoding="utf-8"))
+
+    # A late event carries the new call ID but the abandoned handoff's turn
+    # and payload. It must not claim the new reservation by ID alone.
+    stale = {
+        **spawn,
+        "turn_id": "turn",
+        "tool_input": {**spawn["tool_input"], "message": "old handoff"},
+        "tool_response": {"task_name": "/root/old-child"},
+    }
+    lifecycle.handle_hook(tmp_path, "PostToolUse", stale)
+    after = json.loads(fresh_path.read_text(encoding="utf-8"))
+    assert after["pending_authorized_spawn"]["task_name_hash"] is None
+    assert after["pending_authorized_spawn"] == before["pending_authorized_spawn"]
+    assert after["children"] == before["children"]
 
 
 def test_owner_abort_same_turn_and_handoff_fails_closed_without_native_call_id(tmp_path):

@@ -146,6 +146,8 @@ def _definition_recovery_fields(payload: dict[str, object]) -> dict[str, object]
 
 def _task_preflight(root: Path) -> dict[str, object]:
     """Read exact task evidence before any project initialization."""
+    if core.selected_task(root) is None:
+        return {"status": "NO_TASK"}
     path = core._state_path(root)
     if path.is_symlink() or (path.exists() and not path.is_file()):
         return {"status": "INVALID_STATE"}

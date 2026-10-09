@@ -96,6 +96,8 @@ def test_codex_facade_keeps_legacy_record_shape_and_bytes(store, monkeypatch):
     monkeypatch.setattr(task_authority, "directory", lambda: store.directory)
     core.task_start(store.root, "Repair the example", None, None)
     state = core.task_show(store.root)["state"]
+    # Preserve the exact historical shape for an independently supplied legacy ledger.
+    core._state_path(store.root).replace(store.root / ".context/state.json")
     paths = (*task_authority.SECURITY_PATHS, ".context/state.json")
     expected = {
         "version": 1, "project": str(store.root.resolve()), "task_id": state["task_id"], "goal": state["goal"],

@@ -92,6 +92,21 @@ def recover(root: Path, task_id: str, revision: int, state_sha256: str,
             lifecycle_sha256: str, reason: str, *, codex_home: Path,
             operator_asserted_user_delegation: bool = False,
             integration_disconnected: bool = False) -> dict[str, object]:
+    root = core._repo_root(root)
+    prior = core.selected_task(root)
+    try:
+        core.select_task(root, task_id)
+        return _recover_selected(root, task_id, revision, state_sha256, lifecycle_sha256, reason,
+            codex_home=codex_home, operator_asserted_user_delegation=operator_asserted_user_delegation,
+            integration_disconnected=integration_disconnected)
+    finally:
+        core.select_task(root, prior)
+
+
+def _recover_selected(root: Path, task_id: str, revision: int, state_sha256: str,
+            lifecycle_sha256: str, reason: str, *, codex_home: Path,
+            operator_asserted_user_delegation: bool,
+            integration_disconnected: bool) -> dict[str, object]:
     if not operator_asserted_user_delegation or not integration_disconnected:
         raise ValueError("OFFLINE_OPERATOR_ASSERTIONS_REQUIRED")
     root = core._repo_root(root)
@@ -104,8 +119,13 @@ def recover(root: Path, task_id: str, revision: int, state_sha256: str,
         raise ValueError("offline recovery requires a bounded reason")
     with core._lock(root):
         observation = _disconnected(codex_home)
-        state_path = core._safe_without_final_symlink(root, ".context/state.json")
-        raw = state_path.read_bytes()
+        # The packet selects exactly one task; workspace legacy state is only
+        # eligible when Core independently matches its recorded task identity.
+        state_path = core._state_path(root, task_id)
+        try:
+            raw = state_path.read_bytes()
+        except FileNotFoundError as exc:
+            raise ValueError("offline recovery task identity changed or absent") from exc
         if len(raw) > 512 * 1024 or hashlib.sha256(raw).hexdigest() != state_sha256:
             raise ValueError("offline recovery state bytes changed")
         state = json.loads(raw)
@@ -132,6 +152,18 @@ def recover(root: Path, task_id: str, revision: int, state_sha256: str,
         owners = lifecycle._read_abandoned_owner_hashes(root) | sessions
         complete, provenance = lifecycle._read_abandoned_spawn_provenance(root)
         agent_fence = lifecycle._read_abandoned_agent_hashes(root) | agents
+        # Known fenced native IDs need navigation back to this recovered
+        # task even when a late callback has no session. This grants nothing
+        # and never replaces another task's existing identity association.
+        associations = {}
+        for agent_hash in agents:
+            target = lifecycle._association_path(root, agent_hash, "agent")
+            expected = {"version": 1, "task_id": task_id, "agent_id_hash": agent_hash}
+            if target.exists():
+                if not target.is_file() or json.loads(target.read_bytes()) != expected:
+                    raise ValueError("offline recovery fenced agent association conflict")
+            else:
+                associations[target] = (json.dumps(expected, sort_keys=True) + "\n").encode()
         archive = core._safe_without_final_symlink(root, f".context/audit/abandoned/{lifecycle._task_key(task_id)}-{uuid.uuid4().hex}")
         archive.mkdir(parents=True, exist_ok=False)
         core._atomic_write(archive / "state.json", raw)
@@ -155,6 +187,9 @@ def recover(root: Path, task_id: str, revision: int, state_sha256: str,
         lifecycle._write_capture(lifecycle._abandoned_child_fence_path(root), {"version": 1, "children": children,
             "agent_id_hashes": sorted(agent_fence), "owner_session_id_hashes": sorted(owners),
             "owner_spawn_provenance_complete": sorted(complete), "owner_spawn_provenance": provenance})
+        for target, contents in associations.items():
+            if not lifecycle._claim_agent_association(root, task_id, json.loads(contents)["agent_id_hash"]):
+                raise ValueError("offline recovery fenced agent association changed")
         if lifecycle._read_session_fence(root) != session_fence or lifecycle._read_abandoned_agent_hashes(root) != agent_fence:
             raise ValueError("offline recovery fence verification failed")
         # Retest configuration immediately before releasing the exact slot.

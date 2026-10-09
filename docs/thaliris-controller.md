@@ -23,13 +23,20 @@ the parent's ACTIVE task. Use this installed pinned runner for later operations;
 do not select alternate startup commands, shell-computed hashes or unknown runtime code.
 On READY (or legacy DEFINITION_READY_ACTOR_UNKNOWN), create a separate UTF-8 JSON authority
 contract file selecting the actual human instruction, boundary, invariants,
-acceptance and execution_mode: delegated, controller-direct or single-agent.
+acceptance and, when the human chooses, execution_mode: delegated, controller-direct
+or single-agent. Omitted mode defaults to delegated; an explicit human choice wins.
 Non-mode fields are nonempty strings. Then in a separate standalone direct tool call
-run `<installed pinned runner> --root '<repo>' task-start '<goal>' --authority-contract '<absolute-file-path>'`, using the quoted absolute file path.
+run `<installed pinned runner> --root '<repo>' --session-id '<current-native-session-id>' task-start '<goal>' --authority-contract '<absolute-file-path>'`, using the quoted absolute file path.
 The contract argument is a file path, never inline JSON; do not combine invocations.
 Explicit contract admission needs no bootstrap receipt or single-use Hook bearer.
 Legacy receipt/proof arguments remain compatibility inputs, not human authentication.
 After admission follow the effective project router and selected execution mode.
+Retain the returned Task ID. Later task operations select it with global
+`--task-id <id>` or the explicitly associated current session. A workspace's old
+ACTIVE state, UNKNOWN child or orphaned reservation never selects the current task.
+New tasks have separate ledgers and authority; old evidence remains recoverable.
+Legacy singleton state is available only for intentional diagnostics or explicit
+same-task recovery, and grants no automatic session association.
 
 ## Persistent authority
 
@@ -43,13 +50,27 @@ authority ends on human revocation, closure or Controller abandonment/replacemen
 Goal, scope, acceptance, mode, unfencing or security-baseline changes need an actual
 superior human decision. Children cannot authorize them through prompts, state or config.
 Controller-direct allows Controller reads/edits/tests/Git and useful auxiliary roles;
-single-agent allows ordinary execution without children. Default delegated routing,
+single-agent allows ordinary execution without children. A Controller may change
+strategy during the same task with `--task-id <id> task-mode --mode <mode>
+--human-instruction <actual selection> --base-revision <revision>
+--expected-authority-sha256 <hash>`. Authority and revision CAS preserve the goal,
+scope and hard constraints. First resolve or explicitly dispose affected managed
+dependencies; mode changes do not expand a child's role or readonly permissions.
+Default delegated routing,
 fresh isolation, readonly restrictions and explicit Astra authorization otherwise hold.
 
 ## Task recovery
 
 On CURRENT_CONTINUATION continue or explicitly abandon using the exact task-abandon
-packet. An unbound pending spawn first needs trusted terminal Host recovery evidence.
+packet. Native termination and Controller disposition are different facts.
+`--task-id <id> task-dispose-dependency --handoff-id <id> --base-revision <revision>
+--expected-lifecycle-sha256 <hash> --reason <actual decision>` abandons that dependency
+and fences its managed grants without inventing native terminal evidence. Original
+UNKNOWN execution, death proof and writing risk remain UNKNOWN. Isolate or coordinate
+possible shared writes before new work; a late result cannot reactivate disposed work.
+An unbound dispatch can be disposed through this task-local endpoint. Reused sessions
+or ambiguous replaced reservations need an exact native dispatch return ID to bind
+new managed work; ordinary reading is not subject to this qualification restriction.
 On FOREIGN_RECOVERY_DECISION or UNKNOWN, Controller decides continuation/recovery.
 On INVALID_STATE/bootstrap failure diagnose the affected surface; preserve evidence,
 label managed assurance UNKNOWN, and route ordinary source work through assigned roles.
@@ -57,6 +78,12 @@ For incompatible task schema, read task-status and use task-recover-state with e
 --expected-sha256; ACTIVE recovery also needs --abandon-active and no nonterminal children.
 Never delete invalid state or treat it as absent. Runtime drift is evidence for
 Controller repair/restore/accepted-upgrade judgment, not a blanket source-work ban.
+UNKNOWN missing Host fields, actual authority conflict and role violation are distinct.
+Damaged authority blocks only controls, authorization and certification that depend
+on it; ordinary diagnostics and independent work may proceed within existing role
+boundaries. A new independent task may establish its own authorized current baseline.
+Keep raw immutable contracts, user-owned unknown bytes, CAS and historical provenance;
+do not silently bless unknown changes or bind ordinary work forever to an old runtime.
 
 Authority conflict recovery uses task-recover-authority --expected-authority-sha256
 <exact external hash> --reason <reason>. It archives evidence, restores recorded bytes
@@ -203,16 +230,22 @@ explicitly deferred, or blocked by a decision-changing dependency.
 Fresh role sessions use V2 `fork_turns="none"` or V1 `fork_context=false` and only the authorized parent's native
 spawn message plus explicitly selected information. Controller may spawn registered
 roles; Implementer, Focused Implementer and Reviewer may spawn a fresh Investigator
-doing Scanner work. The supported managed shape has one active/pending top-level
-child and at most one active/pending Scanner under its exact parent. This is a
-simultaneous slot, not a lifetime quota: after proved terminal completion, a fresh
-Scanner may cover another necessary uncovered gap within the same boundary.
-Other children cannot delegate. Maximum managed depth is two, never sibling workers.
+doing Scanner work. Independent investigation and isolated workstreams may execute
+in parallel. Coordinate known overlapping shared-file writes or use separate
+worktrees before dispatch; ACTIVE alone does not prove a write conflict. Existing
+file CAS catches lost updates, not semantic overlap. Each task permits one unbound
+native dispatch until precise identity association; bound siblings may remain live
+together. At most one active/pending Scanner belongs to its exact parent. After its
+completion or explicit dependency disposition, a fresh Scanner may cover another gap.
+Other children cannot delegate. Maximum managed depth is two.
 Native capacity does not expand managed authorization; UNKNOWN overlap evidence
 does not authorize bypassing Hooks or disabling all future supported delegation.
 Keep working sets private; return distilled conclusions, facts, unknowns,
 contradictions, verification and optional Artifact pointers. Child communication,
 mutation/verification practice and role endpoints are defined in native role prompts.
+An active child may receive selected supplemental evidence or factual correction
+inside its existing goal and role. Communication cannot alter its authorization.
+After FINAL, assign new work to a fresh child.
 
 ## Durable retrieval and knowledge admission
 
@@ -224,13 +257,26 @@ invalid freshness or resumed compaction. Near task closure, select Curator only 
 reusable knowledge has future value; supply exact prior memory, navigation and evidence.
 Keep INDEX semantic and concise. Core validates storage, never chooses relevance.
 CHANGED is an observation, not semantic invalidation; Controller decides revalidation.
+In default delegated mode, route open discovery, broad searches and large diagnostics
+to a short-lived Investigator/Scanner. Controller may read one or very few associated
+precise known-path evidence fragments for an immediate decision. Prefer catalog,
+document-get, task-get, artifact-get and controller-instructions --section; task-show
+is available for explicit diagnosis. Do not assemble a broad investigation through
+continuous small queries. Native exec_command precise file reads require a line
+slice of at most 200 lines and explicit max_output_tokens of at most 4096; that is
+an output-token bound, not a source-byte bound. Prefer the existing bounded retrieval
+endpoints. Hooks recognize this small exact-path sliced read shape; they
+cannot prove cumulative semantic scope or every third-party MCP tool's behavior.
 
 ## Native completion and closure
 
 Use only trusted direct runtime commands and native coordination allowed by the
-current execution mode. Pending-spawn recovery needs exact trusted native failure
-evidence; timeouts, not_found and prose cannot release a reservation. Wait only for
-a known unfinished necessary child. Choose waiting from the available capability,
+current execution mode. Native failure reconciliation needs exact trusted evidence;
+timeouts, not_found and prose are not death proof. Explicit dependency disposition
+may end management without proving termination. Wait only for
+a known unfinished necessary child. After FINAL, use its result; a decision-changing
+unknown returns the decision to Controller and does not trigger another wait or
+repeated recovery of the old task. Choose waiting from the available capability,
 expected meaningful event and necessary dependency; prefer native notifications.
 The tool maximum is capacity, not a recommended duration. Higher-level duration
 limits take precedence; do not impose a universal maximum or fixed wait duration.

@@ -92,7 +92,8 @@ def pending_native(tmp_path, monkeypatch, pinned_test_thaliris, replay_runtime):
     (project / ".codex").mkdir()
     (project / ".codex/thaliris.json").write_text("{}")
     core.init(project)
-    core.task_start(project, "Isolated native maintenance replay fixture", None, None)
+    started = core.task_start(project, "Isolated native maintenance replay fixture", None, None)
+    lifecycle.record_task_start_owner(project, started["task_id"], hashlib.sha256(b"native-controller-session").hexdigest())
     monkeypatch.setenv("CODEX_HOME", str(home))
 
     def make_intent(exe, operation="codex-install", unicode=False):
@@ -176,6 +177,19 @@ def test_exact_original_native_replay_admitted(pending_native, distinct, prepare
     # pytest truncates large dictionary assertion messages with saferepr.
     assert result["permissionDecision"] == "allow", json.dumps(result, indent=2)
     assert "UNKNOWN" in result["additionalContext"]
+    assert snapshot(home) == before
+
+
+def test_unassociated_maintenance_replay_does_not_inherit_another_tasks_state(pending_native):
+    home, project, path, command, payload = pending_native()
+    core._state_path(project).write_text("damaged unrelated task")
+    fence = lifecycle._session_fence_path(project)
+    fence.parent.mkdir(parents=True, exist_ok=True)
+    fence.write_text(json.dumps({"version": 1, "session_id_hashes": [
+        hashlib.sha256(b"independent-maintenance-session").hexdigest()]}))
+    payload["session_id"] = "independent-maintenance-session"
+    before = snapshot(home)
+    assert native(command, project, payload)["permissionDecision"] == "allow"
     assert snapshot(home) == before
 
 
@@ -267,7 +281,7 @@ def test_native_replay_input_drift_fails_closed(pending_native, defect):
             value["before"][maintenance.RECEIPT_NAME] = base64.b64encode(b"unverifiable historical receipt").decode()
         journal.write_text(json.dumps(value))
     elif defect in {"unknown_managed_bytes", "state_directory"}:
-        state = project / ".context" / "state.json"
+        state = core._state_path(project)
         if defect == "state_directory":
             state.unlink();state.mkdir()
         else:
@@ -301,7 +315,7 @@ def test_degraded_native_denies_child_other_executor_even_with_invalid_journal(p
 def test_native_replay_diagnostic_identifies_swallowed_guard_without_recording_inputs(pending_native, defect):
     home, project, path, command, payload = pending_native()
     if defect == "state":
-        state = project / ".context" / "state.json"
+        state = core._state_path(project)
         state.write_text("unknown managed state")
     else:
         payload["tool_input"]["cmd"] += " --execution-constraint luna-only"

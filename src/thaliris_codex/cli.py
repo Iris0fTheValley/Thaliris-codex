@@ -9,6 +9,7 @@ import sys
 
 from . import __version__
 from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics
+from thaliris import core
 from thaliris.core import TaskStateSchemaIncompatible, artifact_get, catalog, document_get, milestone_check, rollback, stale, task_artifact, task_get, task_promote, task_show, task_status, task_update
 
 
@@ -53,6 +54,8 @@ def _add_global_arguments(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument("--pretty", action="store_true")
     parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--task-id", dest="selected_task_id", help="explicit task selection; not an authority grant")
+    parser.add_argument("--session-id", help="Controller-selected session association; Host assurance remains UNKNOWN")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -118,6 +121,18 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--abandon-active", action="store_true", help="confirm abandonment of the archived ACTIVE task")
     q.add_argument("--hook-attestation", help=argparse.SUPPRESS)
     q.add_argument("--controller-bridge-sha256", help=argparse.SUPPRESS)
+    q = sub.add_parser("task-dispose-dependency", help="abandon a selected dependency; native execution and writing risk remain UNKNOWN")
+    q.add_argument("--handoff-id", required=True)
+    q.add_argument("--base-revision", type=int, required=True)
+    q.add_argument("--expected-lifecycle-sha256", required=True)
+    q.add_argument("--reason", required=True)
+    q = sub.add_parser("task-associate", help="explicitly associate this session with the selected task")
+    q.add_argument("--expected-authority-sha256", required=True)
+    q = sub.add_parser("task-mode", help="Controller-selected execution mode transition with authority and revision CAS")
+    q.add_argument("--mode", choices=task_authority.MODES, required=True)
+    q.add_argument("--human-instruction", required=True)
+    q.add_argument("--base-revision", type=int, required=True)
+    q.add_argument("--expected-authority-sha256", required=True)
     q = sub.add_parser("task-update")
     q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
     q.add_argument("--base-revision", required=True, type=int)
@@ -221,6 +236,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(out, sort_keys=True, separators=(",", ":")))
             return 0
         root = args.root.resolve()
+        selected = args.selected_task_id or (getattr(args, "task_id", None) if args.command == "task-abandon" else None)
+        if selected is None and args.session_id:
+            selected = lifecycle._associated_task(root, {"session_id": args.session_id})
+        core.select_task(root, selected)
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "recover-pending-spawn", "task-recover-authority", "task-recover-state"} and selected is None:
+            raise ValueError("explicit --task-id or associated --session-id required for managed control")
         if args.command == "controller-instructions":
             from . import controller_instructions
             runner = controller_instructions.runner_command(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME)
@@ -231,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
             raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")
-        if args.command not in {"audit-hook", "codex-bootstrap", "task-status", "doctor", "version", "codex-install", "codex-uninstall", "codex-maintenance-plan", "task-recover-authority"}:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "recover-pending-spawn"}:
             task_authority.check(root)
         if args.command == "audit-hook":
             stage = "receive"
@@ -323,10 +344,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.bootstrap_receipt is not None and args.controller_bridge_sha256 is not None and args.bootstrap_receipt != args.controller_bridge_sha256:
                 raise ValueError("conflicting bootstrap receipts")
             start_args = (root, args.goal, args.milestone, args.input, args.hook_attestation, receipt)
-            out = codex_adapter.task_start(*start_args, authority_contract=args.authority_contract) if args.authority_contract else codex_adapter.task_start(*start_args)
+            out = codex_adapter.task_start(*start_args, authority_contract=args.authority_contract, session_id=args.session_id) if args.authority_contract else codex_adapter.task_start(*start_args)
         elif args.command == "task-abandon": out = codex_adapter.task_abandon(root, args.task_id, args.revision, args.state_sha256, args.lifecycle_sha256, args.reason, args.hook_attestation)
         elif args.command == "task-recover-authority": out = task_authority.recover(root, args.expected_authority_sha256, args.reason)
         elif args.command == "task-recover-state": out = codex_adapter.task_recover_state(root, args.expected_sha256, args.abandon_active, args.hook_attestation, args.controller_bridge_sha256)
+        elif args.command == "task-dispose-dependency": out = lifecycle.task_dispose_dependency(root, args.handoff_id, args.base_revision, args.expected_lifecycle_sha256, args.reason)
+        elif args.command == "task-associate": out = lifecycle.associate_task(root, str(core.selected_task(root)), lifecycle._identity_hash(args.session_id), args.expected_authority_sha256)
+        elif args.command == "task-mode": out = task_authority.switch_mode(root, args.expected_authority_sha256, args.base_revision, args.mode, args.human_instruction)
         elif args.command == "task-update": out = task_update(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
         elif args.command == "task-show": out = task_show(root)
         elif args.command == "task-status": out = _task_status(root, suppress_protocol_notice=args.suppress_protocol_notice)

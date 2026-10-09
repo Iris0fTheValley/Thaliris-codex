@@ -727,7 +727,7 @@ def test_task_abandon_help_is_read_only_and_does_not_issue_proof(
     tmp_path: Path, capsys, incompatible: bool, help_flag: str,
 ) -> None:
     root = repo(tmp_path)
-    state_path = root / ".context" / "state.json"
+    legacy_state_path = root / ".context" / "state.json"
     if incompatible:
         old_state = {
             "schema_version": 1,
@@ -738,9 +738,13 @@ def test_task_abandon_help_is_read_only_and_does_not_issue_proof(
             "active_work": [],
             "pending_results": [],
         }
-        state_path.write_text(json.dumps(old_state), encoding="utf-8")
+        legacy_state_path.write_text(json.dumps(old_state), encoding="utf-8")
+        core.select_task(root, old_state["task_id"])
+        state_path = core._state_path(root, old_state["task_id"])
     else:
-        core.task_start(root, "active state remains unchanged", None, None)
+        started = core.task_start(root, "active state remains unchanged", None, None)
+        core.select_task(root, started["task_id"])
+        state_path = core._state_path(root, started["task_id"])
     original_state = state_path.read_bytes()
     command = (
         f'thaliris task-abandon {help_flag} --reason "quoted >, <, and ; stay text" '
@@ -766,10 +770,12 @@ def test_task_abandon_help_with_shell_redirection_is_denied_before_state_changes
     tmp_path: Path, redirection: str,
 ) -> None:
     root = repo(tmp_path)
-    state_path = root / ".context" / "state.json"
-    core.task_start(root, "active state survives redirected help", None, None)
+    started = core.task_start(root, "active state survives redirected help", None, None)
+    core.select_task(root, started["task_id"])
+    state_path = core._state_path(root, started["task_id"])
+    state_target = state_path.relative_to(root).as_posix()
     original_state = state_path.read_bytes()
-    command = f"thaliris task-abandon --help {redirection} .context/state.json"
+    command = f"thaliris task-abandon --help {redirection} {state_target}"
     payload = hook_payload(tool_name="Bash", tool_input={"command": command})
 
     assert not lifecycle_module._context_help_requested(payload)
@@ -790,10 +796,12 @@ def test_task_abandon_help_rejects_unquoted_shell_expressions(
     tmp_path: Path, expression: str,
 ) -> None:
     root = repo(tmp_path)
-    state_path = root / ".context" / "state.json"
-    core.task_start(root, "active state survives shell expression help", None, None)
+    started = core.task_start(root, "active state survives shell expression help", None, None)
+    core.select_task(root, started["task_id"])
+    state_path = core._state_path(root, started["task_id"])
+    state_target = state_path.relative_to(root).as_posix()
     original_state = state_path.read_bytes()
-    command = f"& 'thaliris.exe' task-abandon --help {expression}"
+    command = f"& 'thaliris.exe' task-abandon --help {expression.replace('.context/state.json', state_target)}"
     payload = hook_payload(tool_name="Bash", tool_input={"command": command})
 
     assert lifecycle_module._context_help_status(payload) == (True, True)
@@ -809,10 +817,12 @@ def test_task_abandon_help_rejects_unquoted_shell_expressions(
 
 def test_top_level_help_rejects_unquoted_powershell_hashtable_expression(tmp_path: Path) -> None:
     root = repo(tmp_path)
-    state_path = root / ".context" / "state.json"
-    core.task_start(root, "active state survives hashtable help expression", None, None)
+    started = core.task_start(root, "active state survives hashtable help expression", None, None)
+    core.select_task(root, started["task_id"])
+    state_path = core._state_path(root, started["task_id"])
+    state_target = state_path.relative_to(root).as_posix()
     original_state = state_path.read_bytes()
-    command = "thaliris.exe --help @{x=Remove-Item .context/state.json}"
+    command = f"thaliris.exe --help @{{x=Remove-Item {state_target}}}"
     payload = hook_payload(tool_name="Bash", tool_input={"command": command})
 
     assert lifecycle_module._context_help_status(payload) == (True, True)
@@ -841,23 +851,29 @@ def test_invalid_state_admission_requires_confirmed_recovery(tmp_path: Path, mon
         "architectural_intent": None,
     }
     state_path = root / ".context" / "state.json"
+    old_task_id = state["task_id"]
     old_bytes = json.dumps(state, sort_keys=True, indent=2).encode("utf-8") + b"\n"
     state_path.write_bytes(old_bytes)
     digest = hashlib.sha256(old_bytes).hexdigest()
     bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
 
     start_command = f"thaliris task-start new-goal --controller-bridge-sha256 {bridge}"
-    start_denied = json.loads(handle_hook(
+    start_admitted = json.loads(handle_hook(
         root,
         "PreToolUse",
         hook_payload(tool_name="Bash", tool_input={"command": start_command}),
         lifecycle_module.MANAGED_HOOK_ABI,
     ))
-    assert start_denied["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "INVALID_STATE" in start_denied["hookSpecificOutput"]["permissionDecisionReason"]
+    assert start_admitted["hookSpecificOutput"]["permissionDecision"] == "allow"
+    new_task = core.task_start(root, "new-goal", None, None)
+    assert new_task["task_id"] != old_task_id
+    new_state_path = core._state_path(root, new_task["task_id"])
+    assert new_state_path.is_file()
     assert state_path.read_bytes() == old_bytes
 
-    no_confirm_command = f"thaliris task-recover-state --expected-sha256 {digest} --controller-bridge-sha256 {bridge}"
+    core.select_task(root, old_task_id)
+
+    no_confirm_command = f"thaliris --task-id {old_task_id} task-recover-state --expected-sha256 {digest} --controller-bridge-sha256 {bridge}"
     no_confirm_denied = json.loads(handle_hook(
         root,
         "PreToolUse",
@@ -869,7 +885,7 @@ def test_invalid_state_admission_requires_confirmed_recovery(tmp_path: Path, mon
     assert state_path.read_bytes() == old_bytes
 
     wrong_digest = "0" * 64 if digest != "0" * 64 else "1" * 64
-    wrong_command = f"thaliris task-recover-state --expected-sha256 {wrong_digest} --abandon-active --controller-bridge-sha256 {bridge}"
+    wrong_command = f"thaliris --task-id {old_task_id} task-recover-state --expected-sha256 {wrong_digest} --abandon-active --controller-bridge-sha256 {bridge}"
     wrong_denied = json.loads(handle_hook(
         root,
         "PreToolUse",
@@ -880,10 +896,10 @@ def test_invalid_state_admission_requires_confirmed_recovery(tmp_path: Path, mon
     assert "INVALID_STATE" in wrong_denied["hookSpecificOutput"]["permissionDecisionReason"]
     assert state_path.read_bytes() == old_bytes
 
-    command = f"thaliris task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
+    command = f"thaliris --task-id {old_task_id} task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
     _, token = _attested_recovery_command(root, command)
     assert cli.main([
-        "--root", str(root), "task-recover-state", "--expected-sha256", digest,
+        "--root", str(root), "--task-id", old_task_id, "task-recover-state", "--expected-sha256", digest,
         "--abandon-active", "--hook-attestation", token,
         "--controller-bridge-sha256", bridge,
     ]) == 0
@@ -895,8 +911,9 @@ def test_invalid_state_admission_requires_confirmed_recovery(tmp_path: Path, mon
     assert recovered["state_sha256"] == digest
     assert archive.read_bytes() == old_bytes
     assert not state_path.exists()
-    assert core.task_start(root, "new current-schema task", None, None)["status"] == "ACTIVE"
-    current = json.loads(state_path.read_text(encoding="utf-8"))
+    fresh = core.task_start(root, "new current-schema task", None, None)
+    assert fresh["status"] == "ACTIVE"
+    current = json.loads(core._state_path(root, fresh["task_id"]).read_text(encoding="utf-8"))
     assert current["schema_version"] == core._STATE_SCHEMA_VERSION
 
 
@@ -909,6 +926,7 @@ def test_state_recovery_blocks_when_lifecycle_authority_is_not_terminal(tmp_path
     state_path = root / ".context" / "state.json"
     old_bytes = json.dumps(state).encode("utf-8")
     state_path.write_bytes(old_bytes)
+    core.select_task(root, task_id)
     lifecycle_path = lifecycle_module._lifecycle_path(root, task_id)
     lifecycle_path.parent.mkdir(parents=True)
     lifecycle_path.write_text(json.dumps({
@@ -920,7 +938,7 @@ def test_state_recovery_blocks_when_lifecycle_authority_is_not_terminal(tmp_path
     }), encoding="utf-8")
     digest = hashlib.sha256(old_bytes).hexdigest()
     bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
-    command = f"thaliris task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
+    command = f"thaliris --task-id {task_id} task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
     denied = json.loads(handle_hook(
         root,
         "PreToolUse",
@@ -948,6 +966,7 @@ def test_state_recovery_refuses_unresolved_lifecycle_authority(tmp_path: Path, l
     state_path = root / ".context" / "state.json"
     old_bytes = json.dumps(state).encode("utf-8")
     state_path.write_bytes(old_bytes)
+    core.select_task(root, task_id)
     path = lifecycle_module._lifecycle_path(root, task_id)
     path.parent.mkdir(parents=True)
     if lifecycle_state == "unreadable":
@@ -963,7 +982,7 @@ def test_state_recovery_refuses_unresolved_lifecycle_authority(tmp_path: Path, l
         path.write_text(json.dumps(record), encoding="utf-8")
     digest = hashlib.sha256(old_bytes).hexdigest()
     bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
-    command = f"thaliris task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
+    command = f"thaliris --task-id {task_id} task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
     denied = json.loads(handle_hook(
         root,
         "PreToolUse",
@@ -1474,10 +1493,9 @@ def test_active_controller_uses_only_the_mechanical_tool_allowlist(tmp_path: Pat
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": "thaliris task-status"},
     )) == ""
-    denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(
+    assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": "thaliris task-show"},
-    )))
-    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )) == ""
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": "thaliris task-get R1"},
     )) == ""
@@ -1761,23 +1779,29 @@ def test_active_spawn_rejects_conflicting_or_unsupported_native_type_fields(tmp_
         assert "THALIRIS_MANAGED_AGENT_REQUIRED" in denied["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-@pytest.mark.parametrize(("agent_type", "command"), (
-    ("worker", "Set-Content unbound.txt value"),
-    ("explorer", "Get-Content unbound.txt"),
-    ("explorer", "Set-Content unbound.txt value"),
+@pytest.mark.parametrize(("agent_type", "command", "decision", "reason"), (
+    ("worker", "Set-Content unbound.txt value", "allow", None),
+    ("explorer", "Get-Content unbound.txt", "allow", None),
+    ("explorer", "Set-Content unbound.txt value", "allow", None),
+    ("thaliris-implementer", "Set-Content unbound.txt value", "allow", None),
+    ("thaliris-verifier", "Set-Content unbound.txt value", "deny", "THALIRIS_READONLY_ACTOR"),
 ))
-def test_active_unbound_native_children_are_rejected_before_tool_rules(
-    tmp_path: Path, agent_type: str, command: str,
+def test_active_unbound_native_children_use_ordinary_role_rules_without_managed_authority(
+    tmp_path: Path, agent_type: str, command: str, decision: str, reason: str | None,
 ) -> None:
     root = repo(tmp_path)
     _owned_task_start(root, "unbound child", None, None)
-    denied = json.loads(handle_hook(root, "PreToolUse", {
+    result = handle_hook(root, "PreToolUse", {
         "session_id": "unbound-session", "turn_id": "unbound-turn",
         "agent_id": f"unbound-{agent_type}", "agent_type": agent_type,
         "tool_name": "Bash", "tool_input": {"command": command},
-    }))
-    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "THALIRIS_BOUND_ROLE_SESSION_REQUIRED" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+    })
+    if decision == "allow":
+        assert result == ""
+    else:
+        denied = json.loads(result)
+        assert denied["hookSpecificOutput"]["permissionDecision"] == decision
+        assert reason in denied["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 @pytest.mark.parametrize("agent_type", (
@@ -2079,7 +2103,7 @@ def test_read_only_roles_make_no_native_sandbox_claim_and_obvious_writes_are_blo
     )))
     assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
     if role == "verifier":
-        assert "THALIRIS_VERIFIER_WRITE_BLOCKED" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "THALIRIS_READONLY_ACTOR" in denied["hookSpecificOutput"]["permissionDecisionReason"]
     assert handle_hook(root, "PreToolUse", hook_payload(
         agent_id="read-only-1",
         agent_type=agent_type,
@@ -2296,8 +2320,10 @@ def test_doctor_keeps_valid_runtime_and_host_executable_observations_distinct(tm
 
 def test_invalid_task_state_denies_only_explicit_managed_mutations(tmp_path: Path) -> None:
     root = repo(tmp_path)
-    _owned_task_start(root, "invalid state", None, None)
-    (root / ".context" / "state.json").write_text("{broken", encoding="utf-8")
+    started = _owned_task_start(root, "invalid state", None, None)
+    state_path = core._state_path(root, started["task_id"])
+    state_target = state_path.relative_to(root).as_posix()
+    state_path.write_text("{broken", encoding="utf-8")
     assert lifecycle_module.managed_task_state(root) == ("INVALID_STATE", None)
     diagnostic = codex_adapter.doctor(root)
     assert diagnostic["managed_task_state"] == "INVALID_STATE"
@@ -2314,8 +2340,8 @@ def test_invalid_task_state_denies_only_explicit_managed_mutations(tmp_path: Pat
         hook_payload(tool_name="Bash", tool_input={"command": "thaliris codex-install"}),
         hook_payload(tool_name="Bash", tool_input={"command": "thaliris codex-uninstall"}),
         hook_payload(tool_name="Bash", tool_input={"command": "thaliris uninstall"}),
-        hook_payload(tool_name="Bash", tool_input={"command": "Set-Content .context/state.json '{}'"}),
-        hook_payload(tool_name="functions.apply_patch", tool_input={"patch": "*** Update File: .context/state.json\n+{}"}),
+        hook_payload(tool_name="Bash", tool_input={"command": f"Set-Content {state_target} '{{}}'"}),
+        hook_payload(tool_name="functions.apply_patch", tool_input={"patch": f"*** Update File: {state_target}\n+{{}}"}),
     ):
         denied = json.loads(handle_hook(root, "PreToolUse", payload))
         assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -2350,15 +2376,16 @@ def test_invalid_task_state_denies_only_explicit_managed_mutations(tmp_path: Pat
         hook_payload(tool_name="send_message", tool_input={"target": "worker", "message": "status"}),
         hook_payload(tool_name="Bash", tool_input={"command": "thaliris doctor"}),
         hook_payload(tool_name="Bash", tool_input={"command": "thaliris task-status"}),
-        hook_payload(tool_name="Bash", tool_input={"command": "Get-Content .context/state.json"}),
+        hook_payload(tool_name="Bash", tool_input={"command": f"Get-Content {state_target}"}),
     ):
         assert handle_hook(root, "PreToolUse", payload) == ""
 
 
 def test_invalid_state_keeps_unrelated_compound_commands_transparent(tmp_path: Path) -> None:
     root = repo(tmp_path)
-    core.task_start(root, "invalid state", None, None)
-    (root / ".context" / "state.json").write_text("{broken", encoding="utf-8")
+    started = core.task_start(root, "invalid state", None, None)
+    core.select_task(root, started["task_id"])
+    core._state_path(root, started["task_id"]).write_text("{broken", encoding="utf-8")
     for command in (
         "Get-Date; Get-Content x",
         "Get-Content x; thaliris task-status",
@@ -2388,8 +2415,10 @@ def test_invalid_v1_active_state_admits_init_then_exact_recovery(tmp_path: Path,
         "architectural_intent": None,
     }
     state_path = root / ".context" / "state.json"
+    old_task_id = state["task_id"]
     old_bytes = json.dumps(state, sort_keys=True, indent=2).encode("utf-8") + b"\n"
     state_path.write_bytes(old_bytes)
+    core.select_task(root, old_task_id)
 
     instruction = root / "AGENTS.md"
     stale_text = instruction.read_text(encoding="utf-8").replace(
@@ -2414,14 +2443,14 @@ def test_invalid_v1_active_state_admits_init_then_exact_recovery(tmp_path: Path,
     assert state_path.read_bytes() == old_bytes
 
     for command in (
-        "thaliris task-close --base-revision 1",
-        "thaliris task-update --base-revision 1 old.json",
-        "thaliris task-artifact --base-revision 1",
-        "thaliris task-promote --base-revision 1 old.json",
-        "thaliris recover-pending-spawn handoff",
-        "thaliris rollback backup-id",
-        "thaliris codex-install",
-        "thaliris uninstall",
+        f"thaliris --task-id {old_task_id} task-close --base-revision 1",
+        f"thaliris --task-id {old_task_id} task-update --base-revision 1 old.json",
+        f"thaliris --task-id {old_task_id} task-artifact --base-revision 1",
+        f"thaliris --task-id {old_task_id} task-promote --base-revision 1 old.json",
+        f"thaliris --task-id {old_task_id} recover-pending-spawn handoff",
+        f"thaliris --task-id {old_task_id} rollback backup-id",
+        f"thaliris --task-id {old_task_id} codex-install",
+        f"thaliris --task-id {old_task_id} uninstall",
     ):
         denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(tool_name="Bash", tool_input={"command": command})))
         assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -2431,10 +2460,10 @@ def test_invalid_v1_active_state_admits_init_then_exact_recovery(tmp_path: Path,
 
     digest = hashlib.sha256(old_bytes).hexdigest()
     bridge = codex_adapter._controller_bridge()["controller_bridge_sha256"]
-    command = f"thaliris task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
+    command = f"thaliris --task-id {old_task_id} task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 {bridge}"
     _, token = _attested_recovery_command(root, command)
     assert cli.main([
-        "--root", str(root), "task-recover-state", "--expected-sha256", digest,
+        "--root", str(root), "--task-id", old_task_id, "task-recover-state", "--expected-sha256", digest,
         "--abandon-active", "--hook-attestation", token,
         "--controller-bridge-sha256", bridge,
     ]) == 0
@@ -2444,8 +2473,9 @@ def test_invalid_v1_active_state_admits_init_then_exact_recovery(tmp_path: Path,
     assert archive.read_bytes() == old_bytes
     assert not state_path.exists()
 
-    assert core.task_start(root, "new current-schema task", None, None)["status"] == "ACTIVE"
-    current = json.loads(state_path.read_text(encoding="utf-8"))
+    fresh = core.task_start(root, "new current-schema task", None, None)
+    assert fresh["status"] == "ACTIVE"
+    current = json.loads(core._state_path(root, fresh["task_id"]).read_text(encoding="utf-8"))
     assert current["schema_version"] == core._STATE_SCHEMA_VERSION
 
 
@@ -3081,7 +3111,7 @@ def test_native_status_conflict_blocks_new_spawn_and_close(tmp_path):
         tool_name="spawn_agent",
         tool_input={"fork_turns": "none", "agent_type": "worker", "message": "next handoff"},
     ))
-    assert "THALIRIS_SERIAL_ROLE_SESSION_REQUIRED" in denied
+    assert "THALIRIS_NATIVE_IDENTITY_COLLISION" in denied
     assert lifecycle(root)["pending_authorized_spawn"] is None
     with pytest.raises(ValueError, match="authorized handoff/identity bindings"):
         codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])
@@ -3323,6 +3353,7 @@ def test_role_profiles_keep_routing_and_model_choice_with_the_controller() -> No
         parsed = tomllib.loads(codex_adapter._agent_profile(name[:-5], role, model, effort).decode())
         assert parsed["developer_instructions"] == roles.profile_instructions(role, name[:-5])
         assert "sandbox_mode" not in parsed
-        assert "sole task-specific input" in parsed["developer_instructions"]
+        assert "selected native spawn handoff is your task-specific input" in parsed["developer_instructions"]
+        assert "selected supplemental evidence or factual correction within the same goal and role" in parsed["developer_instructions"]
     assert Path("docs/thaliris-role-packs.md").read_text(encoding="utf-8") == codex_adapter.render_role_packs()
     assert Path("docs/thaliris-role-registry.md").read_bytes() == roles.render_registry_document()

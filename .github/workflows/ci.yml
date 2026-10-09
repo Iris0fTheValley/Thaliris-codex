@@ -24,7 +24,7 @@ jobs:
         with:
           repository: Iris0fTheValley/Thaliris
           path: shared-core
-          ref: ${{ inputs.core_ref || '70128abd223ecdf789fd9e8ee3b1bafceec0dd70' }}
+          ref: ${{ inputs.core_ref || '56e48ac299dd2c5c4b16c992db732a55b7790893' }}
       - name: Selected Core identity
         run: 'git -C shared-core show -s --format="Core commit: %H%nSubject: %s" HEAD'
       - uses: actions/setup-python@v5

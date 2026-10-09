@@ -253,11 +253,11 @@ def test_lifecycle_policy_denials_name_role_sessions_or_native_codex_sessions() 
             assert prose.strip() == "the human instruction selected no children."
         else:
             assert "child" not in prose.lower(), denial
-    assert "fresh Investigator session and edits to a fresh Implementer session" in source
+    assert "precise known-path reads" in source
     assert "managed native Codex session lifecycle" in source
     assert "managed child slot" not in source
     assert "managed Child" not in source
-    assert "authorized native Codex role-session slot" in source
+    assert "THALIRIS_UNBOUND_DISPATCH_PENDING" in source
     assert "authorized native Codex role session" in source
     assert "child_id" in source  # Raw native schema fields remain unchanged.
 
@@ -540,7 +540,7 @@ def test_promoted_provenance_survives_task_state_and_round_trips(tmp_path: Path)
     }]})
     result = core.task_promote(root, "controller", registered["revision"], promotion)
     durable_path = result["promoted"][0]
-    (root / ".context" / "state.json").unlink()
+    core._state_path(root).unlink()
 
     fetched = core.document_get(root, durable_path)["documents"][0]
     assert "artifact-7" in fetched["body"]
@@ -634,7 +634,7 @@ def test_task_artifact_cli_accepts_repeatable_source_refs(tmp_path: Path, capsys
     }))
     (root / "artifact.md").write_text("details", encoding="utf-8")
     exit_code = cli.main([
-        "--root", str(root), "task-artifact", "--base-revision", str(started["revision"]),
+        "--root", str(root), "--task-id", started["task_id"], "task-artifact", "--base-revision", str(started["revision"]),
         "--id", "artifact-cli", "--path", "artifact.md", "--summary", "details",
         "--source-ref", "s0", "--source-ref", "s1",
     ])
@@ -691,7 +691,7 @@ def test_artifact_provenance_is_validated_while_loading_state(tmp_path: Path) ->
     started = core.task_start(root, "bad artifact provenance", None, None)
     (root / "artifact.md").write_text("body", encoding="utf-8")
     core.task_artifact(root, started["revision"], "A1", "artifact.md", "artifact")
-    path = root / ".context" / "state.json"
+    path = core._state_path(root)
     state = json.loads(path.read_text(encoding="utf-8"))
     state["artifact_refs"][0]["source_refs"] = ["missing"]
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -703,7 +703,7 @@ def test_artifact_provenance_is_validated_while_loading_state(tmp_path: Path) ->
     started = core.task_start(legacy_root, "legacy provenance", None, None)
     (legacy_root / "artifact.md").write_text("body", encoding="utf-8")
     core.task_artifact(legacy_root, started["revision"], "A1", "artifact.md", "artifact")
-    path = legacy_root / ".context" / "state.json"
+    path = core._state_path(legacy_root)
     state = json.loads(path.read_text(encoding="utf-8"))
     state["artifact_refs"][0]["evidence_refs"] = state["artifact_refs"][0].pop("source_refs")
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -1147,7 +1147,7 @@ def test_production_package_has_no_benchmark_authority_module() -> None:
 def test_only_current_task_state_schema_is_accepted(tmp_path: Path) -> None:
     root = repo(tmp_path)
     core.task_start(root, "current schema", None, None)
-    path = root / ".context" / "state.json"
+    path = core._state_path(root)
     state = json.loads(path.read_text(encoding="utf-8"))
     state["schema_version"] -= 1
     path.write_text(json.dumps(state), encoding="utf-8")
@@ -1197,7 +1197,7 @@ def test_revision_cas_rejects_stale_writer_without_mutating_state(tmp_path: Path
         "records": [{"id": "r1", "kind": "note", "text": "first"}],
     })
     first = core.task_update(root, "controller", started["revision"], update)
-    before = (root / ".context" / "state.json").read_bytes()
+    before = core._state_path(root).read_bytes()
 
     try:
         core.task_update(root, "controller", started["revision"], update)
@@ -1206,7 +1206,7 @@ def test_revision_cas_rejects_stale_writer_without_mutating_state(tmp_path: Path
     else:
         raise AssertionError("stale CAS writer was accepted")
 
-    assert (root / ".context" / "state.json").read_bytes() == before
+    assert core._state_path(root).read_bytes() == before
     assert core.task_show(root)["state"]["revision"] == first["revision"]
 
 

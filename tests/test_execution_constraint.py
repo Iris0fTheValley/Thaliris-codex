@@ -29,10 +29,11 @@ def constrained(tmp_path, monkeypatch):
     monkeypatch.setattr(task_authority, "directory", lambda: tmp_path / "authority")
     install_profiles(home, "luna-only")
     codex_adapter.init(root)
-    core.task_start(root, "constraint test", None, None)
+    started = core.task_start(root, "constraint test", None, None)
     intent = dict(human_instruction="Use Luna for every worker", boundary="marker", invariants="Same roles",
                   acceptance="All roles available", execution_mode="delegated", execution_constraint="luna-only")
     task_authority.establish(root, core._load_state(root), intent, hashlib.sha256(b"root").hexdigest())
+    lifecycle.record_task_start_owner(root, started["task_id"], hashlib.sha256(b"root").hexdigest())
     return root, home
 
 
@@ -195,6 +196,8 @@ def test_constrained_child_model_mismatch_or_missing_leaves_handoff_unbound(cons
     assert ledger["children"][-1]["handoff_bound"] is False
     assert ledger["pending_authorized_spawn"] is not None
     result = lifecycle.handle_hook(root, "PreToolUse", dict(child, tool_name="Bash", tool_input={"command": "Get-Content README.md"}))
+    assert result == ""  # Diagnostic reads grant no managed role binding.
+    result = lifecycle.handle_hook(root, "PreToolUse", dict(child, tool_name="Bash", tool_input={"command": "Set-Content marker.txt value"}))
     assert "BOUND_ROLE_SESSION_REQUIRED" in result
 
 

@@ -94,7 +94,7 @@ def test_executor_scanner_parent_binding_and_completion(active, role):
     assert children[1]["parent_role"] == role
     assert lifecycle.handle_hook(active, "PreToolUse", {**scanner, "tool_name": "read_file", "tool_input": {}}) == ""
     assert "DELEGATION" in lifecycle.handle_hook(active, "PreToolUse", spawn(scanner))
-    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
+    assert "SCANNER_SLOT_ACTIVE" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
     finish(active, scanner, parent)
     assert not lifecycle.qualifying_child_completed(active)
     finish(active, parent)
@@ -116,7 +116,7 @@ def test_executor_scanner_parent_binding_and_completion(active, role):
         ("lifecycle_binding_missing", "lifecycle_binding", "MISSING"),
     ],
 )
-def test_bound_role_session_denial_records_hash_only_identity_diagnostic(active, case, field, status):
+def test_ordinary_read_records_hash_only_identity_diagnostic(active, case, field, status):
     child = start(active, agent="private-executor-id")
     request = {**child, "tool_name": "read_file", "tool_input": {"path": "private-command-path"}}
     if case == "agent_id_mismatch":
@@ -142,9 +142,7 @@ def test_bound_role_session_denial_records_hash_only_identity_diagnostic(active,
         ledger["children"][0]["handoff_bound"] = False
         lifecycle._write_capture(path, ledger)
 
-    result = json.loads(lifecycle.handle_hook(active, "PreToolUse", request))
-    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "THALIRIS_BOUND_ROLE_SESSION_REQUIRED" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
 
     session = request.get("session_id") or "unknown-session"
     session_dir = hashlib.sha256(session.encode("utf-8")).hexdigest()[:24]
@@ -175,15 +173,13 @@ def test_bound_role_session_denial_records_hash_only_identity_diagnostic(active,
 def test_unavailable_lifecycle_ledger_reports_unknown_identity_comparisons(active, monkeypatch):
     child = start(active, agent="private-executor-id")
 
-    def unavailable_ledger(path, task_id):
+    def unavailable_ledger(path, task_id, **kwargs):
         raise OSError("ledger unavailable")
 
     monkeypatch.setattr(lifecycle, "_load_lifecycle", unavailable_ledger)
     request = {**child, "tool_name": "read_file", "tool_input": {"path": "private-command-path"}}
 
-    result = json.loads(lifecycle.handle_hook(active, "PreToolUse", request))
-    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "THALIRIS_BOUND_ROLE_SESSION_REQUIRED" in result["hookSpecificOutput"]["permissionDecisionReason"]
+    assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
 
     session_dir = hashlib.sha256(request["session_id"].encode("utf-8")).hexdigest()[:24]
     runtime = json.loads((active / ".context" / "audit" / session_dir / "runtime.json").read_text(encoding="utf-8"))
@@ -200,6 +196,9 @@ def test_unavailable_lifecycle_ledger_reports_unknown_identity_comparisons(activ
     serialized = json.dumps(diagnostic)
     for raw in ("private-executor-id", "root-session", "executor-turn", "private-command-path", "thaliris-implementer"):
         assert raw not in serialized
+
+    write = {**child, "tool_name": "exec_command", "tool_input": {"cmd": "Set-Content ordinary.txt value"}}
+    assert "BOUND_ROLE_SESSION_REQUIRED" in lifecycle.handle_hook(active, "PreToolUse", write)
 
 
 @pytest.mark.parametrize("wrong_agent", [False, True])
@@ -226,12 +225,8 @@ def test_bound_child_pretool_waits_for_concurrent_context_operation(active, monk
             with pytest.raises(FutureTimeoutError):
                 result.result(timeout=0.2)
         decision = json.loads(result.result(timeout=5))["hookSpecificOutput"]
-        if wrong_agent:
-            assert decision["permissionDecision"] == "deny"
-            assert "THALIRIS_BOUND_ROLE_SESSION_REQUIRED" in decision["permissionDecisionReason"]
-        else:
-            assert decision["permissionDecision"] == "allow"
-            assert decision["updatedInput"]["command"].startswith("thaliris task-status ")
+        assert decision["permissionDecision"] == "allow"
+        assert decision["updatedInput"]["command"].startswith("thaliris task-status ")
 
 
 def message(actor, target=None, tool_name="send_message"):
@@ -329,7 +324,7 @@ def test_start_consumes_only_exact_reservation_and_requires_own_identity(active)
     scanner = identity("investigator", "fresh-scanner")
     assert lifecycle._record_subagent_start(active, scanner)
     for key in ("agent_id", "agent_type", "turn_id", "session_id"):
-        assert "deny" in lifecycle.handle_hook(active, "PreToolUse", {**scanner, key: "wrong", "tool_name": "read_file", "tool_input": {}})
+        assert "deny" in lifecycle.handle_hook(active, "PreToolUse", {**scanner, key: "wrong", "tool_name": "apply_patch", "tool_input": {}})
 
 
 def test_parent_stop_before_scanner_start_is_not_terminal_evidence(active):
@@ -377,25 +372,26 @@ def test_parent_wait_preserves_event_duration_with_pending_scanner(active, monke
 
 
 @pytest.mark.parametrize("role", ["implementer", "focused-implementer", "reviewer"])
-def test_scanner_slot_reuse_requires_terminal_and_denies_pending_or_root_sibling(active, role):
+def test_scanner_slot_reuse_preserves_exact_parent_and_allows_bound_root_sibling(active, role):
     parent = start(active, role)
-    # Parent ownership and one active/pending top-level slot remain enforced.
-    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(role="curator"))
+    # A bound independent sibling does not occupy this parent's Scanner slot.
+    curator = start(active, "curator", "independent-curator")
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
-    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
+    assert "UNBOUND_DISPATCH_PENDING" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
     scanner = identity("investigator", "first-scanner")
     assert lifecycle._record_subagent_start(active, scanner)
     lifecycle.handle_hook(active, "PostToolUse", {**spawn(parent), "tool_response": {"task_name": "/root/first-scanner"}})
     lifecycle.handle_hook(active, "SubagentStop", scanner)
     # Optional Stop cannot release the slot without native terminal evidence.
-    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
+    assert "SCANNER_SLOT_ACTIVE" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
     finish(active, scanner, parent)
     second = start(active, "investigator", "second-scanner", parent)
-    assert [child["depth"] for child in state(active)["children"]] == [1, 2, 2]
-    assert "SERIAL" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
+    assert [child["depth"] for child in state(active)["children"]] == [1, 1, 2, 2]
+    assert "SCANNER_SLOT_ACTIVE" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
     assert "DELEGATION" in lifecycle.handle_hook(active, "PreToolUse", spawn(second))
     finish(active, second, parent)
     finish(active, parent)
+    finish(active, curator)
     assert lifecycle.qualifying_child_completed(active)
 
 

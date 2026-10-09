@@ -875,7 +875,12 @@ def _render_managed() -> str:
 
 Controller owns human intent, direction, scope, acceptance, selected context and
 next routing; native execution observations never decide semantic acceptance.
-Follow the authorized execution mode. Authority is persistent Controller-asserted
+Follow the user's execution mode; omitted mode defaults to delegated. Independent
+investigation and isolated workstreams may run in parallel; coordinate known shared
+write overlap or use separate worktrees. In delegated mode, Controller may make one
+or very few related precise known-path evidence reads; open investigation and continuous
+small queries that assemble a broad investigation belong to Investigator/Scanner.
+Authority is persistent Controller-asserted
 intent, not universal Host owner authentication. Children cannot establish, expand,
 rewrite or reactivate it, alter frozen constraints or mutate Controller/security state.
 Isolation and readonly boundaries hold in every mode; damaged management grants no
@@ -1589,10 +1594,10 @@ def task_start(
     hook_attestation: str | None = None,
     controller_bridge_sha256: str | None = None,
     authority_contract: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, object]:
     root = core._repo_root(root)
     from . import task_authority
-    task_authority.check(root)
     intent = task_authority.contract(authority_contract) if authority_contract else None
     definition = _project_definition_facts(root)
     if definition["project_definition_present"] != "YES":
@@ -1610,14 +1615,7 @@ def task_start(
             "status": "BOOTSTRAP_REQUIRED",
             "bootstrap": bootstrap,
         }
-    # Diagnose an existing incompatible ledger before consuming a one-shot
-    # Host attestation. Core still validates it again under the task-start lock.
-    try:
-        core._load_state(root)
-    except core.TaskStateSchemaIncompatible as exc:
-        return task_state_schema_error(root, exc)
-    except ValueError:
-        pass
+    # A new task does not depend on an old task ledger or authority.
     executable = lifecycle.managed_executable_health()
     # A missing trusted executable is an independent fail-closed bootstrap
     # fact. It is not represented by durable restart state.
@@ -1647,6 +1645,8 @@ def task_start(
     session_hash = (None if intent is not None and hook_attestation is None else
         lifecycle.consume_task_start_attestation(root, hook_attestation, controller_bridge_sha256,
             task_authority.digest(Path(authority_contract)) if authority_contract else None))
+    if session_hash is None and session_id is not None:
+        session_hash = lifecycle._identity_hash(session_id)
     installed_constraint = _installed_execution_constraint()
     if (intent is not None and intent.get("execution_constraint") is not None) or installed_constraint is not None:
         profiles = execution_profile_snapshot(root, intent.get("execution_constraint") if intent else None)
@@ -1784,7 +1784,7 @@ def task_recover_state(
 
     if not isinstance(expected_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
         raise ValueError("expected task state SHA-256 must be 64 lowercase hexadecimal characters")
-    state_name = ".context/state.json"
+    state_name = core._state_path(root).relative_to(root).as_posix()
     core._safe_without_final_symlink(root, state_name)
 
     with core._lock(root):
@@ -1908,6 +1908,11 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
         raise ValueError("task-close requires authorized handoff/identity bindings, exact identity-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents (V2) or wait_agent status map (V1) to observe completion. SubagentStop is optional; Controller semantic acceptance remains independent")
     result = core.task_close(root, base_revision, expected_task_id=task_id)
     task_authority.checkpoint(core._repo_root(root))
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(core._repo_root(root), task_id), task_id)
+    if ledger.get("dependency_dispositions"):
+        result = {**result, "task_disposition": "CLOSED_BY_CONTROLLER",
+            "native_execution": "UNKNOWN", "death_proof": "UNKNOWN", "writing_risk": "UNKNOWN",
+            "closure_basis": "DEPENDENCY_DISPOSITION_WITHOUT_NATIVE_TERMINATION"}
     return result
 
 

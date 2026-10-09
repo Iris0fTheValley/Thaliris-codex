@@ -103,11 +103,14 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
 
 @pytest.mark.parametrize("role", list(roles.native_role_definitions()), ids=lambda r: r.id)
 def test_child_contract_is_private_selected_and_boundary_preserving(role):
-    concepts(role.instructions, ("spawn message", "sole task-specific input"),
+    concepts(role.instructions, ("selected native spawn handoff", "task-specific input"),
+             ("supplemental evidence", "factual correction", "same goal", "role"),
              ("preserve its decisions", "hard invariants", "acceptance"),
              ("decision-changing unknowns", "final", "contradictions"),
              ("working sets", "tool logs", "private", "no ordinary progress", "artifact"))
     assert "controller routes registered" not in normalized(role.instructions)
+    require_local_prohibition(role.instructions, action="expand", target="authorization")
+    assert "after final, new work requires a fresh child" in normalized(role.instructions)
 
 
 @pytest.mark.parametrize("role", ["implementer", "focused-implementer"])
@@ -328,9 +331,11 @@ def test_resident_waiting_observation_and_causal_contract_rejects_negation_rever
     require_local_prohibition(value, action="poll", target="child")
     with pytest.raises(AssertionError, match="local prohibition"):
         require_local_prohibition(value.replace("Do not poll a finished child", "Do poll a finished child"), action="poll", target="child")
-    concepts(value, ("active/pending", "slot", "not a lifetime quota", "proved terminal completion"),
+    concepts(value, ("active/pending", "exact parent", "bound siblings", "parallel", "one unbound native dispatch"),
              ("selected candidate", "criteria", "final product acceptance"),
              ("complete normal task context", "retrieval cost", "quality"))
+    concepts(value, ("known unfinished necessary child", "after final", "decision-changing unknown", "another wait"),
+             ("precise known-path", "very few", "continuous small queries", "broad investigation"))
     assert set(controller_instructions.RESIDENT_SECTIONS).isdisjoint({"task-recovery", "host-maintenance"})
 
 

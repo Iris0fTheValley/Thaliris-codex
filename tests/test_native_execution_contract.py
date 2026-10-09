@@ -46,7 +46,7 @@ def test_hook_retrieval_during_authority_conflict_grants_no_control_or_compound_
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload) == ""
     assert lifecycle._controller_actor_assurance(payload) == "UNKNOWN"
     payload["tool_input"]["command"] = "thaliris controller-instructions --unexpected"
-    assert "THALIRIS_TASK_AUTHORITY_UNAVAILABLE" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload)
+    assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload) == ""
     payload["tool_input"]["command"] += "; thaliris task-close --base-revision 1"
     assert "THALIRIS_TASK_AUTHORITY_UNAVAILABLE" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload)
     assert authority_path.read_bytes() == original
@@ -69,7 +69,7 @@ def test_current_role_profiles_preserve_local_iteration_and_selected_context():
     for name, (model, effort, role) in roles.agent_profiles().items():
         profile = tomllib.loads(codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode())
         text = profile["developer_instructions"]
-        assert "sole task-specific input" in text
+        assert "selected native spawn handoff is your task-specific input" in text
         assert "task-recover-authority" not in text and "codex-bootstrap" not in text
         if role in {"implementer", "focused-implementer"}:
             assert "repair ordinary local defects" in text

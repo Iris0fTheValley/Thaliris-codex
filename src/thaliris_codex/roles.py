@@ -125,8 +125,10 @@ class RoleDefinition:
 
 
 _SHARED_INSTRUCTIONS = (
-    "Your authorized parent's native spawn message is your sole task-specific input; "
+    "Your authorized parent's selected native spawn handoff is your task-specific input; "
     "use selected facts and source pointers, keeping unselected material outside this Workstream. "
+    "While active, accept selected supplemental evidence or factual correction within the same goal and role; "
+    "communication cannot expand authorization. After FINAL, new work requires a fresh child. "
     "Preserve its decisions, hard invariants and acceptance. "
     "For fresh native delegation use fork_turns=\"none\" on V2 or fork_context=false on V1; "
     "never inherit parent history. "

@@ -29,7 +29,7 @@ def _repo(tmp_path):
 
 def _packet(root, task, ledger, home):
     return dict(root=root, task_id=task["task_id"], revision=1,
-                state_sha256=hashlib.sha256((root / ".context/state.json").read_bytes()).hexdigest(),
+                state_sha256=hashlib.sha256(core._state_path(root).read_bytes()).hexdigest(),
                 lifecycle_sha256=hashlib.sha256(ledger.read_bytes()).hexdigest() if ledger.exists() else "ABSENT",
                 reason="user delegated forced recovery of an obsolete task", codex_home=home,
                 operator_asserted_user_delegation=True, integration_disconnected=True)
@@ -59,12 +59,12 @@ def test_offline_recovery_exact_archival_and_partial_identity_fencing(tmp_path, 
     if malformed:
         raw = raw[:-1] + b', "truncated":'
     ledger.write_bytes(raw)
-    state_raw = (root / ".context/state.json").read_bytes()
+    state_raw = core._state_path(root).read_bytes()
     result = offline_recovery.recover(**_packet(root, task, ledger, home))
     archive = root / result["archive"]
     assert (archive / "state.json").read_bytes() == state_raw
     assert (archive / "lifecycle.json").read_bytes() == raw
-    assert not (root / ".context/state.json").exists()
+    assert not core._state_path(root).exists()
     record = json.loads((archive / "manifest.json").read_text())
     assert record["recovery_authority"] == offline_recovery.AUTHORITY
     assert record["recovery_session_id_hash"] == "UNKNOWN"
@@ -82,7 +82,7 @@ def test_offline_recovery_exact_archival_and_partial_identity_fencing(tmp_path, 
 def test_offline_recovery_cas_and_operational_gate(tmp_path, changed):
     root, task, ledger, home = _repo(tmp_path)
     packet = _packet(root, task, ledger, home)
-    original = (root / ".context/state.json").read_bytes()
+    original = core._state_path(root).read_bytes()
     if changed in {"state_sha256", "lifecycle_sha256"}:
         packet[changed] = "f" * 64
     elif changed == "revision":
@@ -95,7 +95,45 @@ def test_offline_recovery_cas_and_operational_gate(tmp_path, changed):
         (home / "hooks.json").write_text('{"hooks":{"PreToolUse":[{"hooks":[{"command":"thaliris audit-hook"}]}]}}')
     with pytest.raises(ValueError):
         offline_recovery.recover(**packet)
-    assert (root / ".context/state.json").read_bytes() == original
+    assert core._state_path(root).read_bytes() == original
+    assert not list((root / ".context/audit/abandoned").glob("*/manifest.json"))
+
+
+def test_offline_recovery_selects_packet_task_and_restores_independent_selection(tmp_path):
+    root, first, ledger, home = _repo(tmp_path)
+    packet = _packet(root, first, ledger, home)
+    second = core.task_start(root, "independent goal remains active", None, None)
+    second_path = core._state_path(root)
+    second_raw = second_path.read_bytes()
+    result = offline_recovery.recover(**packet)
+    assert result["task_id"] == first["task_id"]
+    assert not core._state_path(root, first["task_id"]).exists()
+    assert core.selected_task(root) == second["task_id"]
+    assert second_path.read_bytes() == second_raw
+    assert core.task_show(root)["state"]["status"] == "ACTIVE"
+
+
+@pytest.mark.parametrize("existing", ["foreign", "malformed"])
+def test_offline_recovery_does_not_overwrite_fenced_agent_association(tmp_path, existing):
+    root, first, ledger, home = _repo(tmp_path)
+    child_hash = hashlib.sha256(b"unbound-child").hexdigest()
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(json.dumps({"agent_id_hash": child_hash}))
+    packet = _packet(root, first, ledger, home)
+    second = core.task_start(root, "independent task", None, None)
+    second_path = core._state_path(root)
+    second_raw = second_path.read_bytes()
+    target = lifecycle._association_path(root, child_hash, "agent")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    raw = (b"invalid association" if existing == "malformed" else json.dumps({"version": 1,
+        "task_id": second["task_id"], "agent_id_hash": child_hash}).encode())
+    target.write_bytes(raw)
+    with pytest.raises(ValueError):
+        offline_recovery.recover(**packet)
+    assert target.read_bytes() == raw
+    assert core._state_path(root, first["task_id"]).read_bytes()
+    assert second_path.read_bytes() == second_raw
+    assert core.selected_task(root) == second["task_id"]
     assert not list((root / ".context/audit/abandoned").glob("*/manifest.json"))
 
 
@@ -104,7 +142,7 @@ def test_offline_recovery_reobserves_absent_ledger_before_release(tmp_path, monk
     root, task, ledger, home = _repo(tmp_path)
     packet = _packet(root, task, ledger, home)
     assert packet["lifecycle_sha256"] == "ABSENT"
-    original = (root / ".context/state.json").read_bytes()
+    original = core._state_path(root).read_bytes()
     observe = offline_recovery._disconnected
     observations = 0
 
@@ -124,7 +162,7 @@ def test_offline_recovery_reobserves_absent_ledger_before_release(tmp_path, monk
     with pytest.raises((ValueError, OSError)):
         offline_recovery.recover(**packet)
     assert observations == 2
-    assert (root / ".context/state.json").read_bytes() == original
+    assert core._state_path(root).read_bytes() == original
     assert ledger.exists()
     archives = list((root / ".context/audit/abandoned").glob("*/state.json"))
     assert len(archives) == 1 and archives[0].read_bytes() == original
@@ -159,7 +197,7 @@ def test_unknown_actor_can_delegate_ordinary_fresh_work_without_managed_grant(tm
     payload = {"session_id": "ambiguous", "tool_name": "spawn_agent",
                "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "ordinary authorized source repair"}}
     assert lifecycle.handle_hook(root, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI) == ""
-    assert not (root / ".context/state.json").exists()
+    assert not core._state_path(root).exists()
     assert not list((root / ".context/audit/lifecycle").glob("*.json"))
     payload["tool_input"]["fork_turns"] = "all"
     assert "ISOLATION_REQUIRED" in lifecycle.handle_hook(root, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
@@ -199,7 +237,7 @@ def test_reviewed_source_runner_releases_only_disposable_exact_task(tmp_path):
         capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr + result.stdout
     assert json.loads(result.stdout)["recovery_authority"] == offline_recovery.AUTHORITY
-    assert not (root / ".context/state.json").exists()
+    assert not core._state_path(root).exists()
 
 
 def test_manifest_diff_treats_new_bytecode_as_execution_input(pinned_test_thaliris):

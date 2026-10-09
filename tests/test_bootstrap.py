@@ -613,7 +613,7 @@ def test_active_task_yields_exact_recovery_without_probe_or_init(tmp_path: Path,
     monkeypatch.setattr(bootstrap, "_invoke", lambda *args: (_ for _ in ()).throw(AssertionError("no project probe")))
 
     result = bootstrap.bootstrap(tmp_path)
-    state = (tmp_path / ".context" / "state.json").read_bytes()
+    state = core._state_path(tmp_path).read_bytes()
     ledger = lifecycle._lifecycle_path(tmp_path, started["task_id"]).read_bytes()
     assert result["status"] == "UNKNOWN"
     assert result["init_invoked"] is False
@@ -626,7 +626,7 @@ def test_active_task_yields_exact_recovery_without_probe_or_init(tmp_path: Path,
     }
 
 
-def test_invalid_task_state_stops_before_runtime_or_init(tmp_path: Path, monkeypatch):
+def test_unselected_invalid_legacy_state_does_not_become_current_task(tmp_path: Path, monkeypatch):
     import subprocess
 
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -634,9 +634,14 @@ def test_invalid_task_state_stops_before_runtime_or_init(tmp_path: Path, monkeyp
     state.parent.mkdir()
     state.write_text('{"status":"ACTIVE"}', encoding="utf-8")
     monkeypatch.setattr(bootstrap, "_trusted_executable", lambda: ["installed"])
+    monkeypatch.setattr(bootstrap, "_invoke", lambda *args: {
+        "ok": True, "project_definition_present": "YES",
+        "controller_bridge_content": "managed text", "controller_bridge_sha256": hashlib.sha256(b"managed text").hexdigest(),
+    })
     result = bootstrap.bootstrap(tmp_path)
-    assert result["status"] == "INVALID_STATE"
+    assert result["status"] == "READY"
     assert result["init_invoked"] is False
+    assert state.read_text(encoding="utf-8") == '{"status":"ACTIVE"}'
 
 
 def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_path: Path, monkeypatch):

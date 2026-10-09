@@ -317,7 +317,8 @@ def test_arbitrary_workspace_guard_real_unknown_and_child_denial(tmp_path, monke
     # This task ledger is test data, never evidence of native Controller identity.
     from thaliris import core
     core.init(workspace)
-    core.task_start(workspace, "independent active sandbox task", None, None)
+    started = core.task_start(workspace, "independent active sandbox task", None, None)
+    lifecycle.record_task_start_owner(workspace, started["task_id"], maintenance.digest(b"ambiguous-actor"))
     assert lifecycle.managed_task_state(workspace)[0] == "ACTIVE"
     assert lifecycle.handle_hook(workspace, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI) == ""
     child = {**payload, "agent_id": "known-child", "agent_type": "thaliris-implementer"}
