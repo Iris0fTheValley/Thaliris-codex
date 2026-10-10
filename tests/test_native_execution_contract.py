@@ -61,7 +61,7 @@ def test_inherited_spans_select_entry_without_bulk_controller_procedures():
                               "OPERATOR_ASSERTED_USER_DELEGATED_ADMINISTRATION"):
             assert low_frequency not in inherited
             assert low_frequency in controller_instructions.render()
-    assert 'fork_turns="none"' in project
+    assert "selected spawn handoff without parent conversation history" in project
     assert "readonly" in global_span and "human decision" in global_span
 
 
