@@ -919,4 +919,4 @@ def test_managed_renderer_matches_working_artifact_and_derives_added_role(monkey
     from thaliris_codex import controller_instructions
     assert "Formal Sentinel" in controller_instructions.render()
     assert "formal sentinel instructions" in codex_adapter.render_role_packs()
-    assert 'fork_turns="none"' in codex_adapter.render_managed()
+    assert "selected spawn handoff without parent conversation history" in codex_adapter.render_managed()

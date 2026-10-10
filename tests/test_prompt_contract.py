@@ -90,7 +90,7 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
     # Role microstyle and endpoint are not a second global runtime authority.
     for omitted in ("smallest relevant tests", "focused-test pass", "reviewer reopen"):
         assert omitted not in normalized(global_text)
-    concepts(project, ("controller", "direction", "scope", "acceptance", "methods"),
+    concepts(project, ("owning controller", "task owner", "semantic acceptance", "methods"),
              ("selected spawn handoff", "unselected material", "ordinary local repair"),
              ("controller instructions", "role docs", "codex protocol"))
     concepts(controller, ("decision-complete handoff", "authoritative source", "derived relationships", "verification entry"),
@@ -99,6 +99,44 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
     assert "stale regions" in normalized(prompt("implementer"))
     assert "task-recover-authority" not in prompt("implementer")
     assert prompt("implementer") in adapter.render_role_packs()
+
+
+def test_identity_and_mode_distinctions_reach_normal_controller_context():
+    for value in (controller_instructions.render(), codex_bootstrap.controller_guidance()):
+        text = normalized(value)
+        concepts(value, ("native /root", "primary agent", "tree/execution position"),
+                 ("controller", "goal", "boundary", "selected context", "routing", "evidence", "final acceptance"),
+                 ("owning controller", "task owner", "parent", "immediate delegator"),
+                 ("scanner", "implementer", "focused implementer", "reviewer"),
+                 ("thaliris task id", "distinct", "native thread", "session", "agent ids"),
+                 ("execution_mode", "independently", "multi_agent_mode", "collaboration_mode"))
+        assert "host root identity remains unknown" in text
+        assert "neither native position nor task responsibility proves admission or host identity" in text
+        assert "native mode or tree position never selects or changes the task's authority contract" in text
+        assert "omitted mode defaults to delegated" in text
+        assert "controller-direct" in text and "single-agent" in text
+        assert "root routes workstreams" not in text
+        assert "applicable global/project agents and native role instructions still apply" in text
+        assert "fresh isolation does not remove these inherited instructions" in text
+
+
+def test_shared_entry_keeps_safety_and_discovery_without_controller_execution_routine():
+    for value in (adapter._global_agents_block().decode(), adapter.render_managed()):
+        text = normalized(value)
+        concepts(value, ("controller-asserted", "readonly"),
+                 ("isolation", "readonly boundaries", "live host maintenance", "authority"),
+                 ("unknown user-owned bytes", "native activation", "controller-instructions"))
+        assert "omitted mode defaults to delegated" not in text
+        assert "in delegated mode" not in text
+        assert "continuous small queries" not in text
+        assert "may make one" not in text
+        for controller_identity in ("native /root", "primary agent", "host root identity remains unknown",
+                                    "execution_mode", "multi_agent_mode", "collaboration_mode"):
+            assert controller_identity not in text
+    concepts(adapter._global_agents_block().decode(), ("owning controller", "codex-bootstrap", "resident controller guidance"),
+             ("known child", "readonly", "abandoned", "fenced", "human decision", "security-baseline"))
+    concepts(adapter.render_managed(), ("parent", "immediate delegator", "without parent conversation history"),
+             ("children", "frozen constraints", "controller/security state"))
 
 
 @pytest.mark.parametrize("role", list(roles.native_role_definitions()), ids=lambda r: r.id)
@@ -111,6 +149,8 @@ def test_child_contract_is_private_selected_and_boundary_preserving(role):
     assert "controller routes registered" not in normalized(role.instructions)
     require_local_prohibition(role.instructions, action="expand", target="authorization")
     assert "after final, new work requires a fresh child" in normalized(role.instructions)
+    concepts(role.instructions, ("fresh reception", "excludes parent conversation history"),
+             ("parent", "immediate delegator", "owning controller", "task owner"))
 
 
 @pytest.mark.parametrize("role", ["implementer", "focused-implementer"])
@@ -176,9 +216,24 @@ def test_discovery_challenge_knowledge_and_delegation_capabilities():
              ("provenance", "historical", "traceable"), ("no write", "sufficient"))
     for role in ("investigator", "curator", "reasoning-specialist", "verifier"):
         assert not roles.get_codex_binding(role).allowed_delegation_targets
+        assert "fork_turns" not in prompt(role)
+        assert "fork_context" not in prompt(role)
     for role in ("implementer", "focused-implementer", "reviewer"):
         assert roles.get_codex_binding(role).allowed_delegation_targets == frozenset({"investigator"})
         concepts(prompt(role), ("fresh investigator", "scanner", 'fork_turns="none"'))
+        assert "fork_context=false" in prompt(role)
+
+
+@pytest.mark.parametrize("execution_constraint", [None, "luna-only"])
+def test_profile_delegation_text_matches_role_capability(execution_constraint):
+    for name, (model, effort, role) in roles.agent_profiles(execution_constraint).items():
+        value = tomllib.loads(adapter._agent_profile(name[:-5], role, model, effort).decode())["developer_instructions"]
+        assert "Fresh reception excludes parent conversation history" in value
+        if roles.get_codex_binding(role).allowed_delegation_targets:
+            assert 'fork_turns="none"' in value and "fork_context=false" in value
+            concepts(value, ("fresh investigator", "scanner", "without model/effort overrides"))
+        else:
+            assert "fork_turns" not in value and "fork_context" not in value
 
 
 def test_controller_selects_roles_and_accounts_for_goals():

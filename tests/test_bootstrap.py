@@ -663,8 +663,8 @@ def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_
     assert "Explicit contract admission needs no bootstrap receipt" in controller_instructions.render()
     normalized = " ".join(rendered.lower().split())
     normalized_controller = " ".join(controller_instructions.render().lower().split())
-    assert "owning root" in normalized_controller and "controller runs" in normalized_controller
-    assert "managed children" in normalized and "parent" in normalized and "active task" in normalized
+    assert "owning controller runs" in normalized_controller
+    assert "managed children" in normalized and "owning controller's active task" in normalized
     assert "do not bootstrap, task-start or task-abandon" in normalized
     assert "report blocked work honestly" in normalized_controller
 

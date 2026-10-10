@@ -18,14 +18,14 @@ may retrieve other rules on demand within their authority. Retrieval grants no a
 
 For substantive file-changing project work, including README-only changes,
 configuration changes and new project creation, unless the human opts out, the owning
-root Controller runs `@RUNNER@ --root <repo> codex-bootstrap` directly once. Chatting
+Controller runs `@RUNNER@ --root <repo> codex-bootstrap` directly once. Chatting
 and read-only work needs no project bootstrap. When a new project directory has no Git
 metadata, initialize Git at the intended project root before bootstrap if creating a
 repository is within the user's requested project scope; do not initialize unrelated
 directories or create Git metadata for read-only work. Bootstrap itself still requires
 Git metadata and never initializes arbitrary directories.
 Managed children follow their handoff; do not bootstrap, task-start or task-abandon
-the parent's ACTIVE task. Use this installed pinned runner for later operations;
+the owning Controller's ACTIVE task. Use this installed pinned runner for later operations;
 do not select alternate startup commands, shell-computed hashes or unknown runtime code.
 On READY (or legacy DEFINITION_READY_ACTOR_UNKNOWN), create a separate UTF-8 JSON authority
 contract file selecting the actual human instruction, boundary, invariants,
@@ -45,6 +45,18 @@ Legacy singleton state is available only for intentional diagnostics or explicit
 same-task recovery, and grants no automatic session association.
 
 ## Persistent authority
+
+Native `/root` and `primary agent` describe native tree/execution position.
+Thaliris Controller names task responsibility for goal, boundary, selected context,
+routing, evidence and final acceptance. The same actor may hold both positions;
+neither native position nor task responsibility proves admission or Host identity.
+The owning Controller is the Thaliris task owner. Parent means the immediate
+delegator; a Scanner's parent may be an Implementer, Focused Implementer or Reviewer.
+Thaliris Task ID selects the admitted task and is distinct from native Thread,
+Session and Agent IDs; use their explicit associations rather than substituting IDs.
+Thaliris `execution_mode` selects delegated, controller-direct or single-agent task
+execution independently of native `multi_agent_mode` and `collaboration_mode`.
+Native mode or tree position never selects or changes the task's authority contract.
 
 Authority is persistent Controller-asserted human intent under governance, not
 mechanical human/Root authentication. Host Root identity remains UNKNOWN.
@@ -195,7 +207,7 @@ require separate Host maintenance authority under the global contract.
 
 ## Workstream endpoints and review
 
-Root routes Workstreams; executors close local loops inside them. Semantic dependency,
+Controller routes Workstreams; executors close local loops inside them. Semantic dependency,
 decision coupling and independent closure define their boundaries. Ordinary Implementer
 may finish assigned deterministic execution and Git closure in the same Workstream.
 Focused Implementer returns at semantic convergence: core solution/invariants hold,
@@ -227,8 +239,11 @@ architecture, contract, invariant, scope, acceptance or decision basis reopen Co
 Before opportunistic work, account for every explicit user goal as addressed,
 explicitly deferred, or blocked by a decision-changing dependency.
 
-Fresh role sessions use V2 `fork_turns="none"` or V1 `fork_context=false` and only the authorized parent's native
-spawn message plus explicitly selected information. Controller may spawn registered
+Fresh role sessions use V2 `fork_turns="none"` or V1 `fork_context=false` to exclude
+parent conversation history. Task-specific input is the authorized parent's native
+spawn message plus explicitly selected information; applicable global/project AGENTS
+and native role instructions still apply. Fresh isolation does not remove these
+inherited instructions. Controller may spawn registered
 roles; Implementer, Focused Implementer and Reviewer may spawn a fresh Investigator
 doing Scanner work. Independent investigation and isolated workstreams may execute
 in parallel. Coordinate known overlapping shared-file writes or use separate

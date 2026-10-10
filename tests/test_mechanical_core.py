@@ -178,8 +178,9 @@ def test_authoritative_prose_uses_role_names_or_explicit_native_child_context() 
     assert "Provide a decision-complete handoff:" in controller
     assert "Ordinary Implementer may finish assigned deterministic execution and Git closure in the same Workstream." in controller
     assert "Focused Implementer returns at semantic convergence:" in controller
-    assert 'Fresh role sessions use V2 `fork_turns="none"` or V1 `fork_context=false` and only the authorized parent\'s native' in controller
-    assert "spawn message plus explicitly selected information." in controller
+    assert 'Fresh role sessions use V2 `fork_turns="none"` or V1 `fork_context=false` to exclude parent conversation history.' in controller
+    assert "Task-specific input is the authorized parent's native spawn message plus explicitly selected information; applicable global/project AGENTS and native role instructions still apply." in controller
+    assert "Fresh isolation does not remove these inherited instructions." in controller
     assert "Controller may spawn registered roles; Implementer, Focused Implementer and Reviewer" in controller
 
 

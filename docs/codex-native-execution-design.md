@@ -6,13 +6,15 @@ status, messaging and completion observations. Neither a native Completed status
 nor an adapter ledger accepts the meaning or quality of a child result.
 
 Inherited global/project managed spans contain shared authority, isolation and
-readonly boundaries plus entry pointers. Controller procedures are explicitly
-retrieved before their relevant operations, from the installed pinned runner's
-`controller-instructions --section <name>` command or the selected section of the
-repository Controller document. The bare command returns a small procedure index. This is
-contextual relevance, not secrecy: other roles may retrieve rules on demand within
-their authority. Native developer instructions contain only the selected role's
-responsibilities and working methods. Fresh V2 `fork_turns="none"` or V1
+readonly boundaries plus entry pointers. The owning Controller receives normal
+Controller procedures in the existing bootstrap response; it does not retrieve a
+section before each operation. Retrieve an exact section with the installed pinned
+runner's `controller-instructions --section <name>` only when applicable context is
+missing or exceptional recovery/Host maintenance requires it. The bare command
+returns a small procedure index. This is contextual relevance, not secrecy. Other
+roles may retrieve rules on demand within their authority. Native developer
+instructions describe the selected role's responsibilities and working methods.
+Fresh V2 `fork_turns="none"` or V1
 `fork_context=false` and the authorized
 parent's selected native spawn handoff remain the task-specific input boundary;
 inherited AGENTS snapshots cannot be undone with ThreadInstructionsProvider.
@@ -81,7 +83,8 @@ Character counts against immutable predecessor `7045c7de4a490e589e49d3151b37e6ea
 | Implementer developer instructions | 3,448 | 2,770 |
 | Focused Implementer developer instructions (Sol) | 4,594 | 3,536 |
 
-Controller procedures are retrieved explicitly; they were moved, not deleted. Counts
+Normal bootstrap delivers resident Controller guidance; exact-section retrieval is
+for missing context or exceptional recovery/Host maintenance. Counts
 cover Thaliris-owned surfaces, not a measured full Host/session prompt or model-quality
 benchmark. Default/constrained prior profile renderings, managed span and role packs
 were replayed from immutable predecessor source; exact tracked default bytes matched.
