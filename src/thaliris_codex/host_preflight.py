@@ -35,23 +35,60 @@ function Unlinked($path) {
     $path=[IO.Path]::GetDirectoryName($path)
   }
 }
-function FreshUnmanaged($h) {
+function IdentityHash($value) {
+  $sha=[Security.Cryptography.SHA256]::Create()
+  try { return [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$value))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+}
+function Fenced($h) {
   try {
-    if ($null -ne $h.agent_id -or $null -ne $h.agent_type) { return $false }
-    $i=$h.tool_input
-    if ($i.fork_turns -cne 'none' -or $i.agent_type -cnotmatch '^thaliris-(investigator|curator|implementer|focused-implementer|reasoning-specialist|reviewer|verifier)$' -or $null -ne $i.model -or $null -ne $i.reasoning_effort) { return $false }
-    $path=[Environment]::CurrentDirectory
-    if ($h.cwd -and [IO.Path]::GetFullPath([string]$h.cwd) -ine $path) { return $false }
+    if ($h.fenced -eq $true) { return $true }
+    $path=if ($h.cwd) {[IO.Path]::GetFullPath([string]$h.cwd)} else {[Environment]::CurrentDirectory}
     while ($path -and -not (Present (Join-Path $path '.git'))) { $path=[IO.Path]::GetDirectoryName($path) }
     if (-not $path) { return $false }
     Unlinked (Join-Path $path '.git')
-    # Only safely absent state is admitted without importing runtime schema.
-    # Existing fences stay conservative; no actor gains a managed grant.
-    foreach ($name in @('.context/state.json','.context/audit/abandoned/session-fence.json','.context/audit/abandoned-child-fence.json')) {
-      $p=Join-Path $path $name; Unlinked $p; if (Present $p) { return $false }
+    # State existence and another task's fences grant no authority and do not
+    # block ordinary delegation. Read deny-only exact session fence evidence.
+    $hash=if ($h.session_id) {IdentityHash $h.session_id} else {''}
+    $agent=if ($h.agent_id) {IdentityHash $h.agent_id} else {''}
+    $p=Join-Path $path '.context/audit'; Unlinked $p
+    if (Present $p) {
+      foreach ($f in (Get-ChildItem -LiteralPath $p -Include 'session-fence.json','abandoned-child-fence.json' -Recurse -File -Force)) {
+        try { Unlinked $f.FullName; $v=[IO.File]::ReadAllText($f.FullName)|ConvertFrom-Json } catch { continue }
+        if ($f.Name -eq 'session-fence.json' -and $hash -and $v.session_id_hashes -ccontains $hash) { return $true }
+        if ($agent -and ($v.agent_id_hashes -ccontains $agent -or $v.children.agent_id_hash -ccontains $agent)) { return $true }
+      }
     }
-    return $true
+    return $false
   } catch { return $false }
+}
+function FreshUnmanaged($h) {
+  if ($h.readonly -eq $true -or $null -ne $h.agent_id -or $null -ne $h.agent_type) { return $false }
+  $i=$h.tool_input
+  $managed=([string]$i.agent_type -cmatch '^thaliris-' -or [string]$i.agentType -cmatch '^thaliris-')
+  return -not $managed -or ($i.agent_type -cmatch '^thaliris-(investigator|curator|implementer|focused-implementer|reasoning-specialist|reviewer|verifier)$' -and ($null -eq $i.agentType -or $i.agentType -ceq $i.agent_type) -and (($i.fork_turns -ceq 'none' -and ($null -eq $i.fork_context -or $i.fork_context -eq $false)) -or ($null -eq $i.fork_turns -and $i.fork_context -eq $false)))
+}
+function ManagedTarget($h) {
+  try {
+    $target=$h.tool_input.target; if (-not $target) { $target=$h.tool_input.id }
+    if (-not $target) { return $false }
+    $path=if ($h.cwd) {[IO.Path]::GetFullPath([string]$h.cwd)} else {[Environment]::CurrentDirectory}
+    while ($path -and -not (Present (Join-Path $path '.git'))) { $path=[IO.Path]::GetDirectoryName($path) }
+    if (-not $path) { return $false }
+    $p=Join-Path $path '.context/audit/lifecycle'; Unlinked $p
+    if (-not (Present $p)) { return $false }
+    if (-not $h.session_id) { return $false }
+    $hash=IdentityHash $target; $session=IdentityHash $h.session_id
+    $association=Join-Path $path ('.context/audit/session-tasks/'+$session+'.json'); Unlinked $association
+    $a=[IO.File]::ReadAllText($association)|ConvertFrom-Json
+    if ($a.version -ne 1 -or ([Guid]$a.task_id).ToString() -cne $a.task_id) { return $false }
+    $key=(IdentityHash $a.task_id).Substring(0,24)
+    $f=Join-Path $p ($key+'.json'); Unlinked $f
+    $v=[IO.File]::ReadAllText($f)|ConvertFrom-Json
+    if ($v.task_id -cne $a.task_id) { return $false }
+    foreach ($child in $v.children) { if ($child.managed -eq $true -and ($child.task_name_hash -ceq $hash -or ($null -eq $child.task_name_hash -and $child.agent_id_hash -ceq $hash))) { return $true } }
+    if ($v.pending_authorized_spawn.task_name_hash -ceq $hash -or $v.pending_authorized_spawn.native_agent_id_hash -ceq $hash) { return $true }
+  } catch {}
+  return $false
 }
 function Degraded($detail) {
   if ($env:THALIRIS_HOOK_EVENT -cne 'PreToolUse') { return }
@@ -60,24 +97,30 @@ function Degraded($detail) {
   $inputJson=$h.tool_input|ConvertTo-Json -Depth 32 -Compress
   $command=[string]$h.tool_input.command; if (-not $command) { $command=[string]$h.tool_input.cmd }
   $control=$command -match '(?i)(?:^|[;&|])\s*&?\s*["'']?(?:[^\s"'';|&]*[\\/])?(?:python[0-9.]*(\.exe)?|py(\.exe)?)["'']?\s+(-[IB]\s+)*(["'']?[^\r\n]*thaliris_offline_recovery\.py\b|-m\s+thaliris\.offline_recovery\b)'
-  if ($tool -match '(?i)(spawn_agent|followup_task|send_input|send_message|Agent)$') {
+  if ($tool -match '(?i)(spawn_agent|Agent)$') {
     $control=$true
     if ($tool -match '(?i)(?:^|[._:/])spawn_agent$' -and (FreshUnmanaged $h)) { $control=$false }
   }
+  if ($tool -match '(?i)(followup_task|send_input|send_message|interrupt_agent|close_agent)$' -and ((ManagedTarget $h) -or $h.readonly -eq $true -or [string]$h.agent_type -cmatch '^thaliris-')) { $control=$true }
   $write=$tool -match '(?i)(apply_patch|file_change|write|edit|delete|move|rename)$'
-  if ($tool -match '(?i)(Bash|exec_command|exec)$' -and $command -match '(?i)(Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|apply_patch|git\s+(apply|reset|restore|checkout)|[>])') { $write=$true }
-  if ($write -and $inputJson -match '(?i)\.context[\\/]+(state\.json|audit[\\/]+(lifecycle|abandoned|external-recovery))') { $control=$true }
+  if ($tool -match '(?i)(Bash|exec_command|exec)$' -and $command -match '(?i)(Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|New-Item|apply_patch|git\s+(apply|commit|reset|restore|checkout|rebase)|[>])') { $write=$true }
+  if ($write -and $inputJson -match '(?i)(\.context[\\/]+(state\.json|config\.json|tasks|audit[\\/]+(lifecycle|abandoned|external-recovery))|\.thaliris[\\/]+task-authority|\.codex[\\/]+(config\.toml|hooks\.json|thaliris\.json))') { $control=$true }
+  if ($write -and $env:CODEX_HOME) {
+    $homeRoot=[IO.Path]::GetFullPath($env:CODEX_HOME).Replace('\','/').TrimEnd([char]'/')
+    $normalizedInput=$inputJson -replace '\\+','/'
+    if ($normalizedInput -match ('(?i)'+[regex]::Escape($homeRoot)+'/(?:agents|thaliris-host-generations)/')) { $control=$true }
+  }
   if ($command -match '(?i)^\s*&?\s*["'']?(thaliris(\.exe|\.cmd)?)["'']?\s' -and $command -match '(?i)\b(task-start|task-abandon|task-recover-state|task-recover-external|task-update|task-close|task-promote|task-artifact|recover-pending-spawn)\b') { $control=$true }
   if ($command -and $env:THALIRIS_EXECUTABLE -and $command -match ('^\s*&?\s*["'']?'+[regex]::Escape($env:THALIRIS_EXECUTABLE)+'["'']?\s')) { $control=$true }
   # A pending generation never exempts maintenance through another executor.
   if ($command -match '(?i)(?:^|[;&|])\s*&?\s*["'']?[^\r\n;|&]*?\s+codex-(install|uninstall)\b') { $control=$true }
-  if ($write -and [string]$h.agent_type -match '^thaliris-(reviewer|verifier)$') { $control=$true }
-  $o=@{hookEventName='PreToolUse';additionalContext=('THALIRIS_RUNTIME_DRIFT: '+$detail+'; assurance UNKNOWN. Diagnose and decide; ordinary workspace work remains available.')}
+  if ((Fenced $h) -or ($write -and ($h.readonly -eq $true -or [string]$h.agent_type -match '^thaliris-(reviewer|verifier)(-|$)'))) { $control=$true }
+  $o=@{hookEventName='PreToolUse';additionalContext=('THALIRIS_RUNTIME_DRIFT: '+$detail+'; assurance UNKNOWN.')}
   if ($control) { $o.permissionDecision='deny';$o.permissionDecisionReason='THALIRIS_CONTROL_AUTHORITY_UNAVAILABLE: '+$detail }
   @{hookSpecificOutput=$o}|ConvertTo-Json -Depth 32 -Compress|Write-Output
 }
 '''
-    for old, new in (("$inputJson", "$j"), ("$command", "$c"), ("$control", "$d"), ("$detail", "$e"), ("$path", "$x"), ("FreshUnmanaged", "Fresh"), ("Present", "Exists"), ("Unlinked", "Safe")):
+    for old, new in (("$inputJson", "$j"), ("$command", "$c"), ("$control", "$d"), ("$detail", "$e"), ("$path", "$x"), ("FreshUnmanaged", "Fresh"), ("Present", "Exists"), ("Unlinked", "Safe"), ("ManagedTarget", "Target"), ("Fenced", "Fence"), ("IdentityHash", "Hash"), ("$association", "$q"), ("$session", "$s"), ("$target", "$t"), ("$managed", "$m"), ("$agent", "$g"), ("$hash", "$b")):
         source = source.replace(old, new)
     return "\n".join(line.strip() for line in source.splitlines() if line.strip() and not line.lstrip().startswith("#"))
 
@@ -267,7 +310,7 @@ def recovery_source() -> str:
     This uses the same runtime verifier and replay parser as the on-disk
     preflight. It imports no damaged/new disk policy to decide admission.
     """
-    return _platform_source() + r'''
+    source = _platform_source() + r'''
 try {
   $hostHome=[IO.Path]::GetDirectoryName($env:THALIRIS_INSTALL_MANIFEST)
   $journal=Join-Path $hostHome 'thaliris-host-transition.json'
@@ -279,6 +322,10 @@ try {
   Degraded $_.Exception.Message
 }
 '''
+    # Recovery is also packed inside the global Hook command. Keep canonical
+    # on-disk comments, but leave cmd enough space for its shell wrapper.
+    return "\n".join(line.strip() for line in source.splitlines()
+                     if line.strip() and not line.lstrip().startswith("#"))
 
 
 def entry_source() -> str:

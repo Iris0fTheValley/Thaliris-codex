@@ -106,7 +106,6 @@ _ROOT_MANAGED_TOOL_NAMES = frozenset({"spawn_agent", "wait_agent", "list_agents"
 _ROOT_CODEX_APP_CONTROL_TOOLS = frozenset({
     "mcp__codex_app__list_projects", "mcp__codex_app__create_thread",
 })
-_CONTROLLER_BOUNDARY_REASON = "THALIRIS_CONTROLLER_BOUNDARY: delegate open or iterative investigation and implementation; the Controller may make one or very few related precise known-path reads and bounded control-plane or acceptance checks."
 _OBVIOUS_WRITE = re.compile(
     r"(?i)(?:apply_patch|git\s+(?:apply|commit|reset|checkout|restore|rebase)|(?:set|add|clear|out|remove|move|copy|rename|new)-content|(?:set|add|remove|move|copy|rename|new)-item|\b(?:ni|mkdir)\b|(?<![<>])>{1,2}(?![&]))"
 )
@@ -1443,20 +1442,80 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
                         return _permission_deny("THALIRIS_BOUND_ROLE_SESSION_REQUIRED: supplied fields contradict this exact known handoff identity")
         return _handle_hook_selected(root, event, payload, managed_hook_abi)
     except (OSError, ValueError, TypeError, KeyError):
-        if event == "PreToolUse" and (_managed_control_dependency(payload) or _controller_actor_assurance(payload) == "CHILD" and _obvious_write_attempt(payload)):
+        if event == "PreToolUse" and (_managed_control_dependency(payload, root) or _controller_actor_assurance(payload) == "CHILD" and _obvious_write_attempt(payload)):
             return _permission_deny("THALIRIS_TASK_ASSOCIATION_UNKNOWN: managed control requires an explicit intact task association")
         return ""
     finally:
         core.select_task(root, prior)
 
 
-def _managed_control_dependency(payload: dict[str, Any]) -> bool:
+def _managed_collaboration_target(root: Path, payload: dict[str, Any]) -> bool:
+    """Deny-only exact target evidence; unknown native targets gain no binding."""
+    tool_input = _delegation_input(payload)
+    target = next((tool_input[key] for key in ("target", "agent_id", "id", "task_id", "task_name")
+                   if isinstance(tool_input.get(key), str)), None)
+    task_id = _active_task_id(root)
+    if task_id is None:
+        return _session_associated_managed_actor(root, payload)
+    try:
+        state = _load_lifecycle(_lifecycle_path(root, task_id), task_id, verify_authority=False)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    actor_hash = _identity_hash(payload.get("agent_id"))
+    if actor_hash is not None and any(child.get("managed") is True and child.get("handoff_bound") is True
+            and child.get("agent_id_hash") == actor_hash for child in state["children"]):
+        return True
+    if target is None:
+        return False
+    pending = state.get("pending_authorized_spawn")
+    return (_child_for_native_name(state["children"], target) is not None
+        or isinstance(pending, dict) and _identity_hash(target) in
+        {pending.get("task_name_hash"), pending.get("native_agent_id_hash")})
+
+
+def _session_associated_managed_actor(root: Path, payload: dict[str, Any]) -> bool:
+    """Recover deny-only child identity from intact same-session task evidence."""
+    session_hash = _session_id_hash(payload)
+    agent_hash = _identity_hash(payload.get("agent_id"))
+    turn_hash = _turn_id_hash(payload)
+    if session_hash is None or agent_hash is None or turn_hash is None:
+        return False
+    try:
+        association = json.loads(_association_path(root, session_hash).read_text(encoding="utf-8"))
+        if not isinstance(association, dict):
+            return False
+        task_id = association.get("task_id")
+        if (association.get("version") != 1 or association.get("session_id_hash") != session_hash
+                or not isinstance(task_id, str) or str(uuid.UUID(task_id)) != task_id):
+            return False
+        prior = core.selected_task(root)
+        try:
+            core.select_task(root, task_id)
+            state = core._load_state(root, active=True)
+            authority = task_authority.check(root)
+            if state.get("task_id") != task_id or authority is None or authority.get("task_id") != task_id:
+                return False
+            ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id, verify_authority=False)
+        finally:
+            core.select_task(root, prior)
+        return any(isinstance(child, dict) and child.get("managed") is True
+            and child.get("handoff_bound") is True and child.get("agent_id_hash") == agent_hash
+            and child.get("session_id_hash") == session_hash and child.get("turn_id_hash") == turn_hash
+            for child in ledger["children"])
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def _managed_control_dependency(payload: dict[str, Any], root: Path) -> bool:
     tool = payload.get("tool_name") or payload.get("tool")
     normalized = _tool_basename(tool) if isinstance(tool, str) else ""
     operation = _context_operation(payload)
     return (operation in _CHILD_CONTEXT_MUTATIONS and operation != "task-start"
         or _compound_invalid_state_mutation(payload)
-        or normalized in _DELEGATION_TOOL_NAMES | {"interrupt_agent", "close_agent"}
+        or normalized == "Agent"
+        or normalized in _FRESH_CHILD_REUSE_TOOL_NAMES | {"interrupt_agent", "close_agent"}
+        and (_managed_spawn_requested({"tool_input": payload}) or _managed_collaboration_target(root, payload))
+        or normalized == "spawn_agent" and _managed_spawn_requested(payload)
         or _control_state_target(payload) is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)))
 
 
@@ -1491,7 +1550,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 if _context_operation(payload) == "task-recover-authority":
                     if _controller_actor_assurance(payload) == "CHILD":
                         return _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
-                elif _managed_control_dependency(payload) and _context_operation(payload) not in {"codex-install", "codex-uninstall", "controller-instructions"}:
+                elif _managed_control_dependency(payload, root) and _context_operation(payload) not in {"codex-install", "codex-uninstall", "controller-instructions"}:
                     task_authority.check(root)
             except (OSError, ValueError, KeyError, TypeError):
                 return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: preserve the external authority and task evidence; a Controller must resolve this conflict.")
@@ -1552,7 +1611,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
         # blocks or corrects the Controller.
         return ""
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
-        return _permission_deny("THALIRIS_TASK_AUTHORITY_UNAVAILABLE") if event == "PreToolUse" and _managed_control_dependency(payload) else ""
+        return _permission_deny("THALIRIS_TASK_AUTHORITY_UNAVAILABLE") if event == "PreToolUse" and _managed_control_dependency(payload, root) else ""
 
 
 def _best_effort_record(function: Any, *args: Any, **kwargs: Any) -> None:
@@ -2142,6 +2201,17 @@ def _managed_spawn_role(payload: dict[str, Any]) -> str | None:
     return _native_agent_roles().get(native_agent_type) if native_agent_type is not None else None
 
 
+def _managed_spawn_requested(payload: dict[str, Any]) -> bool:
+    """A named Thaliris profile requests managed binding, even if malformed.
+
+    Ordinary native profiles never acquire a reservation. Conflicting fields
+    containing a managed profile cannot silently downgrade to ordinary work.
+    """
+    tool_input = _delegation_input(payload)
+    return any(isinstance(tool_input.get(key), str) and tool_input[key].startswith("thaliris-")
+               for key in ("agent_type", "agentType"))
+
+
 def _native_spawn_agent_type(payload: dict[str, Any]) -> str | None:
     """Accept one exact supported native profile, never a first-match alias."""
     tool_input = _delegation_input(payload)
@@ -2356,21 +2426,26 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
     expected_agent_type = _native_spawn_agent_type(payload)
     role = _native_agent_roles().get(expected_agent_type) if expected_agent_type is not None else None
     if role is None:
-        return _permission_deny("THALIRIS_MANAGED_AGENT_REQUIRED: managed tasks may spawn only a supported Thaliris agent profile.")
+        return (_permission_deny("THALIRIS_MANAGED_AGENT_REQUIRED: managed binding requires one exact supported Thaliris profile.")
+                if _managed_spawn_requested(payload) else "")
     tool_input = _delegation_input(payload)
     if not _explicit_fresh_spawn(tool_input):
         return _permission_deny('THALIRIS_ISOLATION_REQUIRED: use fork_turns="none" (V2) or fork_context=false (V1).')
     nested = payload.get("agent_id") is not None or payload.get("agent_type") is not None
     overrides = {key: tool_input[key] for key in ("model", "reasoning_effort", "thinking", "model_reasoning_effort") if tool_input.get(key) is not None}
-    if overrides:
-        return _permission_deny("THALIRIS_ROLE_MODEL_OVERRIDE: native profiles use the installed execution binding; per-spawn model/effort overrides are denied.")
+    if nested and tool_input.get("model") == "gpt-6-astra":
+        return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: explicit Astra selection is Controller-only and requires the current task's human opt-in.")
     authority = task_authority.check(root)
     if authority is not None and authority["contract"].get("execution_constraint") == "luna-only":
+        if overrides:
+            return _permission_deny("THALIRIS_EXECUTION_CONSTRAINT: the frozen luna-only binding does not permit per-spawn overrides.")
         binding = roles.get_codex_binding(role)
         if binding is not None and expected_agent_type != binding.native_profile:
             return _permission_deny("THALIRIS_EXECUTION_CONSTRAINT: luna-only permits only the ordinary semantic role profiles.")
     target_binding = roles.get_codex_binding(role)
-    if nested and target_binding is not None and expected_agent_type == target_binding.exceptional_native_profile:
+    if overrides and target_binding is not None and expected_agent_type != target_binding.native_profile:
+        return _permission_deny("THALIRIS_ROLE_MODEL_OVERRIDE: an exceptional compatibility profile retains its selected binding.")
+    if nested and target_binding is not None and expected_agent_type != target_binding.native_profile:
         return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exceptional profiles are Controller-only.")
     session_id_hash = _session_id_hash(payload)
     if session_id_hash is None:
@@ -2815,6 +2890,10 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
     causally bound to its exact dispatch. Native completion is independent of
     optional SubagentStop observations and of Controller semantic acceptance.
     """
+    # An ordinary native dispatch cannot consume or contradict an outstanding
+    # managed handoff, even when it shares the Controller session.
+    if tool == "spawn_agent" and not _managed_spawn_requested(payload):
+        return
     task_id = _active_task_id(root)
     response = _post_tool_response(payload)
     if task_id is None or not isinstance(response, dict):
@@ -3326,6 +3405,190 @@ def _context_operation(payload: dict[str, Any]) -> str | None:
     return _context_call(payload)[0]
 
 
+def _compound_host_maintenance_attempt(payload: dict[str, Any], *, shell_dialect: str | None = None) -> bool:
+    """Identify a direct Host maintenance command embedded in shell syntax.
+
+    Host install and uninstall require one checked standalone invocation. An
+    otherwise ordinary command containing that invocation must not bypass the
+    direct-command parser merely because the shell combines it with other work.
+    """
+    command = _bash_command(payload)
+    if command is None:
+        return False
+    separator_check = command.lstrip()
+    if separator_check.startswith("&") and len(separator_check) > 1 and separator_check[1].isspace():
+        separator_check = separator_check[1:].lstrip()
+    segments = _split_command_separators(separator_check)
+    if segments is not None and len(segments) < 2:
+        return False
+    # The strict parser establishes standalone eligibility. All other syntax
+    # takes one deny-only lexical path, including comments between separators.
+    if shell_dialect is None:
+        shell_dialect = _maintenance_shell_dialect(payload)
+    segments = _unsupported_shell_command_prefixes(separator_check, shell_dialect=shell_dialect)
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+    for segment in segments:
+        if not segment:
+            continue
+        candidate = dict(payload)
+        candidate_input = dict(tool_input)
+        candidate_input.pop("cmd", None)
+        candidate_input["command"] = segment
+        candidate["tool_input"] = candidate_input
+        if _context_operation(candidate) in {"codex-install", "codex-uninstall"}:
+            return True
+    return False
+
+
+def _maintenance_shell_dialect(payload: dict[str, Any]) -> str:
+    """Resolve known explicit executor shells before using the host default."""
+    tool_input = payload.get("tool_input")
+    shell = tool_input.get("shell") if isinstance(tool_input, dict) else None
+    if isinstance(shell, str) and shell.strip():
+        stripped = shell.strip()
+        quote = stripped[:1]
+        if quote in {'"', "'"}:
+            end = stripped.find(quote, 1)
+            executable = stripped[1:end] if end > 0 else ""
+        else:
+            executable = stripped.split(maxsplit=1)[0]
+            # Some executor schemas carry an unquoted binary path directly,
+            # even when that path contains spaces. Match a known executable
+            # suffix before falling back to ordinary command-line tokenizing.
+            for name, dialect in (
+                ("bash.exe", "bash"), ("bash", "bash"), ("sh.exe", "bash"), ("sh", "bash"),
+                ("powershell.exe", "powershell"), ("powershell", "powershell"),
+                ("pwsh.exe", "powershell"), ("pwsh", "powershell"),
+            ):
+                if re.match(rf"^.+[\\/]{re.escape(name)}(?=\s|$)", stripped, re.IGNORECASE):
+                    return dialect
+        basename = executable.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+        if basename in {"bash", "bash.exe", "sh", "sh.exe"}:
+            return "bash"
+        if basename in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+            return "powershell"
+    return "powershell" if os.name == "nt" else "bash"
+
+
+def _unsupported_shell_command_prefixes(command: str, *, shell_dialect: str) -> list[str]:
+    """Extract visible calls using the active shell's quote and escape rules.
+
+    This deny-only scan does not authorize shell syntax or resolve dynamic command
+    names. Expressions are inspected as executable bodies; their values remain
+    opaque outer arguments. Redirection targets use the same word reader, so
+    expansion executes there too. PowerShell backticks and Bash backslash escapes
+    are interpreted only by their respective shell dialects.
+    """
+    candidates: list[str] = []
+
+    def render_word(value: str) -> str:
+        # Literal metacharacters cannot become syntax when the existing direct
+        # classifier reads a reconstructed candidate. Their exact data value is
+        # irrelevant to recognizing the executable and maintenance operation.
+        value = re.sub(r"[\"'`\r\n]", "_", value).replace("$(", "_expression_")
+        return '"' + value + '"'
+
+    def word(index: int) -> tuple[str, int]:
+        value: list[str] = []
+        quote: str | None = None
+        while index < len(command):
+            char = command[index]
+            following = command[index + 1:index + 2]
+            if shell_dialect == "powershell" and quote != "'" and char == "`" and following:
+                value.append(following)
+                index += 2
+                continue
+            if shell_dialect == "bash" and quote != "'" and char == "\\" and following:
+                if quote is None or following in {'$', '`', '"', "\\", "\n"}:
+                    if following != "\n":
+                        value.append(following)
+                    index += 2
+                    continue
+            if quote is not None:
+                if char == quote:
+                    if quote == "'" and following == "'":
+                        value.append("'")
+                        index += 2
+                        continue
+                    quote = None
+                    index += 1
+                    continue
+            elif char in {"'", '"'}:
+                quote = char
+                index += 1
+                continue
+            elif char.isspace() or char in ";|&<>)":
+                break
+            if quote != "'" and (command[index:index + 2] in {"$(", "@("} or char == "(" and quote is None):
+                offset = 2 if char in "$@" else 1
+                index = statements(index + offset, closing=")")
+                value.append("_expression_")
+                continue
+            value.append(char)
+            index += 1
+        return render_word("".join(value)), index
+
+    def statements(index: int, *, closing: str | None = None) -> int:
+        words: list[str] = []
+
+        def finish() -> None:
+            if words:
+                candidates.append(" ".join(words))
+                words.clear()
+
+        while index < len(command):
+            char = command[index]
+            if char == closing:
+                finish()
+                return index + 1
+            if char.isspace() and char not in "\r\n":
+                index += 1
+                continue
+            # Comments cannot manufacture a maintenance call from literal text.
+            if char == "#":
+                newline = command.find("\n", index)
+                index = len(command) if newline < 0 else newline
+                continue
+            if command[index:index + 2] == "<#":
+                end = command.find("#>", index + 2)
+                index = len(command) if end < 0 else end + 2
+                continue
+            redirect = re.match(r"(?:[0-9]+|\*)?(?:>>?|<<?)", command[index:])
+            if redirect is not None:
+                index += redirect.end()
+                while index < len(command) and command[index].isspace():
+                    index += 1
+                stream = re.match(r"&(?:[0-9]+|-)", command[index:])
+                if stream is not None:
+                    index += stream.end()
+                else:
+                    _target, index = word(index)
+                continue
+            separator = _COMMAND_SEPARATOR.match(command, index)
+            if separator is not None:
+                if char == "&" and not words and command[index + 1:index + 2].isspace():
+                    words.append("&")
+                else:
+                    finish()
+                index = separator.end()
+                continue
+            token, end = word(index)
+            if end == index:
+                # An unmatched closing delimiter is unsupported syntax, not a
+                # reason to rescan quoted data as an executable command.
+                index += 1
+                continue
+            words.append(token)
+            index = end
+        finish()
+        return index
+
+    statements(0)
+    return candidates
+
+
 def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -> bool:
     """Recognize only the side-effect-free Controller-instructions CLI call."""
     tool = payload.get("tool_name") or payload.get("tool")
@@ -3567,8 +3830,9 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
                 ordinary = _ordinary_child_record(root, _load_lifecycle(_lifecycle_path(root, task_id), task_id), payload)
             except (OSError, ValueError, TypeError, KeyError):
                 ordinary = None
-            if (_managed_control_dependency(payload)
-                    or ordinary is None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized_))):
+            if (_managed_control_dependency(payload, root)
+                    or ordinary is None and _managed_spawn_requested({"tool_input": payload})
+                    and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized_))):
                 return _permission_deny("THALIRIS_BOUND_ROLE_SESSION_REQUIRED: managed grants and task writes require a currently authorized exact role binding; diagnostic reads remain available")
     tool = payload.get("tool_name") or payload.get("tool")
     if not isinstance(tool, str):
@@ -3583,6 +3847,19 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     binding = roles.get_codex_binding(role)
     role_names = _native_role_names()
     if normalized in _DELEGATION_TOOL_NAMES:
+        if normalized == "spawn_agent" and _delegation_input(payload).get("model") == "gpt-6-astra":
+            return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: explicit Astra selection is Controller-only and requires the current task's human opt-in.")
+        if normalized == "spawn_agent" and native_agent_type is None and not _managed_spawn_requested(payload):
+            # An ordinary native child may use native delegation; this never
+            # establishes a managed parent or task-control grant.
+            anchor = task_authority.check(root)
+            if anchor is not None and anchor["contract"]["execution_mode"] == "single-agent":
+                return _permission_deny("THALIRIS_SINGLE_AGENT_TASK: the human instruction selected no children.")
+            if anchor is not None and anchor["contract"].get("execution_constraint") == "luna-only":
+                return _permission_deny("THALIRIS_EXECUTION_CONSTRAINT: luna-only requires an observable named execution binding.")
+            return ""
+        if native_agent_type is None and normalized in _FRESH_CHILD_REUSE_TOOL_NAMES and not _managed_collaboration_target(root, payload):
+            return ""
         if normalized == "send_message" and managed_task_state(root)[0] == "ACTIVE" and _bound_child_parent_message(root, payload):
             return ""
         if normalized != "spawn_agent" or binding is None or not binding.allowed_delegation_targets:
@@ -4100,33 +4377,6 @@ def _isolation_classification(tool: str, tool_input: dict[str, Any], _role: str)
     return {"required": "YES", "fork_turns": "OTHER", "status": "FAIL"}
 
 
-def _precise_evidence_read(payload: dict[str, Any]) -> bool:
-    """Recognize one explicitly sliced known file, not semantic investigation.
-
-    This cannot detect a cumulative investigation or third-party MCP behavior;
-    those remain Controller obligations in the delegated execution contract.
-    """
-    # Only this native execution interface exposes a checked output-token
-    # limit. A line slice alone cannot bound a huge single source line.
-    tool = payload.get("tool_name") or payload.get("tool")
-    limit = _delegation_input(payload).get("max_output_tokens")
-    if tool not in {"exec_command", "functions.exec_command"} or type(limit) is not int or not 1 <= limit <= 4096:
-        return False
-    command = _bash_command(payload)
-    if not isinstance(command, str) or any(char in command for char in ("$", "`", ";", "&", "\n", "\r", ">", "<")):
-        return False
-    match = re.fullmatch(r"(?i)\s*Get-Content(?:\s+-LiteralPath)?\s+(?:'([^']+)'|\"([^\"]+)\"|(\S+))\s+(?:-TotalCount\s+([1-9][0-9]*)|\|\s*Select-Object(?:\s+-Skip\s+[0-9]+)?\s+-First\s+([1-9][0-9]*))\s*", command)
-    if match is None:
-        return False
-    path = next(value for value in match.groups()[:3] if value is not None)
-    count_text = next(value for value in match.groups()[3:] if value is not None)
-    if len(count_text) > 3 or int(count_text) > 200:
-        return False
-    if match.group(3) is not None and any(char in path for char in ("(", ")", "{", "}", ",")):
-        return False
-    return not any(char in path for char in ("*", "?", "[", "]", "|")) and not path.endswith(("/", "\\"))
-
-
 def _active_child_communication(root: Path, payload: dict[str, Any]) -> bool:
     """Supplement an existing live handoff; never reuse a FINAL child."""
     task_id = _active_task_id(root)
@@ -4145,7 +4395,7 @@ def _active_child_communication(root: Path, payload: dict[str, Any]) -> bool:
 
 
 def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_hook_abi: str | None = None) -> str:
-    """Enforce the small ACTIVE Root tool boundary before native dispatch."""
+    """Protect explicit control boundaries without gating ordinary work."""
     tool = payload.get("tool_name") or payload.get("tool")
     if not isinstance(tool, str):
         return ""
@@ -4164,6 +4414,8 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             return ""
     if _offline_administration_requested(payload):
         return _permission_deny("THALIRIS_OFFLINE_ADMINISTRATION_REQUIRES_DISCONNECTED_INTEGRATION: automated actors have no offline recovery grant while managed hooks are present.")
+    if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _compound_host_maintenance_attempt(payload):
+        return _permission_deny("THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED: Host maintenance must remain one exact standalone checked command.")
     operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
     if operation == "controller-instructions":
         # Public instruction retrieval grants no control and survives damaged
@@ -4182,7 +4434,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     try:
         anchor = task_authority.check(root)
     except (OSError, ValueError, KeyError, TypeError):
-        if _managed_control_dependency(payload):
+        if _managed_control_dependency(payload, root):
             return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: selected task evidence changed; preserve it and resolve before managed control")
         return ""
     explicit_start = operation == "task-start" and _direct_context_option(payload, {"--authority-contract"}, digest_only=False) is not None
@@ -4195,7 +4447,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
         # Keep ordinary work available; withhold only dangerous control grants.
         target = _control_state_target(payload)
         if (operation in _CHILD_CONTEXT_MUTATIONS or _compound_invalid_state_mutation(payload)
-                or state_status == "ACTIVE" and normalized in _DELEGATION_TOOL_NAMES or normalized in {"interrupt_agent", "close_agent"}
+                or state_status == "ACTIVE" and _managed_control_dependency(payload, root)
                 or target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized))):
             return _permission_deny("THALIRIS_CONTROLLER_ACTOR_UNKNOWN: this Host cannot distinguish every Controller from delegated actors; managed control authority is unavailable.")
         if operation == "codex-bootstrap" and state_status == "ACTIVE":
@@ -4233,6 +4485,10 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
         return _issue_task_start_attestation(root, payload, managed_hook_abi)
 
     if state_status == "ACTIVE":
+        if operation in {"init", "rollback", "task-recover-state"}:
+            return _permission_deny("THALIRIS_TASK_AUTHORITY_REPLACEMENT_REQUIRES_CONTROLLER_DECISION")
+        if operation == "uninstall":
+            return _permission_deny("THALIRIS_ACTIVE_TASK_CONTROL_REQUIRES_CONTROLLER_DECISION: project integration cannot be uninstalled during an active task.")
         if operation == "codex-bootstrap":
             if anchor is not None:
                 return ""
@@ -4252,10 +4508,12 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
                 "artifact-get", "catalog", "document-get", "version",
             }:
                 return ""
-            return _permission_deny("THALIRIS_ACTIVE_OWNER_REQUIRED: ACTIVE control requires the owning Hook session; use direct codex-bootstrap for recovery evidence.")
+            if _managed_control_dependency(payload, root):
+                return _permission_deny("THALIRIS_ACTIVE_OWNER_REQUIRED: ACTIVE control requires the owning Hook session; use direct codex-bootstrap for recovery evidence.")
+            return ""
         if normalized in {"send_message", "followup_task", "send_input"} and _active_child_communication(root, payload):
             return ""
-        if normalized in _FRESH_CHILD_REUSE_TOOL_NAMES or normalized == "Agent":
+        if normalized in _FRESH_CHILD_REUSE_TOOL_NAMES and _managed_collaboration_target(root, payload) or normalized == "Agent":
             _best_effort_record(_record_controller_guard_event, root, payload, "CHILD_REUSE", "blocked")
             return _permission_deny("THALIRIS_FRESH_ROLE_SESSION_REQUIRED: continue work with a new named-role spawn_agent(fork_turns=\"none\") handoff.")
         if normalized == "spawn_agent":
@@ -4266,6 +4524,10 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
                 if mode == "controller-direct" and _managed_spawn_role(payload) in {"implementer", "focused-implementer"}:
                     return _permission_deny("THALIRIS_CONTROLLER_DIRECT_TASK: implementation belongs to the Controller; only auxiliary roles apply.")
             tool_input = _delegation_input(payload)
+            if not _managed_spawn_requested(payload):
+                if anchor is not None and anchor["contract"].get("execution_constraint") == "luna-only":
+                    return _permission_deny("THALIRIS_EXECUTION_CONSTRAINT: luna-only requires an observable named execution binding.")
+                return ""
             if not _explicit_fresh_spawn(tool_input):
                 return _permission_deny(f"THALIRIS_ISOLATION_REQUIRED: spawn a fresh {_native_role_names()} session explicitly with fork_turns=\"none\" (V2) or fork_context=false (V1).")
             return _reserve_managed_spawn(root, payload, _task_id)
@@ -4279,10 +4541,10 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
         if operation in _ACTIVE_ROOT_CONTEXT_OPERATIONS:
             _best_effort_record(_record_controller_guard_event, root, payload, f"CONTEXT_{operation}", "allowed")
             return ""
-        if operation == "task-show" or _precise_evidence_read(payload):
-            return ""
-        _best_effort_record(_record_controller_guard_event, root, payload, "NON_CONTROL_TOOL", "blocked")
-        return _permission_deny(_CONTROLLER_BOUNDARY_REASON)
+        # Delegation is the default semantic routing guidance, not a native
+        # tool allowlist. Explicit control, readonly and fence guards above
+        # still apply to diagnostics, Git, reads and source repair alike.
+        return ""
 
     # NO_TASK is transparent: ordinary Codex workflows are not managed and
     # therefore do not inherit Thaliris spawn isolation requirements.

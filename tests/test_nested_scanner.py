@@ -246,7 +246,9 @@ def test_bound_child_messages_only_root(active):
     for tool_name in ("followup_task", "send_input"):
         assert "deny" in lifecycle.handle_hook(active, "PreToolUse", message(child, "/root", tool_name))
     assert "deny" in lifecycle.handle_hook(active, "PreToolUse", message({**child, "turn_id": "spoof"}, "/root"))
-    assert "deny" in lifecycle.handle_hook(active, "PreToolUse", message(event(), "/root"))
+    # A root call to an unknown native target is native coordination; it
+    # neither reuses a managed child nor grants task-control authority.
+    assert lifecycle.handle_hook(active, "PreToolUse", message(event(), "/root")) == ""
 
 
 def test_nested_child_messages_only_exact_parent(active):
@@ -439,17 +441,30 @@ def test_nested_pending_recovery_is_exact_and_controller_owned(active):
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
 
 
-def test_model_override_is_controller_only_and_exact(active):
-    for overrides in ({"model": "gpt-6-luna"}, {"reasoning_effort": "xhigh"}, {"thinking": "xhigh"}, {"model_reasoning_effort": "xhigh"}, {"model": "gpt-6-astra", "reasoning_effort": "high"}):
-        assert "MODEL_OVERRIDE" in lifecycle.handle_hook(active, "PreToolUse", spawn(role="implementer", **overrides))
-    request = spawn(role="implementer", model="gpt-6-astra", reasoning_effort="xhigh")
-    assert "MODEL_OVERRIDE" in lifecycle.handle_hook(active, "PreToolUse", request)
+@pytest.mark.parametrize("overrides", [{"model": "gpt-6-luna"}, {"reasoning_effort": "xhigh"},
+    {"thinking": "xhigh"}, {"model_reasoning_effort": "xhigh"}, {"model": "gpt-6-astra", "reasoning_effort": "high"}])
+def test_native_model_selection_preserves_managed_handoff(active, overrides):
+    request = spawn(role="implementer", **overrides)
+    assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
+    assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == "thaliris-implementer"
+    assert lifecycle._record_subagent_start(active, identity())
+    assert state(active)["children"][0]["handoff_bound"] is True
+
+
+def test_nested_scanner_native_sol_selection_keeps_exact_parent(active):
     parent = start(active)
-    assert "MODEL_OVERRIDE" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent, model="gpt-6-astra", reasoning_effort="xhigh"))
+    assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent, model="gpt-6.1-sol", reasoning_effort="high")) == ""
+    assert state(active)["pending_authorized_spawn"]["parent_agent_id_hash"] == lifecycle._identity_hash(parent["agent_id"])
+
+
+def test_nested_scanner_cannot_select_astra_without_controller_handoff(active):
+    parent = start(active)
+    assert "DELEGATION" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent, model="gpt-6-astra", reasoning_effort="xhigh"))
+    assert state(active)["pending_authorized_spawn"] is None
 
 
 @pytest.mark.parametrize("field", ["model", "reasoning_effort", "thinking", "model_reasoning_effort"])
-def test_top_level_fallback_model_override_is_denied(active, field):
+def test_top_level_fallback_native_model_selection_is_authorized(active, field):
     request = event(
         tool_name="spawn_agent",
         agentType="thaliris-implementer",
@@ -457,7 +472,8 @@ def test_top_level_fallback_model_override_is_denied(active, field):
         message="Selected facts only",
         **{field: "gpt-6-astra" if field == "model" else "xhigh"},
     )
-    assert "MODEL_OVERRIDE" in lifecycle.handle_hook(active, "PreToolUse", request)
+    assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
+    assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == "thaliris-implementer"
 
 
 def test_top_level_fallback_spawn_without_override_remains_authorized(active):

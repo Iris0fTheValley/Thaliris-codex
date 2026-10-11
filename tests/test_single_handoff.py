@@ -21,13 +21,14 @@ import thaliris_codex.lifecycle as lifecycle_module
 
 
 @pytest.fixture(autouse=True)
-def hypothetical_controller_contract(monkeypatch):
+def hypothetical_controller_contract(monkeypatch, tmp_path):
     """Synthetic lifecycle unit seam, not an observed Host actor guarantee.
 
     The current Host actor UNKNOWN cases live in test_drift_recovery.py without
     this seam. These legacy mechanics test a hypothetical certified Controller.
     """
     original = lifecycle_module._controller_actor_assurance
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "isolated-host"))
     monkeypatch.setattr(lifecycle_module, "_controller_actor_assurance", lambda payload:
                         "CONTROLLER" if original(payload) == "UNKNOWN" else original(payload))
 
@@ -1476,7 +1477,7 @@ def test_user_prompt_does_not_clear_pending_spawn_reservation(tmp_path: Path) ->
     assert lifecycle(root)["pending_authorized_spawn"] == pending
 
 
-def test_active_controller_uses_only_the_mechanical_tool_allowlist(tmp_path: Path) -> None:
+def test_active_controller_keeps_ordinary_work_available_and_gates_managed_control(tmp_path: Path) -> None:
     root = repo(tmp_path)
     _owned_task_start(root, "mechanical guard", None, None)
     assert hook_spec()["hooks"]["PreToolUse"][0]["matcher"] == "*"
@@ -1487,8 +1488,7 @@ def test_active_controller_uses_only_the_mechanical_tool_allowlist(tmp_path: Pat
         hook_payload(tool_name="apply_patch", tool_input={}),
         hook_payload(tool_name="mcp__example__read", tool_input={}),
     ):
-        denied = json.loads(handle_hook(root, "PreToolUse", payload))
-        assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert handle_hook(root, "PreToolUse", payload) == ""
 
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": "thaliris task-status"},
@@ -1499,26 +1499,26 @@ def test_active_controller_uses_only_the_mechanical_tool_allowlist(tmp_path: Pat
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": "thaliris task-get R1"},
     )) == ""
-    denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(
+    assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": r"C:\untrusted\thaliris.exe task-status"},
-    )))
-    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )) == ""
     for command in (
         "thaliris init",
         "thaliris uninstall",
         "thaliris rollback backup-id",
         "thaliris task-start another-task",
-        "thaliris stale",
     ):
         denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(
             tool_name="Bash", tool_input={"command": command},
         )))
         assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert handle_hook(root, "PreToolUse", hook_payload(
+        tool_name="Bash", tool_input={"command": "thaliris stale"},
+    )) == ""
     for name in ("wait_agent", "list_agents", "interrupt_agent"):
         assert handle_hook(root, "PreToolUse", hook_payload(tool_name=name, tool_input={})) == ""
     for name in ("followup_task", "send_message", "send_input"):
-        denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(tool_name=name, tool_input={"target": "old-child"})))
-        assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert handle_hook(root, "PreToolUse", hook_payload(tool_name=name, tool_input={"target": "old-child"})) == ""
 
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="spawn_agent",
@@ -1527,17 +1527,16 @@ def test_active_controller_uses_only_the_mechanical_tool_allowlist(tmp_path: Pat
 
 
 @pytest.mark.parametrize("command", ["thaliris task-status", "thaliris.exe task-status", "thaliris.cmd task-status"])
-def test_managed_control_accepts_only_direct_canonical_thaliris(tmp_path: Path, command: str) -> None:
+def test_active_task_reads_and_ordinary_wrappers_remain_available(tmp_path: Path, command: str) -> None:
     root = repo(tmp_path)
     _owned_task_start(root, "canonical executable", None, None)
     assert handle_hook(root, "PreToolUse", hook_payload(tool_name="Bash", tool_input={"command": command})) == ""
-    for rejected in (
+    for ordinary in (
         "context task-status", "uv run thaliris task-status", "python -m thaliris task-status",
         "cmd /c thaliris task-status", "powershell thaliris task-status", "my-thaliris task-status",
         r"C:\untrusted\thaliris.exe task-status",
     ):
-        denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(tool_name="Bash", tool_input={"command": rejected})))
-        assert denied["hookSpecificOutput"]["permissionDecision"] == "deny", rejected
+        assert handle_hook(root, "PreToolUse", hook_payload(tool_name="Bash", tool_input={"command": ordinary})) == ""
 
 
 def test_pinned_absolute_thaliris_is_accepted_but_legacy_handlers_only_migrate(tmp_path: Path, monkeypatch) -> None:
@@ -1748,15 +1747,18 @@ def test_no_task_child_worker_and_explorer_execution_is_transparent(tmp_path: Pa
 
 
 @pytest.mark.parametrize("agent_type", ("worker", "explorer"))
-def test_active_managed_spawn_rejects_ordinary_codex_agent_types(tmp_path: Path, agent_type: str) -> None:
+def test_active_ordinary_codex_spawn_creates_no_managed_reservation(tmp_path: Path, agent_type: str) -> None:
     root = repo(tmp_path)
     _owned_task_start(root, "named roles only", None, None)
+    before = lifecycle(root)
     payload = {
         "session_id": "controller-session", "turn_id": "controller-turn",
         "tool_name": "spawn_agent",
         "tool_input": {"fork_turns": "none", "agent_type": agent_type, "message": "handoff"},
     }
-    assert "THALIRIS_MANAGED_AGENT_REQUIRED" in handle_hook(root, "PreToolUse", payload)
+    assert handle_hook(root, "PreToolUse", payload) == ""
+    assert lifecycle(root) == before
+    assert before["pending_authorized_spawn"] is None
 
 
 def test_active_spawn_rejects_conflicting_or_unsupported_native_type_fields(tmp_path: Path) -> None:
@@ -1765,9 +1767,6 @@ def test_active_spawn_rejects_conflicting_or_unsupported_native_type_fields(tmp_
     for fields in (
         {"agent_type": "worker", "agentType": "thaliris-reviewer"},
         {"agent_type": "thaliris-implementer", "agentType": "thaliris-reviewer"},
-        {"agent_type": "worker"},
-        {"agentType": "explorer"},
-        {"agent_type": "worker", "agentType": "explorer"},
         {"agent_type": "thaliris-implementer", "agentType": 1},
     ):
         denied = json.loads(handle_hook(root, "PreToolUse", {
@@ -2501,7 +2500,7 @@ def test_authorized_spawn_requires_fresh_explicit_serial_handoff(tmp_path: Path)
     for tool_input in (
         {"fork_turns": "all", "agent_type": "worker", "message": "task"},
         {"fork_turns": "none", "agent_type": "worker", "message": ""},
-        {"fork_turns": "none", "agent_type": "unknown-role", "message": "task"},
+        {"fork_turns": "none", "agent_type": "thaliris-unknown-role", "message": "task"},
     ):
         denied = json.loads(handle_hook(root, "PreToolUse", hook_payload(tool_name="spawn_agent", tool_input=tool_input)))
         assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -3339,16 +3338,7 @@ def test_exact_historical_role_pack_migrates_and_unknown_bytes_are_preserved(tmp
 def test_role_profiles_keep_routing_and_model_choice_with_the_controller() -> None:
     # Public ingress/binding facts remain mechanical contracts. Prompt ownership
     # and semantic concepts are tested separately in test_prompt_contract.py.
-    assert codex_adapter._ROLE_MODEL_DEFAULTS == {
-        "controller": (None, None),
-        "investigator": ("gpt-6-luna", "xhigh"),
-        "curator": ("gpt-6-luna", "xhigh"),
-        "reasoning-specialist": ("gpt-6.1-sol", "high"),
-        "implementer": ("gpt-6-luna", "xhigh"),
-        "focused-implementer": ("gpt-6.1-sol", "high"),
-        "verifier": ("gpt-6-luna", "xhigh"),
-        "reviewer": ("gpt-6.1-sol", "high"),
-    }
+    assert codex_adapter._ROLE_MODEL_DEFAULTS == {role: (None, None) for role in roles.role_choices()}
     for name, (model, effort, role) in codex_adapter._AGENT_PROFILES.items():
         parsed = tomllib.loads(codex_adapter._agent_profile(name[:-5], role, model, effort).decode())
         assert parsed["developer_instructions"] == roles.profile_instructions(role, name[:-5])

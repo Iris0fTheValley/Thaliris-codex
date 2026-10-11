@@ -6,13 +6,13 @@ Generated from `thaliris_codex.roles.ROLE_REGISTRY`. Role prompts are canonical 
 | Role | Default model | Default reasoning | Native profile | Repo writes | Delegation | Controller-state mutation | Install metadata |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `controller` | `(host/user)` | `(host/task)` | `(root)` | NO | registered native roles | YES | `(not generated)` |
-| `investigator` | `gpt-6-luna` | `xhigh` | `thaliris-investigator` | YES | NO | NO | `thaliris-investigator.toml` |
-| `curator` | `gpt-6-luna` | `xhigh` | `thaliris-curator` | YES | NO | NO | `thaliris-curator.toml` |
-| `reasoning-specialist` | `gpt-6.1-sol` | `high` | `thaliris-reasoning-specialist` | YES | NO | NO | `thaliris-reasoning-specialist.toml` |
-| `implementer` | `gpt-6-luna` | `xhigh` | `thaliris-implementer` | YES | investigator | NO | `thaliris-implementer.toml` |
-| `focused-implementer` | `gpt-6.1-sol` | `high` | `thaliris-focused-implementer` | YES | investigator | NO | `thaliris-focused-implementer.toml` |
-| `verifier` | `gpt-6-luna` | `xhigh` | `thaliris-verifier` | NO | NO | NO | `thaliris-verifier.toml` |
-| `reviewer` | `gpt-6.1-sol` | `high` | `thaliris-reviewer` | NO | investigator | NO | `thaliris-reviewer.toml` |
+| `investigator` | `(host/user)` | `(host/task)` | `thaliris-investigator` | YES | NO | NO | `thaliris-investigator.toml` |
+| `curator` | `(host/user)` | `(host/task)` | `thaliris-curator` | YES | NO | NO | `thaliris-curator.toml` |
+| `reasoning-specialist` | `(host/user)` | `(host/task)` | `thaliris-reasoning-specialist` | YES | NO | NO | `thaliris-reasoning-specialist.toml` |
+| `implementer` | `(host/user)` | `(host/task)` | `thaliris-implementer` | YES | investigator | NO | `thaliris-implementer.toml` |
+| `focused-implementer` | `(host/user)` | `(host/task)` | `thaliris-focused-implementer` | YES | investigator | NO | `thaliris-focused-implementer.toml` |
+| `verifier` | `(host/user)` | `(host/task)` | `thaliris-verifier` | NO | NO | NO | `thaliris-verifier.toml` |
+| `reviewer` | `(host/user)` | `(host/task)` | `thaliris-reviewer` | NO | investigator | NO | `thaliris-reviewer.toml` |
 
 Controller-only exceptional native profiles (same stable role IDs; defaults above remain unchanged):
 

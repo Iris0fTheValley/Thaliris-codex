@@ -101,6 +101,62 @@ def test_user_edit_to_managed_guidance_survives_upgrade_and_uninstall(tmp_path, 
     assert (home / "config.toml").read_bytes() == edited
 
 
+def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(tmp_path, target, monkeypatch):
+    home, _ = target
+    original = b'# user config\r\n[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\r\n'
+    (home / "config.toml").write_bytes(original)
+    old_guidance = guidance.GUIDANCE + " Previous wording."
+    current_guidance = guidance.GUIDANCE + " Current wording."
+    monkeypatch.setattr(guidance, "GUIDANCE", old_guidance)
+
+    first = install(tmp_path, target)
+    assert first["ok"], first
+    old_record = receipt(home)[guidance.RECORD_KEY]
+    assert old_record["fragment"] == guidance._fragment("\r\n")
+    managed_bytes = (home / "config.toml").read_bytes()
+    assert tomllib.loads(managed_bytes.decode())[guidance.KEY] == old_guidance
+
+    monkeypatch.setattr(guidance, "GUIDANCE", current_guidance)
+    upgraded = install(tmp_path, target)
+    assert upgraded["ok"], upgraded
+    assert upgraded["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
+    assert (home / "config.toml").read_bytes() == managed_bytes
+    assert receipt(home)[guidance.RECORD_KEY] == old_record
+
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert removed["controller_wait_guidance_compatibility"]["status"] == "RESTORED_ABSENT"
+    assert (home / "config.toml").read_bytes() == original
+
+
+def test_user_edit_to_historical_template_is_not_reclaimed_on_upgrade_or_uninstall(
+        tmp_path, target, monkeypatch):
+    home, _ = target
+    original = b'[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\n'
+    (home / "config.toml").write_bytes(original)
+    baseline_guidance = guidance.GUIDANCE
+    old_guidance = baseline_guidance + " Previous wording."
+    current_guidance = baseline_guidance + " Current wording."
+    monkeypatch.setattr(guidance, "GUIDANCE", old_guidance)
+    first = install(tmp_path, target)
+    assert first["ok"], first
+
+    raw = (home / "config.toml").read_bytes()
+    edited = raw.replace(old_guidance.encode(), (old_guidance + " User addition.").encode(), 1)
+    (home / "config.toml").write_bytes(edited)
+    monkeypatch.setattr(guidance, "GUIDANCE", current_guidance)
+
+    upgraded = install(tmp_path, target)
+    assert upgraded["ok"], upgraded
+    assert upgraded["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
+    assert (home / "config.toml").read_bytes() == edited
+
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert removed["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
+    assert (home / "config.toml").read_bytes() == edited
+
+
 def test_unsupported_version_does_not_insert_guidance(tmp_path, target, monkeypatch):
     home, _ = target
     monkeypatch.setattr(guidance, "capability", lambda: "UNKNOWN")
@@ -126,6 +182,20 @@ def test_invalid_ownership_record_fails_closed_before_config_mutation(tmp_path, 
     assert not result["ok"]
     assert (home / "config.toml").read_bytes() == before
     assert host_transition.pending(home) is False
+
+
+def test_invalid_ownership_record_is_not_hidden_by_optional_config_read_error(tmp_path, target, monkeypatch):
+    home, _ = target
+    assert install(tmp_path, target)["ok"]
+    record = receipt(home)[guidance.RECORD_KEY]
+    record["fragment"] = "# forged optional ownership\n"
+
+    def fail_config_read(path):
+        raise OSError("simulated optional config read failure")
+
+    monkeypatch.setattr(guidance, "read", fail_config_read)
+    with pytest.raises(ValueError, match="invalid Controller wait guidance owned bytes"):
+        guidance.plan_install(home, {guidance.RECORD_KEY: record})
 
 
 def test_guidance_matches_the_accepted_waiting_text():
@@ -202,3 +272,145 @@ def test_interrupted_guidance_write_is_reconciled_without_reacquisition(tmp_path
     result = uninstall(tmp_path, target)
     assert result["ok"], result
     assert (home / "config.toml").read_bytes() == original
+
+
+@pytest.mark.parametrize("preexisting_managed", [False, True])
+def test_optional_guidance_read_errors_do_not_fail_host_install(
+        tmp_path, target, monkeypatch, preexisting_managed):
+    home, _ = target
+    original = b'[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\n'
+    (home / "config.toml").write_bytes(original)
+    if preexisting_managed:
+        first = install(tmp_path, target)
+        assert first["ok"], first
+        installed = (home / "config.toml").read_bytes()
+    read = guidance.read
+    calls = 0
+
+    def fail_finalization_read(path):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated optional config read failure")
+        return read(path)
+
+    monkeypatch.setattr(guidance, "read", fail_finalization_read)
+    result = install(tmp_path, target)
+
+    assert result["ok"], result
+    assert result["host_integration_ready"] == "YES"
+    assert result["transition_pending"] is False
+    assert result["controller_wait_guidance_compatibility"]["status"] == "OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"
+    assert (home / "config.toml").read_bytes() == (installed if preexisting_managed else original)
+
+    monkeypatch.setattr(guidance, "read", read)
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert (home / "config.toml").read_bytes() == original
+
+
+@pytest.mark.parametrize("preexisting_managed", [False, True])
+def test_optional_guidance_planning_read_errors_preserve_install_and_ownership(
+        tmp_path, target, monkeypatch, preexisting_managed):
+    home, _ = target
+    original = b'[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\n'
+    (home / "config.toml").write_bytes(original)
+    prior_record = None
+    expected_config = original
+    if preexisting_managed:
+        first = install(tmp_path, target)
+        assert first["ok"], first
+        prior_record = receipt(home)[guidance.RECORD_KEY]
+        expected_config = (home / "config.toml").read_bytes()
+    read = guidance.read
+
+    def fail_first_planning_read(path):
+        raise OSError("simulated optional config planning read failure")
+
+    monkeypatch.setattr(guidance, "read", fail_first_planning_read)
+    result = install(tmp_path, target)
+
+    assert result["ok"], result
+    assert result["host_integration_ready"] == "YES"
+    assert result["transition_pending"] is False
+    assert result["controller_wait_guidance_compatibility"]["status"] == "OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"
+    assert (home / "config.toml").read_bytes() == expected_config
+    updated_receipt = receipt(home)
+    if prior_record is None:
+        assert guidance.RECORD_KEY not in updated_receipt
+    else:
+        assert updated_receipt[guidance.RECORD_KEY] == prior_record
+
+    monkeypatch.setattr(guidance, "read", read)
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert (home / "config.toml").read_bytes() == original
+
+
+def test_optional_guidance_journal_failure_stops_before_config_mutation(tmp_path, target, monkeypatch):
+    home, exe = target
+    original = b'[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\n'
+    (home / "config.toml").write_bytes(original)
+    contract = intent(tmp_path, home, exe)
+    write = host_transition._write
+
+    def fail_attempt_checkpoint(path, transition):
+        if transition["finish"].get("wait_guidance_phase") == "ATTEMPTING":
+            raise OSError("simulated required transition journal failure")
+        return write(path, transition)
+
+    monkeypatch.setattr(host_transition, "_write", fail_attempt_checkpoint)
+    failed = adapter.codex_install(maintenance_contract=contract)
+    assert not failed["ok"], failed
+    assert failed["transition_pending"] is True
+    assert host_transition.pending(home)
+    assert (home / "config.toml").read_bytes() == original
+
+    monkeypatch.setattr(host_transition, "_write", write)
+    recovered = adapter.codex_install(maintenance_contract=contract)
+    assert recovered["ok"], recovered
+    assert not host_transition.pending(home)
+    assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == guidance.GUIDANCE
+
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert (home / "config.toml").read_bytes() == original
+
+
+@pytest.mark.parametrize("write_outcome,expected_status", [
+    ("before", "OPTIONAL_WRITE_FAILED_PRESERVED"),
+    ("after", "MANAGED"),
+    ("user_edit", "APPLY_OUTCOME_UNKNOWN_PRESERVED"),
+])
+def test_optional_guidance_write_errors_do_not_fail_host_install(
+        tmp_path, target, monkeypatch, write_outcome, expected_status):
+    home, _ = target
+    original = b'[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\n'
+    (home / "config.toml").write_bytes(original)
+    write = adapter._atomic_host_write
+
+    def fail_guidance_write(path, contents):
+        if path == home / "config.toml":
+            if write_outcome == "after":
+                write(path, contents)
+            elif write_outcome == "user_edit":
+                path.write_bytes(b'developer_instructions = "user edit"\n' + original)
+            raise OSError("simulated optional config write failure")
+        return write(path, contents)
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", fail_guidance_write)
+    result = install(tmp_path, target)
+
+    assert result["ok"], result
+    assert result["host_integration_ready"] == "YES"
+    assert result["transition_pending"] is False
+    assert result["controller_wait_guidance_compatibility"]["status"] == expected_status
+    user_edit = b'developer_instructions = "user edit"\n' + original
+    if write_outcome == "before":
+        assert (home / "config.toml").read_bytes() == original
+    elif write_outcome == "after":
+        assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == guidance.GUIDANCE
+    monkeypatch.setattr(adapter, "_atomic_host_write", write)
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert (home / "config.toml").read_bytes() == (user_edit if write_outcome == "user_edit" else original)

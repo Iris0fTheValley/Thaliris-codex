@@ -49,7 +49,7 @@ def _native_codex_role_map() -> dict[str, str]:
     return roles.native_codex_role_map()
 
 
-def _role_model_defaults() -> dict[str, tuple[str, str | None]]:
+def _role_model_defaults() -> dict[str, tuple[str | None, str | None]]:
     return {
         role: (binding.model, binding.reasoning_effort)
         for role in roles.role_choices()
@@ -58,7 +58,7 @@ def _role_model_defaults() -> dict[str, tuple[str, str | None]]:
     }
 
 
-def _agent_profiles() -> dict[str, tuple[str, str | None, str]]:
+def _agent_profiles() -> dict[str, tuple[str | None, str | None, str]]:
     return roles.agent_profiles()
 
 
@@ -479,7 +479,38 @@ for _profile_name, _profile_hashes in _ORCHESTRATION_PREDECESSOR_PROFILE_HASHES.
 _KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'b65f45a9335c174d542368a0ec69c1d10ea8b898cbdeefbf31b31ca5eee10bd6'})
 _KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'3c54cb36dd73d82c180e8fe7b659d9a9a4c98f9c6ab1be148c8469b67c1eb526'})
 
-def _agent_profile(name: str, role: str, model: str, effort: str) -> bytes:
+# Exact filename-bound output of immutable 5f80214bb8d4ef219851405b017f660c5f8b554e.
+# Independent source/blob and default/luna-only witnesses: role-model-before fixtures.
+_ROLE_MODEL_PREDECESSOR_PROFILE_HASHES = {'default': {'thaliris-investigator.toml': '2097e14170126ac4a875a0871c341514ec04ccdaceb342d1c62b6c3049271aba',
+             'thaliris-curator.toml': '29b5160bd0d7b14f98b2ff2a3d38eadc4531fba6626ce50f991aeccf94b2531e',
+             'thaliris-reasoning-specialist.toml': '7fba12985f08117a4fad30e8c5f84cbcadcbe925ca5794be5ec1bf959b38316d',
+             'thaliris-implementer.toml': 'caaea59835f5298ea40e579c5e48d32d20957f913d08c0b92aa8447b834f67a6',
+             'thaliris-focused-implementer.toml': '0d77bc6f8b289816a49a82077f817564b295af3aa99864598be5641177d03fbc',
+             'thaliris-verifier.toml': '1c4bc1c070ae85470649fb644cd722383ba8e963e4f213efd64de8973f47ac40',
+             'thaliris-reviewer.toml': '936a380a53f7d48b8e9e9a14d298daf4bd703791420dda86b60b8b6ab80f7c40',
+             'thaliris-reasoning-specialist-astra-medium.toml': '0cb2407978fa5ead51910f0be2bc1040d4c41d1c95edcc2b598cd149545944e7',
+             'thaliris-reasoning-specialist-xhigh.toml': 'cef6f5ff5f83bff32886bd8330c1fe453a593aa9f5463b31ee68e59e24d19ce2',
+             'thaliris-focused-implementer-astra-medium.toml': 'b92a19bb533c2de930ff735d0305ad36b19e68815849cb4859359f64ca6e07b9',
+             'thaliris-focused-implementer-xhigh.toml': '43b9b56bbd5f51501069feb4a2badd74679d9801c2e903c4b20d860e8dc8b0cc'},
+ 'luna-only': {'thaliris-investigator.toml': '2097e14170126ac4a875a0871c341514ec04ccdaceb342d1c62b6c3049271aba',
+               'thaliris-curator.toml': '29b5160bd0d7b14f98b2ff2a3d38eadc4531fba6626ce50f991aeccf94b2531e',
+               'thaliris-reasoning-specialist.toml': '04b52b097d727a81fa79d79d337e8560560490cb419abee61f2c294b6e70e036',
+               'thaliris-implementer.toml': 'caaea59835f5298ea40e579c5e48d32d20957f913d08c0b92aa8447b834f67a6',
+               'thaliris-focused-implementer.toml': '9ca15bcd5ce8051e0a419a77c0029d04e8fa80185eb666e9f48fe504543e86ce',
+               'thaliris-verifier.toml': '1c4bc1c070ae85470649fb644cd722383ba8e963e4f213efd64de8973f47ac40',
+               'thaliris-reviewer.toml': '9ffcc6e5e8716d94be7a5c0c196bfca694a0dbe3ff4c724bd872e87f076f953d',
+               'thaliris-reasoning-specialist-astra-medium.toml': '0cb2407978fa5ead51910f0be2bc1040d4c41d1c95edcc2b598cd149545944e7',
+               'thaliris-reasoning-specialist-xhigh.toml': 'cef6f5ff5f83bff32886bd8330c1fe453a593aa9f5463b31ee68e59e24d19ce2',
+               'thaliris-focused-implementer-astra-medium.toml': 'b92a19bb533c2de930ff735d0305ad36b19e68815849cb4859359f64ca6e07b9',
+               'thaliris-focused-implementer-xhigh.toml': '43b9b56bbd5f51501069feb4a2badd74679d9801c2e903c4b20d860e8dc8b0cc'}}
+for _profile_set in _ROLE_MODEL_PREDECESSOR_PROFILE_HASHES.values():
+    for _profile_name, _profile_hash in _profile_set.items():
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash})
+_KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'0fc5f465d6543b0ab4a2087b4de41511991a20683902fe8e5fc48b971b8f0692'})
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'e6b28d06d39de22f9a7fc5d80e07eaf044caf45a328551834dbcb2336123360b'})
+_KNOWN_GENERATED_ROLE_REGISTRY_DOC_HASHES |= frozenset({'ffecc599a0e593d7634d837a9b32150c1782602f4bdd0ec3941673de3efe5dc6'})
+
+def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
     # isolation instructions contain quotes that must not terminate the value.
     spec = roles.get_role(role)
@@ -490,8 +521,8 @@ def _agent_profile(name: str, role: str, model: str, effort: str) -> bytes:
     return (
         f'name = "{name}"\n'
         f'description = "Thaliris {role} execution role"\n'
-        f'model = "{model}"\n'
-        f'model_reasoning_effort = "{effort}"\n'
+        + (f'model = "{model}"\n' if model is not None else "")
+        + (f'model_reasoning_effort = "{effort}"\n' if effort is not None else "")
         + f'developer_instructions = {json.dumps(instructions, ensure_ascii=False)}\n'
     ).encode("utf-8")
 
@@ -564,19 +595,30 @@ def _installed_execution_constraint() -> str | None:
     agents = _codex_home() / "agents"
     profiles = roles.agent_profiles("luna-only")
     defaults = roles.agent_profiles()
-    distinguishing_profiles = {
-        name for name, profile in profiles.items()
-        if profile[:2] != defaults[name][:2]
-    }
+    # Historical fixed defaults can share exact Luna bytes with a constrained
+    # installation. Model names alone cannot prove that installation's policy.
+    # Use filename-bound immutable default witnesses to avoid inventing a
+    # partial frozen constraint after ordinary profiles begin inheriting.
+    historical_defaults = _ROLE_MODEL_PREDECESSOR_PROFILE_HASHES["default"]
+    historical_luna = _ROLE_MODEL_PREDECESSOR_PROFILE_HASHES["luna-only"]
     observed_luna_profiles = 0
     complete_luna_install = True
     for name in profiles:
         try:
-            current = _agent_profile_state((agents / name).read_bytes(), name, "luna-only") == "current"
+            raw = (agents / name).read_bytes()
+            current = _agent_profile_state(raw, name, "luna-only") == "current"
+            digest = hashlib.sha256(raw).hexdigest()
+            known_luna = current or digest == historical_luna.get(name)
+            proven_default = (
+                raw == _agent_profile(name[:-5], defaults[name][2], *defaults[name][:2])
+                or digest == historical_defaults.get(name)
+            )
         except OSError:
             current = False
-        observed_luna_profiles += current and name in distinguishing_profiles
-        complete_luna_install = complete_luna_install and current
+            known_luna = False
+            proven_default = False
+        observed_luna_profiles += known_luna and not proven_default
+        complete_luna_install = complete_luna_install and known_luna
     if complete_luna_install:
         return "luna-only"
     if observed_luna_profiles:
@@ -925,9 +967,12 @@ recovery/Host maintenance retrieved on demand. Full mechanical
 design belongs to [Codex protocol](../adapter/codex/README.md), not repeated prompts.
 
 {_native_profile_facts()}
-Controller uses Host/user selection. Static Astra variants require current-task
-human authorization and preserve the same semantic role IDs. Per-spawn overrides
-are denied. Dedicated luna-only policy changes bindings, not role responsibilities.
+Ordinary profiles omit model and effort: native spawn, configuration and user selection
+resolve them, while role instructions and readonly boundaries remain binding. Static
+Astra variants retain fixed bindings and require current-task human authorization.
+Dedicated luna-only policy freezes Luna/xhigh bindings and forbids model overrides;
+it changes execution, not role responsibilities. Source rendering does not prove that
+a running Host loaded these profiles.
 
 {role_sections}
 """
@@ -2009,7 +2054,7 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
     task_id = str(state["task_id"])
     override = anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}
     if not lifecycle.qualifying_child_completed(core._repo_root(root), allow_no_children=override):
-        raise ValueError("task-close requires authorized handoff/identity bindings, exact identity-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents (V2) or wait_agent status map (V1) to observe completion. SubagentStop is optional; Controller semantic acceptance remains independent")
+        raise ValueError("task-close requires authorized handoff/identity bindings, exact identity-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents (V2) or wait_agent status map (V1) to observe completion. SubagentStop is optional; final product acceptance through the explicit closing handoff remains separate")
     result = core.task_close(root, base_revision, expected_task_id=task_id)
     task_authority.checkpoint(core._repo_root(root))
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(core._repo_root(root), task_id), task_id)

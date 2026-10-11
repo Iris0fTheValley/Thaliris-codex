@@ -152,6 +152,10 @@ _EXECUTOR_INSTRUCTIONS = (
     "Return undecided authority affecting compatibility, ownership, security, lifecycle or "
     "contract; volume or difficulty alone does not require escalation. Prove decision-critical "
     "Host schemas, protocol, identity and serialization from source or real-shaped evidence. "
+    "An explicit closing handoff may assign final product acceptance against the user's original "
+    "objective and criteria. Verify the candidate in that selected boundary and return a conclusion, "
+    "criterion-linked evidence and UNKNOWN for unverified behavior; local tests and Reviewer READY "
+    "do not replace this acceptance. Controller integrates your result and records mechanical closure. "
     "Project/package smoke does not authorize live Host maintenance. Keep durable admission "
     "and INDEX maintenance with Controller/selected Curator. Own observation of your tests, "
     "processes and CI: run/wait on them and report substantive changes or terminal evidence, "
@@ -163,7 +167,7 @@ _EXECUTOR_INSTRUCTIONS = (
     "from inferred root causes and preserve refusal/identity/ownership guarantees. "
     "You may delegate an independent, "
     "genuinely uncovered discovery set to a fresh Investigator Scanner, fork_turns=\"none\" (V2) or fork_context=false (V1), "
-    "without model/effort overrides. Wait only while its needed result is unfinished; use its "
+    "under the selected task model constraints. Wait only while its needed result is unfinished; use its "
     "FINAL without another wait or repeated discovery. Only one Scanner may be active/pending "
     "at once; after proved terminal completion another necessary fresh uncovered discovery "
     "gap within the accepted boundary may use that slot. Native capacity grants no additional authority. "
@@ -171,7 +175,7 @@ _EXECUTOR_INSTRUCTIONS = (
 
 
 _FOCUSED_SOL_INSTRUCTIONS = (
-    ' With the Sol Focused Implementer profile, consider offloading broad peripheral '
+    ' When executing with Sol, consider offloading broad peripheral '
     'call-site, rollout/log, and residual-reference collections when that removes an '
     'independent working set.'
 )
@@ -185,9 +189,11 @@ _FOCUSED_ASTRA_INSTRUCTIONS = (
 def _instructions(role: str) -> str:
     role_instructions = {
         'controller': (
-            'Own the user objective, scope, hard invariants, acceptance, context selection, and next '
+            'Own the user objective, scope, hard invariants, acceptance criteria, context selection, and next '
             'routing. Supply decision-complete bounded handoffs; implementation methods belong to the '
-            'assigned executor. Interpret observations and decide semantic completion.'
+            'assigned executor. Assign final product acceptance through a separate explicit closing '
+            'handoff to a suitable existing executor; integrate its conclusion, evidence and UNKNOWN '
+            'and record mechanical closure. Do not perform final product acceptance yourself.'
         ),
         'investigator': (
             'Establish facts and gather broad evidence within the selected scope; architecture '
@@ -256,7 +262,7 @@ def _instructions(role: str) -> str:
             'history. Treat unrelated workspace anomalies as observations. Historical/generated '
             'ownership requires independent historical evidence, not current HEAD. Delegate '
             'independent broad discovery to a fresh Investigator doing Scanner work, '
-            'fork_turns="none" (V2) or fork_context=false (V1), without model/effort overrides; retain independent semantic judgment '
+            'fork_turns="none" (V2) or fork_context=false (V1), under selected task model constraints; retain independent semantic judgment '
             'and wait only while its needed result is unfinished. Only one Scanner may be '
             'active/pending at once; after proved terminal completion the slot can serve '
             'another necessary uncovered gap in the same boundary. Choose waiting by '
@@ -268,7 +274,8 @@ def _instructions(role: str) -> str:
             'Remain a read-only compatibility role, not a mandatory stage. Check selected acceptance '
             'evidence, modification boundaries, synchronization, compatibility, and contradictions. '
             'Report supported readiness, bounded defects, or decision-changing unknowns as '
-            'observations; the Controller decides acceptance. Treat unrelated workspace anomalies as '
+            'observations. An explicit closing handoff assigns final product acceptance to a suitable '
+            'existing executor; Controller integrates that result and records mechanical closure. Treat unrelated workspace anomalies as '
             'observations and require independent historical ownership evidence. Do not replace an '
             'independent Reviewer when the selected contract needs semantic challenge. Do not delegate.'
         ),
@@ -339,8 +346,8 @@ for _role, _digest in _PHASE_TWO_PROFILE_HASHES.items():
 
 def _native_role(
     role: str,
-    model: str,
-    effort: str,
+    model: str | None = None,
+    effort: str | None = None,
     *,
     aliases: tuple[str, ...] = (),
     repo_write: bool = True,
@@ -389,18 +396,18 @@ ROLE_REGISTRY: dict[str, RoleRegistration | RoleDefinition | tuple[RoleSpec, Cod
             controller_control_state_modification_allowed=True,
         ),
     ),
-    "investigator": _native_role("investigator", "gpt-6-luna", "xhigh", aliases=("luna", "luna-investigator")),
-    "curator": _native_role("curator", "gpt-6-luna", "xhigh", aliases=("luna-curator",), notices=True),
-    "reasoning-specialist": _native_role("reasoning-specialist", "gpt-6.1-sol", "high", aliases=("sol-high", "reasoning-specialist-sol"), notices=True),
-    "implementer": _native_role("implementer", "gpt-6-luna", "xhigh", aliases=("terra-implementer",), orchestration_metric="implementer_rounds"),
-    "focused-implementer": _native_role("focused-implementer", "gpt-6.1-sol", "high", orchestration_metric="implementer_rounds"),
+    "investigator": _native_role("investigator", aliases=("luna", "luna-investigator")),
+    "curator": _native_role("curator", aliases=("luna-curator",), notices=True),
+    "reasoning-specialist": _native_role("reasoning-specialist", aliases=("sol-high", "reasoning-specialist-sol"), notices=True),
+    "implementer": _native_role("implementer", aliases=("terra-implementer",), orchestration_metric="implementer_rounds"),
+    "focused-implementer": _native_role("focused-implementer", orchestration_metric="implementer_rounds"),
     "verifier": _native_role(
-        "verifier", "gpt-6-luna", "xhigh", repo_write=False, notices=True,
+        "verifier", repo_write=False, notices=True,
         write_denial_code="THALIRIS_VERIFIER_WRITE_BLOCKED",
         write_denial_reason="Verifier must remain an independent non-writing checker.",
     ),
     "reviewer": _native_role(
-        "reviewer", "gpt-6.1-sol", "high", aliases=("terra-reviewer",), repo_write=False, notices=True,
+        "reviewer", aliases=("terra-reviewer",), repo_write=False, notices=True,
         write_denial_code="THALIRIS_REVIEWER_WRITE_BLOCKED",
         write_denial_reason="Reviewer must remain an independent non-writing checker.",
         orchestration_metric="reviewer_rounds",
@@ -565,7 +572,7 @@ def native_profile_names() -> frozenset[str]:
 EXECUTION_CONSTRAINTS = ("luna-only",)
 
 
-def agent_profiles(execution_constraint: str | None = None) -> dict[str, tuple[str, str | None, str]]:
+def agent_profiles(execution_constraint: str | None = None) -> dict[str, tuple[str | None, str | None, str]]:
     if execution_constraint is not None and execution_constraint not in EXECUTION_CONSTRAINTS:
         raise ValueError("UNSUPPORTED_EXECUTION_CONSTRAINT")
     values = {

@@ -343,17 +343,27 @@ def _windows_hook(tmp_path, exe, *, drift=True):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows platform preflight")
-def test_windows_degraded_policy_allows_repair_and_denies_control(tmp_path, pinned_test_thaliris):
+def test_windows_degraded_policy_allows_repair_and_denies_control(tmp_path, pinned_test_thaliris, monkeypatch):
     exe, _ = pinned_test_thaliris
-    command, _home = _windows_hook(tmp_path, exe)
-    for tool, tool_input, denied in [("Bash", {"command": "pytest tests/test_roles.py"}, False),
-                                      ("apply_patch", {"patch": "*** Update File: src/x.py"}, False),
-                                      ("spawn_agent", {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "authorized source repair"}, False),
-                                      ("spawn_agent", {}, True),
-                                      ("Bash", {"command": "Set-Content .context/state.json '{}'"}, True),
-                                      ("Bash", {"command": "python tools/thaliris_offline_recovery.py"}, True)]:
-        payload = json.dumps({"tool_name": tool, "tool_input": tool_input}).encode()
-        result = subprocess.run(command, shell=True, cwd=tmp_path, input=payload, capture_output=True, timeout=30)
+    command, home = _windows_hook(tmp_path, exe)
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    cases = [
+        ("Bash", {"command": "pytest tests/test_roles.py"}, {}, False),
+        ("apply_patch", {"patch": "*** Update File: src/x.py"}, {}, False),
+        ("spawn_agent", {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "authorized source repair"}, {}, False),
+        ("spawn_agent", {}, {}, False),
+        ("Bash", {"command": "Set-Content .context/state.json '{}'"}, {}, True),
+        ("Bash", {"command": "python tools/thaliris_offline_recovery.py"}, {}, True),
+        ("Bash", {"command": "git commit -m changed"}, {}, False),
+        ("Bash", {"command": "git commit -m changed"}, {"readonly": True}, True),
+        ("Bash", {"command": "git commit -m changed"}, {"agent_type": "thaliris-reviewer"}, True),
+        ("apply_patch", {"patch": f"*** Update File: {home / 'agents/thaliris-controller.toml'}\n+changed"}, {}, True),
+        ("apply_patch", {"patch": f"*** Update File: {home / 'thaliris-host-generations/g1/config.toml'}\n+changed"}, {}, True),
+    ]
+    for tool, tool_input, actor, denied in cases:
+        payload = json.dumps({"tool_name": tool, "tool_input": tool_input, **actor}).encode()
+        result = subprocess.run(command, shell=True, cwd=tmp_path, input=payload, capture_output=True, timeout=30,
+                                env={**os.environ, "CODEX_HOME": str(home)})
         assert result.returncode == 0, result.stderr
         assert b"SHOULD_NOT_EXECUTE" not in result.stdout
         output = json.loads(result.stdout)["hookSpecificOutput"]
@@ -363,7 +373,7 @@ def test_windows_degraded_policy_allows_repair_and_denies_control(tmp_path, pinn
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows platform preflight")
 @pytest.mark.parametrize("damage", ["runtime", "preflight", "trampoline"])
-@pytest.mark.parametrize("restriction", ["absent", "active", "invalid", "state_directory", "fence", "child", "inherited", "reuse", "override", "foreign_cwd"])
+@pytest.mark.parametrize("restriction", ["absent", "active", "invalid", "state_directory", "fence", "unrelated_fence", "scoped_fence", "broken_unrelated_fence", "readonly", "fenced", "child", "inherited", "reuse", "ordinary_reuse", "override", "foreign_cwd", "native"])
 def test_windows_degraded_fresh_delegation_has_no_managed_grant(tmp_path, pinned_test_thaliris, damage, restriction):
     exe, _ = pinned_test_thaliris
     command, home = _windows_hook(tmp_path, exe)
@@ -380,18 +390,41 @@ def test_windows_degraded_fresh_delegation_has_no_managed_grant(tmp_path, pinned
             state.mkdir()
         else:
             state.write_text('{"status":"ACTIVE"}' if restriction == "active" else '{"malformed":')
-    elif restriction == "fence":
-        fence = tmp_path / ".context/audit/abandoned/session-fence.json"
+    elif restriction in {"fence", "unrelated_fence", "scoped_fence"}:
+        fence = tmp_path / (".context/audit/abandoned/old-task/session-fence.json" if restriction == "scoped_fence"
+                            else ".context/audit/abandoned/session-fence.json")
         fence.parent.mkdir(parents=True)
-        fence.write_text(json.dumps({"version": 1, "session_id_hashes": [hashlib.sha256(b"ordinary-session").hexdigest()]}))
+        session = b"another-session" if restriction == "unrelated_fence" else b"ordinary-session"
+        fence.write_text(json.dumps({"version": 1, "session_id_hashes": [hashlib.sha256(session).hexdigest()]}))
+    elif restriction in {"readonly", "fenced"}:
+        payload[restriction] = True
+    elif restriction == "broken_unrelated_fence":
+        fence = tmp_path / ".context/audit/abandoned/old-task/session-fence.json"
+        fence.parent.mkdir(parents=True)
+        fence.write_text('{"version":"unknown","session_id_hashes":')
     elif restriction == "child":
         payload.update(agent_id="known-child", agent_type="thaliris-focused-implementer")
     elif restriction == "inherited":
         payload["tool_input"]["fork_turns"] = "all"
     elif restriction == "reuse":
         payload["tool_name"] = "followup_task"
+        payload["tool_input"] = {"target": "managed-child", "message": "another workstream"}
+        task_id = "adf16584-f390-4bfe-9c1f-af7eec63a006"
+        task_key = hashlib.sha256(task_id.encode()).hexdigest()[:24]
+        ledger = tmp_path / f".context/audit/lifecycle/{task_key}.json"
+        ledger.parent.mkdir(parents=True)
+        ledger.write_text(json.dumps({"task_id": task_id, "children": [{"managed": True,
+            "agent_id_hash": hashlib.sha256(b"managed-child").hexdigest(), "task_name_hash": None}]}))
+        association = tmp_path / f".context/audit/session-tasks/{hashlib.sha256(b'ordinary-session').hexdigest()}.json"
+        association.parent.mkdir()
+        association.write_text(json.dumps({"version": 1, "task_id": task_id}))
+    elif restriction == "ordinary_reuse":
+        payload["tool_name"] = "followup_task"
+        payload["tool_input"] = {"target": "ordinary-child", "message": "authorized native followup"}
     elif restriction == "override":
         payload["tool_input"]["model"] = "unapproved-model"
+    elif restriction == "native":
+        payload["tool_input"] = {"agent_type": "worker", "fork_turns": "all", "message": "ordinary native work"}
     elif restriction == "foreign_cwd":
         other = tmp_path / "other-worktree"
         other.mkdir()
@@ -403,9 +436,10 @@ def test_windows_degraded_fresh_delegation_has_no_managed_grant(tmp_path, pinned
     assert result.returncode == 0, result.stderr
     assert b"SHOULD_NOT_EXECUTE" not in result.stdout
     output = json.loads(result.stdout)["hookSpecificOutput"]
-    assert (output.get("permissionDecision") == "deny") == (restriction != "absent")
+    assert (output.get("permissionDecision") == "deny") == (restriction in {"fence", "scoped_fence", "readonly", "fenced", "child", "inherited", "reuse"})
     assert "THALIRIS_RUNTIME_DRIFT" in output["additionalContext"]
-    assert not (tmp_path / ".context/audit/lifecycle").exists()
+    if restriction != "reuse":
+        assert not (tmp_path / ".context/audit/lifecycle").exists()
     assert not (tmp_path / ".context/audit/task-start-attestations").exists()
     if restriction == "absent":
         assert not state.exists()

@@ -123,6 +123,89 @@ def test_install_upgrades_previous_owned_runner(tmp_path: Path, monkeypatch, pin
     assert runner.read_bytes() == lifecycle.host_run_script_bytes(executable, runtime_identity.manifest_identity(manifest))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell syntax observation")
+@pytest.mark.parametrize("command,expected", [
+    ('git status > "$(thaliris codex-install)"', True),
+    ('git status > "file-$(thaliris codex-uninstall).txt"', True),
+    ('git status > "$(Write-Output "$(thaliris codex-install)")"', True),
+    (r'Write-Output "\"; thaliris codex-install #"', True),
+    (r'git status > "\"; thaliris codex-uninstall #"', True),
+    ('Write-Output "`$(thaliris codex-install)"', False),
+    ('git status > "file-`$(thaliris codex-install).txt"', False),
+    ("Write-Output hi # ; thaliris codex-install", False),
+    ("Write-Output 'it''s $(thaliris codex-install)'", False),
+    ('thaliris 2>&1 codex-install', True),
+    ('thaliris > out`>file.txt codex-install', True),
+])
+def test_embedded_maintenance_agrees_with_powershell_command_ast(command: str, expected: bool) -> None:
+    # Parse only: no observed CommandAst is invoked, and no Host state is read
+    # or maintained. This proves the execution/data distinction independently
+    # of our scanner for the regression examples that motivated this boundary.
+    script = """$text = [Console]::In.ReadToEnd()
+$errors=$null; $tokens=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+$names=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.CommandAst]},$true) | ForEach-Object {$_.GetCommandName()})
+[pscustomobject]@{names=$names; errors=@($errors | ForEach-Object {$_.ErrorId})} | ConvertTo-Json -Compress
+"""
+    parsed = subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                            input=command, text=True, capture_output=True, check=True)
+    observation = json.loads(parsed.stdout)
+    assert observation["errors"] == []
+    assert ("thaliris" in observation["names"]) is expected
+    assert lifecycle._compound_host_maintenance_attempt({"tool_input": {"command": command}}) is expected
+
+
+@pytest.mark.parametrize("command", [
+    r'Write-Output "\"; thaliris codex-install #"',
+    r'git status > "\"; thaliris codex-uninstall #"',
+])
+def test_compound_maintenance_quote_escapes_follow_shell_dialect(command: str) -> None:
+    payload = {"tool_input": {"command": command}}
+    assert lifecycle._compound_host_maintenance_attempt(payload, shell_dialect="powershell")
+    # The same backslash-quote sequence is literal data in Bash, so it must not
+    # manufacture a maintenance invocation from text inside the quoted value.
+    assert not lifecycle._compound_host_maintenance_attempt(payload, shell_dialect="bash")
+
+
+def test_compound_maintenance_uses_explicit_executor_shell() -> None:
+    bash_literal = r'Write-Output "\"; thaliris codex-install #"'
+    assert not lifecycle._compound_host_maintenance_attempt({
+        "tool_input": {"command": bash_literal, "shell": "bash"},
+    })
+    assert not lifecycle._compound_host_maintenance_attempt({
+        "tool_input": {"command": bash_literal, "shell": "/bin/bash"},
+    })
+    assert not lifecycle._compound_host_maintenance_attempt({
+        "tool_input": {
+            "command": bash_literal,
+            "shell": r"C:\Program Files\Git\bin\bash.exe",
+        },
+    })
+
+    powershell_call = r'Write-Output "\"; thaliris codex-install #"'
+    assert lifecycle._compound_host_maintenance_attempt({
+        "tool_input": {"cmd": powershell_call, "shell": "pwsh"},
+    })
+    assert lifecycle._compound_host_maintenance_attempt({
+        "tool_input": {
+            "command": powershell_call,
+            "shell": r'"C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile',
+        },
+    })
+    assert lifecycle._compound_host_maintenance_attempt({
+        "tool_input": {
+            "command": powershell_call,
+            "shell": r"C:\Program Files\PowerShell\7\pwsh.exe",
+        },
+    })
+    assert not lifecycle._compound_host_maintenance_attempt({
+        "tool_input": {
+            "command": r'Write-Output "`$(thaliris codex-install)"',
+            "shell": "powershell",
+        },
+    })
+
+
 def test_powershell_runner_receipt_and_host_maintenance_are_direct_only(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
     executable, _ = pinned_test_thaliris
     home = tmp_path / "codex-home"
@@ -132,9 +215,13 @@ def test_powershell_runner_receipt_and_host_maintenance_are_direct_only(tmp_path
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     codex_adapter.init(tmp_path)
     receipt = codex_adapter._controller_bridge()["controller_bridge_sha256"]
+
+    def powershell_command(command: str) -> dict[str, str]:
+        return {"command": command, "shell": "powershell"}
+
     direct = {
         "session_id": "owner", "turn_id": "start", "tool_name": "Bash",
-        "tool_input": {"command": f"& '{runner}' --root '{tmp_path}' task-start 'goal' --bootstrap-receipt '{receipt}'"},
+        "tool_input": powershell_command(f"& '{runner}' --root '{tmp_path}' task-start 'goal' --bootstrap-receipt '{receipt}'"),
     }
     start = json.loads(lifecycle.handle_hook(tmp_path, "PreToolUse", direct, lifecycle.MANAGED_HOOK_ABI))
     assert start["hookSpecificOutput"]["permissionDecision"] == "allow"
@@ -144,17 +231,75 @@ def test_powershell_runner_receipt_and_host_maintenance_are_direct_only(tmp_path
     started = core.task_start(tmp_path, "unfinished", None, None)
     lifecycle.record_task_start_owner(tmp_path, started["task_id"], hashlib.sha256(b"owner").hexdigest())
     for operation in ("codex-install", "codex-uninstall"):
-        payload = {**direct, "tool_input": {"command": f"& '{runner}' {operation}"}}
+        payload = {**direct, "tool_input": powershell_command(f"& '{runner}' {operation}")}
         assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
-        payload["tool_input"] = {"command": f"thaliris {operation}"}
+        payload["tool_input"] = powershell_command(f"thaliris {operation}")
         assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
-        payload["tool_input"] = {"command": f"& '{runner}' {operation}; git status"}
-        assert "THALIRIS_CONTROLLER_BOUNDARY" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
-    source = {**direct, "tool_input": {"command": "git status"}}
-    assert "THALIRIS_CONTROLLER_BOUNDARY" in lifecycle.handle_hook(tmp_path, "PreToolUse", source, lifecycle.MANAGED_HOOK_ABI)
+        payload["tool_input"] = powershell_command(f"& '{runner}' {operation}; git status")
+        assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
+        for command in (
+            f"thaliris {operation} > out.txt",
+            f"& '{runner}' {operation} > out.txt",
+            f"thaliris {operation}; Write-Output $(1)",
+        ):
+            payload["tool_input"] = powershell_command(command)
+            assert lifecycle._compound_host_maintenance_attempt(payload), command
+            assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
+    for command in (
+        "thaliris > out.txt codex-install",
+        "thaliris 2> out.txt codex-uninstall",
+        f"& '{runner}' > out.txt codex-install",
+        f"& '{runner}' 2> out.txt codex-uninstall",
+        "thaliris > $(Write-Output out.txt) codex-install",
+        "thaliris > (Join-Path $pwd out.txt) codex-uninstall",
+        f"& '{runner}' > $(Write-Output out.txt) codex-install",
+        f"& '{runner}' > (Join-Path $pwd out.txt) codex-uninstall",
+        "thaliris > 'out file.txt' codex-install",
+        "thaliris > out` file.txt codex-install",
+        "git status > $(thaliris codex-install)",
+        "git status > (thaliris codex-uninstall)",
+        'git status > "$(thaliris codex-install)"',
+        'git status > "file-$(thaliris codex-uninstall).txt"',
+        'git status > "$(Write-Output "$(thaliris codex-install)")"',
+        'git status > "$(thaliris codex-install; Write-Output \')\')"',
+        'Write-Output "outer $(thaliris codex-install) tail"',
+        'Write-Output "$(Write-Output hi; thaliris codex-uninstall)"',
+        f'git status > "file-$(& \'{runner}\' codex-install).txt"',
+        f'& \'{runner}\' 2> "$(Write-Output \'out file.txt\')" codex-uninstall',
+        "thaliris > out`>file.txt codex-install",
+        "thaliris 2>&1 codex-install",
+        "Write-Output hi > $(thaliris codex-install; 'out.txt')",
+        "Write-Output $(thaliris codex-install)",
+        'Write-Output "$(thaliris codex-uninstall)"',
+    ):
+        payload = {**direct, "tool_input": powershell_command(command)}
+        assert lifecycle._compound_host_maintenance_attempt(payload), command
+        assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI)
+    for command in (
+        "git status > out.txt",
+        'git status > "out file.txt"',
+        'git status > "file-`$(thaliris codex-install).txt"',
+        'Write-Output "`$(thaliris codex-install)"',
+        'Write-Output "escaped quote `" thaliris codex-install"',
+        "Write-Output 'it''s $(thaliris codex-install)'",
+        "git status # thaliris codex-install",
+        "Write-Output hi # ; thaliris codex-install",
+        "git status <# thaliris codex-install #>",
+        'Write-Output "$(Write-Output \'$(thaliris codex-install)\')"',
+        "Write-Output 'thaliris codex-install; git status'",
+        "thaliris > out.txt codex-install --help",
+        "git status > $(Write-Output out.txt)",
+        "Write-Output 'thaliris codex-install > out.txt'",
+        "Write-Output hi > $(Write-Output 'thaliris codex-install')",
+        'Write-Output "$(Write-Output \'thaliris codex-install\')"',
+    ):
+        payload = {**direct, "tool_input": powershell_command(command)}
+        assert not lifecycle._compound_host_maintenance_attempt(payload), command
+    source = {**direct, "tool_input": powershell_command("git status")}
+    assert lifecycle.handle_hook(tmp_path, "PreToolUse", source, lifecycle.MANAGED_HOOK_ABI) == ""
     package_code = executable.parent.parent / "Lib" / "site-packages" / "thaliris_codex" / "lifecycle.py"
     package_code.write_text("changed after install\n", encoding="utf-8")
-    maintenance = {**direct, "tool_input": {"command": f"& '{runner}' codex-install"}}
+    maintenance = {**direct, "tool_input": powershell_command(f"& '{runner}' codex-install")}
     assert "THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", maintenance, lifecycle.MANAGED_HOOK_ABI)
 
 
@@ -216,7 +361,7 @@ def test_separate_host_checkout_stays_available_when_project_is_active(tmp_path:
     }
     assert lifecycle.handle_hook(active, "PreToolUse", source_command, lifecycle.MANAGED_HOOK_ABI) == ""
     source_command["cwd"] = str(active)
-    assert "THALIRIS_ACTIVE_OWNER_REQUIRED" in lifecycle.handle_hook(active, "PreToolUse", source_command, lifecycle.MANAGED_HOOK_ABI)
+    assert lifecycle.handle_hook(active, "PreToolUse", source_command, lifecycle.MANAGED_HOOK_ABI) == ""
 
 
 def test_install_rejects_user_manifest_conflict(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
@@ -362,7 +507,15 @@ def test_host_command_rejects_tampered_script_before_dispatch(tmp_path: Path, pi
     payload = b'{"tool_name":"spawn_agent","tool_input":{}}'
     result = subprocess.run(command, shell=True, cwd=tmp_path, input=payload, capture_output=True, timeout=15)
     assert result.returncode == 0
-    assert json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    ordinary = json.loads(result.stdout)["hookSpecificOutput"]
+    assert "permissionDecision" not in ordinary
+    assert "THALIRIS_RUNTIME_DRIFT" in ordinary["additionalContext"]
+    assert b"dispatched" not in result.stdout.lower(), result.stdout
+    readonly_payload = b'{"tool_name":"spawn_agent","readonly":true,"tool_input":{}}'
+    readonly = subprocess.run(command, shell=True, cwd=tmp_path, input=readonly_payload, capture_output=True, timeout=15)
+    assert readonly.returncode == 0
+    assert json.loads(readonly.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert b"dispatched" not in readonly.stdout.lower(), readonly.stdout
     script.write_bytes(lifecycle.host_hook_script_bytes())
     accepted = subprocess.run(command, shell=True, cwd=tmp_path, input=payload, capture_output=True, timeout=15)
     assert accepted.returncode == 0

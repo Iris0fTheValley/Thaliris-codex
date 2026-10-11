@@ -1364,5 +1364,13 @@
     "git_blob": "2e092e2e9293c6b51897a83e8b5de9d8326b2225",
     "original_path": "src/thaliris/roles.py",
     "sha256": "5f352a737cb3c1702758dc8c8385ca8fdc3a27ac05752d955090f4011b737373"
+  },
+  "5f80214bb8d4ef219851405b017f660c5f8b554e:src/thaliris_codex/roles.py": {
+    "sha256": "ff2b8f758bbbbc392d338bf64151f8d3434e64ce03da119824e6e0c78963e830",
+    "git_blob": "d71e4c607ad460ce0c0b3328c5c9e2f39438f086"
+  },
+  "5f80214bb8d4ef219851405b017f660c5f8b554e:src/thaliris_codex/codex_adapter.py": {
+    "sha256": "752c9a0a7b0ea8dd8c6a3d03dbe0bece8281254df7da8b77c58938f6d4b63419",
+    "git_blob": "91f41ada8dfacdd6b06b3cf0ee80c3b854962d91"
   }
 }

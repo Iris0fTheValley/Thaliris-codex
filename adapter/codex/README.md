@@ -31,10 +31,10 @@ and [routing protocol](../../docs/thaliris-routing-protocol.md).
 Authorized parent native spawn carries the sole task-specific input. Core does not
 construct or inject a child projection. Fresh roles use V2 fork_turns="none" or
 V1 fork_context=false. The default Controller work method is delegated: a long-lived
-Controller keeps direction and acceptance, while fresh roles perform open-ended or repeated
-investigation and stable implementation. A few precise reads of known evidence and an
-explicit diagnostic are allowed; continuous small queries remain one investigation to
-delegate. Explicit user choices of `controller-direct` and `single-agent` override this
+Controller keeps direction and acceptance criteria, while fresh roles perform open-ended or repeated
+investigation and stable implementation. Ordinary Controller reads, Git and diagnostics
+are legal within the task boundary; delegation follows purpose and working set rather
+than numeric permission thresholds. Explicit user choices of `controller-direct` and `single-agent` override this
 efficiency default without changing task scope, read-only role limits or file protection.
 
 Controller may authorize multiple independent child workstreams at once, including review
@@ -59,8 +59,10 @@ observation can establish execution termination; `SubagentStop` remains optional
 wake signals or child prose alone cannot prove termination. Missing or malformed evidence
 keeps status `UNKNOWN`. The Controller can explicitly cancel or abandon the associated task
 through its bounded path without claiming child `Completed`; preserve possible shared-write
-conflicts and fence late results. The Controller independently accepts result meaning and
-quality.
+conflicts and fence late results. Final product acceptance is assigned through a separate
+explicit closing handoff to a suitable existing executor, which returns its conclusion,
+criterion-linked evidence and UNKNOWN. Controller integrates that result and records
+mechanical closure; local tests and Reviewer challenge/READY cannot replace acceptance.
 
 V1 wait_agent status maps use the exact spawned agent ID; V2 list_agents status
 entries use canonical task names. Both establish execution evidence without
@@ -128,7 +130,11 @@ Maintenance replay follows the task/session association already present in its p
 It does not infer an association from an old workspace `ACTIVE` task or another task's
 fence when the session is unassociated; Host immutable intent is checked independently.
 
-Native model defaults come from registry binding facts. Astra variants preserve role
+Ordinary native profiles omit model and effort, allowing native spawn, configuration
+and user selection while retaining role instructions and readonly boundaries. Historical
+fixed profiles remain fixed in a running Host until a separately authorized update is
+loaded. Astra selection requires current-task human opt-in; Hook restrictions on known
+child selection do not mechanically prove that human authorization. Astra variants preserve role
 identity and require current-task human authorization before Controller selection.
 Luna-only freezes task constraint/profile/config identities, forbids Astra, and checks
 Host-reported child model; missing/mismatch stays unbound and later tools are denied.

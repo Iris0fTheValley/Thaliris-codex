@@ -61,7 +61,7 @@ same-task recovery, and grants no automatic session association.
 
 Native `/root` and `primary agent` describe native tree/execution position.
 Thaliris Controller names task responsibility for goal, boundary, selected context,
-routing, evidence and final acceptance. The same actor may hold both positions;
+routing, evidence and acceptance criteria. The same actor may hold both positions;
 neither native position nor task responsibility proves admission or Host identity.
 The owning Controller is the Thaliris task owner. Parent means the immediate
 delegator; a Scanner's parent may be an Implementer, Focused Implementer or Reviewer.
@@ -162,10 +162,12 @@ hashes, attestations and lifecycle details out of that prose and report blocked 
 The Controller is the sole task-specific semantic router. Core records identities,
 revisions, hashes, provenance and observations; models decide meaning and completion.
 Native Completed proves execution closure, never child-result meaning or quality.
-Controller independently interprets the result against human acceptance before
-closing the task; SubagentStop is optional observational evidence, not another gate.
+Controller assigns final product acceptance through a separate explicit closing
+handoff to a suitable existing executor, then integrates its conclusion and records
+mechanical closure; it does not perform final acceptance itself. SubagentStop is
+optional observational evidence, not another gate.
 Follow the global startup/authority contract and the selected execution mode.
-In delegated mode, Controller owns direction, scope, acceptance, context selection
+In delegated mode, Controller owns direction, scope, acceptance criteria, context selection
 and next routing; assigned executors own implementation design and local methods.
 Controller-direct permits Controller execution with useful fresh auxiliary roles;
 single-agent permits ordinary execution without children. Isolation and readonly
@@ -174,11 +176,17 @@ to Controller; diagnose the management failure and keep assurance UNKNOWN.
 
 Choose the minimum necessary fresh role for the Workstream's work shape:
 
-| Role | Responsibility | Default native binding |
+| Role | Responsibility | Native model/effort selection |
 | --- | --- | --- |
 @ROLE_ROWS@
 
-Controller has no fixed model, effort or native profile; Host/user selection applies.
+Ordinary roles have no fixed model or effort. Generated profiles retain semantic
+instructions and readonly boundaries, while native spawn, configuration and user
+selection resolve model and effort. An omitted selection inherits the parent; an
+explicit native model selection can use its supported default effort. Select suitable
+capability for the current work and prefer lower cost when sufficient, without a
+fixed role/model map or automatic escalation by count. The installed Host may still
+have historical fixed profiles; source changes do not prove native activation.
 Investigator gathers broad facts, not architecture decisions. Reasoning Specialist
 independently challenges a decision basis when that could change direction.
 Scanner is a nested Investigator discovery working pattern. Executor is a category
@@ -186,8 +194,12 @@ covering Implementer and Focused Implementer; profiles select execution facts fo
 those same semantic roles. Stable direction and deterministic convergence use
 ordinary Implementer; coupled invariants requiring sustained reasoning use Focused
 Implementer. Choose one profile per Workstream, not a ladder or size threshold.
-Automatic routing stops at Sol; static Astra medium/xhigh profiles require current-task
-user authorization before spawn. Per-spawn model/effort overrides are denied.
+Any Astra selection requires current-task user authorization before spawn. Static
+Astra medium/xhigh compatibility profiles retain their fixed bindings; do not use
+them to bypass that authorization. Ordinary profiles allow native model/effort
+selection within the selected task constraints. Known children cannot choose Astra
+for their own delegation. This restriction does not mechanically prove current-task
+human opt-in; preserve that decision in the selected handoff.
 The dedicated luna-only installation requires `execution_constraint: luna-only`
 in the authority contract; it retains semantic roles, restricts ordinary profiles
 to Luna/xhigh, and forbids Astra. Children cannot alter the frozen constraint.
@@ -285,18 +297,31 @@ invalid freshness or resumed compaction. Near task closure, select Curator only 
 reusable knowledge has future value; supply exact prior memory, navigation and evidence.
 Keep INDEX semantic and concise. Core validates storage, never chooses relevance.
 CHANGED is an observation, not semantic invalidation; Controller decides revalidation.
-In default delegated mode, route open discovery, broad searches and large diagnostics
-to a short-lived Investigator/Scanner. Controller may read one or very few associated
-precise known-path evidence fragments for an immediate decision. Prefer catalog,
-document-get, task-get, artifact-get and controller-instructions --section; task-show
-is available for explicit diagnosis. Do not assemble a broad investigation through
-continuous small queries. Native exec_command precise file reads require a line
-slice of at most 200 lines and explicit max_output_tokens of at most 4096; that is
-an output-token bound, not a source-byte bound. Prefer the existing bounded retrieval
-endpoints. Hooks recognize this small exact-path sliced read shape; they
-cannot prove cumulative semantic scope or every third-party MCP tool's behavior.
+Default delegated routing recommends a short-lived Investigator/Scanner for open
+discovery, broad searches and large diagnostics, and an executor for substantial
+implementation. Ordinary Controller reads, Git and diagnostics are legal within the
+task boundary. Choose direct work or delegation by its purpose and working set;
+file, line, token and query counts do not grant or deny permission. Prefer catalog,
+document-get, task-get, artifact-get and exact instruction sections when useful.
+Hooks cannot prove cumulative semantic scope or every third-party MCP tool's behavior.
 
 ## Native completion and closure
+
+Final product acceptance uses a separate explicit closing handoff, not a new role
+or lifecycle stage. Select a suitable existing executor and provide the original
+user objective, acceptance criteria, exact candidate, evidence and unverified
+dependencies. The executor checks those criteria and returns a conclusion,
+criterion-linked evidence and UNKNOWN for unverified behavior. Local tests,
+native completion and an independent Reviewer's challenge/READY cannot replace
+this acceptance. Controller integrates the returned conclusion, routes unmet
+criteria or decision-changing unknowns, and records mechanical task closure when
+the original acceptance is supported. Controller does not perform final acceptance
+itself. Core task-close remains a mechanical record operation.
+This responsibility does not require a spawn in every mode. Preserve a human's
+single-agent or controller-direct selection: use an already authorized available
+executor or human acceptance. Without independent closing evidence, keep acceptance
+unverified and return the closing decision to the human; do not create a child or
+change mode automatically. Controller integration never substitutes for acceptance.
 
 Use only trusted direct runtime commands and native coordination allowed by the
 current execution mode. Native failure reconciliation needs exact trusted evidence;

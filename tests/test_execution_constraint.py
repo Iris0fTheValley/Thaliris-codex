@@ -65,7 +65,7 @@ def test_all_semantic_roles_share_constrained_execution_only():
         assert codex_adapter._agent_profile_state(value, name, "luna-only") == "current"
         assert codex_adapter._agent_profile_state(value + b"\n# user change", name, "luna-only") == "user"
     for role in ("focused-implementer", "reviewer", "reasoning-specialist"):
-        assert defaults[roles.get_codex_binding(role).profile_filename][:2] == ("gpt-6.1-sol", "high")
+        assert defaults[roles.get_codex_binding(role).profile_filename][:2] == (None, None)
     assert roles.get_codex_binding("controller").model is None
     assert not roles.repo_write_allowed("reviewer")
     assert not roles.repo_write_allowed("verifier")
@@ -84,10 +84,25 @@ def test_same_semantic_role_identity_is_admitted(constrained, role):
 def test_luna_constraint_rejects_overrides_and_astra(constrained):
     root, _ = constrained
     for model in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"):
-        assert "MODEL_OVERRIDE" in lifecycle._reserve_managed_spawn(root, spawn("focused-implementer", model=model))
+        assert "EXECUTION_CONSTRAINT" in lifecycle._reserve_managed_spawn(root, spawn("focused-implementer", model=model))
     request = spawn("focused-implementer")
     request["tool_input"]["agent_type"] = "thaliris-focused-implementer-astra-medium"
     assert "EXECUTION_CONSTRAINT" in lifecycle._reserve_managed_spawn(root, request)
+
+
+@pytest.mark.parametrize("agent_type", ["worker", "explorer", None])
+def test_human_frozen_luna_constraint_denies_unobservable_native_binding(constrained, agent_type):
+    root, _ = constrained
+    task = core._load_state(root)
+    path = lifecycle._lifecycle_path(root, task["task_id"])
+    before = path.read_bytes()
+    request = spawn("focused-implementer")
+    if agent_type is None:
+        request["tool_input"].pop("agent_type")
+    else:
+        request["tool_input"]["agent_type"] = agent_type
+    assert "EXECUTION_CONSTRAINT" in lifecycle.handle_hook(root, "PreToolUse", request)
+    assert path.read_bytes() == before
 
 
 def test_external_anchor_freezes_execution_profiles(constrained):

@@ -105,7 +105,7 @@ def test_identity_and_mode_distinctions_reach_normal_controller_context():
     for value in (controller_instructions.render(), codex_bootstrap.controller_guidance()):
         text = normalized(value)
         concepts(value, ("native /root", "primary agent", "tree/execution position"),
-                 ("controller", "goal", "boundary", "selected context", "routing", "evidence", "final acceptance"),
+                 ("controller", "goal", "boundary", "selected context", "routing", "evidence", "acceptance criteria"),
                  ("owning controller", "task owner", "parent", "immediate delegator"),
                  ("scanner", "implementer", "focused implementer", "reviewer"),
                  ("thaliris task id", "distinct", "native thread", "session", "agent ids"),
@@ -245,7 +245,7 @@ def test_profile_delegation_text_matches_role_capability(execution_constraint):
         assert "Fresh reception excludes parent conversation history" in value
         if roles.get_codex_binding(role).allowed_delegation_targets:
             assert 'fork_turns="none"' in value and "fork_context=false" in value
-            concepts(value, ("fresh investigator", "scanner", "without model/effort overrides"))
+            concepts(value, ("fresh investigator", "scanner", "selected task model constraints"))
         else:
             assert "fork_turns" not in value and "fork_context" not in value
 
@@ -255,7 +255,7 @@ def test_controller_selects_roles_and_accounts_for_goals():
     concepts(value, ("minimum necessary", "work shape", "not a ladder", "threshold"),
              ("investigator", "broad facts", "architecture"),
              ("ordinary implementer", "deterministic convergence", "focused implementer", "coupled"),
-             ("automatic routing stops at sol", "astra", "current-task", "authorization"),
+             ("no fixed model or effort", "astra", "current-task", "authorization"),
              ("luna-only", "semantic roles", "forbids astra"),
              ("every explicit user goal", "addressed", "deferred", "dependency"))
     assert not {"scanner", "executor", "astra"} & set(roles.role_choices())
@@ -267,9 +267,9 @@ def test_profile_styles_remain_specific_without_extending_endpoint():
     sol = roles.profile_instructions("focused-implementer", "thaliris-focused-implementer")
     astra = roles.profile_instructions("focused-implementer", "thaliris-focused-implementer-astra-medium")
     assert sol.startswith(base) and astra.startswith(base)
-    assert "With the Sol" in sol and "explicitly user-authorized Astra" not in sol
-    assert "explicitly user-authorized Astra" in astra and "With the Sol" not in astra
-    assert "With the Sol" not in base
+    assert "When executing with Sol" in sol and "explicitly user-authorized Astra" not in sol
+    assert "explicitly user-authorized Astra" in astra and "When executing with Sol" not in astra
+    assert "When executing with Sol" not in base
     for value in (sol, astra):
         concepts(value, ("wait only", "needed result", "unfinished", "without another wait"),
                  ("shared guidance", "cannot extend"))
@@ -385,6 +385,61 @@ def test_orchestration_predecessor_is_independently_rendered_and_filename_bound(
     assert adapter._role_pack_state(packs + b"edit") == "user"
 
 
+def test_role_model_predecessor_is_independent_and_filename_bound():
+    base = Path(__file__).parent / "fixtures/role-model-before"
+    proof = json.loads((base / "provenance.json").read_text(encoding="utf-8"))
+    revision = "5f80214bb8d4ef219851405b017f660c5f8b554e"
+    assert proof["revision"] == revision
+    module = types.ModuleType("role_model_immutable_roles")
+    sys.modules[module.__name__] = module
+    exec(compile(historical_blob(revision + ":src/thaliris_codex/roles.py"), "immutable_roles.py", "exec"), module.__dict__)
+    tree = ast.parse(historical_blob(revision + ":src/thaliris_codex/codex_adapter.py"))
+    namespace = {"roles": module, "json": json, "MANAGED_START": adapter.MANAGED_START, "MANAGED_END": adapter.MANAGED_END}
+    renderers = {"_agent_profile", "_render_managed", "_render_role_packs", "_native_profile_facts", "_native_role_labels"}
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in renderers]
+    exec(compile(ast.Module(functions, type_ignores=[]), "immutable_adapter.py", "exec"), namespace)
+    assert proof["profiles"] == adapter._ROLE_MODEL_PREDECESSOR_PROFILE_HASHES
+    for constraint in (None, "luna-only"):
+        label = constraint or "default"
+        for name, (model, effort, role) in module.agent_profiles(constraint).items():
+            raw = (base / label / name).read_bytes()
+            assert raw == namespace["_agent_profile"](name[:-5], role, model, effort)
+            assert hashlib.sha256(raw).hexdigest() == proof["profiles"][label][name]
+            assert adapter._agent_profile_state(raw, name, constraint) in {"current", "legacy"}
+            assert adapter._agent_profile_state(raw + b"\n# private edit", name, constraint) == "user"
+            other = next(candidate for candidate in proof["profiles"][label] if candidate != name)
+            assert adapter._agent_profile_state(raw, other, constraint) == "user"
+    for name, expected, state in (
+        ("managed", namespace["_render_managed"]().encode(), lambda raw: adapter._managed_agents_state(raw.decode())),
+        ("role_packs", namespace["_render_role_packs"]().encode(), adapter._role_pack_state),
+        ("role_registry", module.render_registry_document(), adapter._role_registry_state),
+    ):
+        raw = (base / (name + ".md")).read_bytes()
+        assert raw == expected
+        assert hashlib.sha256(raw).hexdigest() == proof[name + "_sha256"]
+        assert state(raw) in {"current", "legacy"}
+        edited = raw.replace(b"<!-- thaliris:end -->", b"private edit\n<!-- thaliris:end -->") if name == "managed" else raw + b"private edit"
+        assert state(edited) == "user"
+
+
+def test_explicit_closing_handoff_and_dynamic_model_selection_reach_resident_context():
+    controller = controller_instructions.render()
+    concepts(controller, ("separate explicit closing handoff", "suitable existing executor"),
+             ("original user objective", "acceptance criteria", "exact candidate"),
+             ("conclusion", "criterion-linked evidence", "unknown", "mechanical task closure"),
+             ("reviewer", "challenge", "cannot replace", "core task-close", "mechanical record"),
+             ("ordinary roles", "no fixed model or effort", "native spawn", "configuration", "user selection"),
+             ("astra", "current-task user authorization", "luna-only", "frozen constraint"))
+    concepts(controller, ("does not require a spawn in every mode", "single-agent", "controller-direct"),
+             ("already authorized available executor", "human acceptance", "unverified", "closing decision"),
+             ("do not create a child", "change mode automatically"))
+    require_local_prohibition(controller, action="perform", target="acceptance")
+    assert "200 lines" not in controller and "4096" not in controller
+    for role in ("implementer", "focused-implementer"):
+        concepts(prompt(role), ("explicit closing handoff", "final product acceptance", "original objective"),
+                 ("conclusion", "criterion-linked evidence", "unknown", "controller integrates", "mechanical closure"))
+
+
 def test_resident_waiting_observation_and_causal_contract_rejects_negation_reversal():
     value = controller_instructions.render()
     for text in (value, prompt("implementer"), prompt("focused-implementer")):
@@ -404,7 +459,8 @@ def test_resident_waiting_observation_and_causal_contract_rejects_negation_rever
              ("selected candidate", "criteria", "final product acceptance"),
              ("complete normal task context", "retrieval cost", "quality"))
     concepts(value, ("known unfinished necessary child", "after final", "decision-changing unknown", "another wait"),
-             ("precise known-path", "very few", "continuous small queries", "broad investigation"))
+             ("ordinary controller reads", "git", "diagnostics", "legal", "task boundary"),
+             ("line", "token", "query", "counts", "permission"))
     assert set(controller_instructions.RESIDENT_SECTIONS).isdisjoint({"task-recovery", "host-maintenance"})
 
 

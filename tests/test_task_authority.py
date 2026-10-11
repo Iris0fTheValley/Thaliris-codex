@@ -15,6 +15,7 @@ def workspace(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "host"))
     monkeypatch.setattr(task_authority, "directory", lambda: tmp_path / "external")
     observed = lifecycle.managed_executable_health()
     monkeypatch.setattr(lifecycle, "managed_executable_health", lambda: {**observed, "canonical_executable_available": "YES"})
@@ -142,11 +143,63 @@ def test_explicit_execution_overrides_allow_ordinary_work_and_close_without_spaw
     assert task_authority.read(workspace)["status"] == "DONE"
 
 
-def test_default_routing_and_closure_are_unchanged(workspace):
+def test_default_delegation_guidance_does_not_gate_ordinary_execution(workspace):
     start(workspace)
-    assert "CONTROLLER_BOUNDARY" in lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, "pytest tests/test_example.py"), lifecycle.MANAGED_HOOK_ABI)
+    for command in ("pytest tests/test_example.py", "git status", "git diff", "git commit -m repair",
+                    "Get-Content src/example.py", "Set-Content src/example.py fixed"):
+        assert lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, command), lifecycle.MANAGED_HOOK_ABI) == ""
     with pytest.raises(ValueError, match="task-close requires"):
         codex_adapter.task_close(workspace, 1)
+
+
+def test_healthy_hook_blocks_reviewer_git_commit_and_host_profile_patches(workspace):
+    start(workspace)
+    _spawn(workspace, role="reviewer")
+    child = {"cwd": str(workspace), "session_id": "first", "turn_id": "reviewer-turn",
+        "agent_id": "reviewer", "agent_type": "thaliris-reviewer", "tool_name": "Bash",
+        "tool_input": {"command": "git commit -m changed"}}
+    assert lifecycle._record_subagent_start(workspace, child)
+    assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", child, lifecycle.MANAGED_HOOK_ABI)
+
+    home = Path(os.environ["CODEX_HOME"])
+    for path in (home / "agents/thaliris-controller.toml",
+                 home / "thaliris-host-generations/g1/config.toml"):
+        patch_call = {"cwd": str(workspace), "session_id": "first", "tool_name": "apply_patch",
+            "tool_input": {"patch": f"*** Update File: {path}\n+changed"}}
+        result = lifecycle.handle_hook(workspace, "PreToolUse", patch_call, lifecycle.MANAGED_HOOK_ABI)
+        assert "CONTROL_STATE_DIRECT_WRITE" in result
+
+    source_patch = {"cwd": str(workspace), "session_id": "first", "tool_name": "apply_patch",
+        "tool_input": {"patch": "*** Update File: src/example.py\n+changed"}}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", source_patch, lifecycle.MANAGED_HOOK_ABI) == ""
+
+
+def test_damaged_agent_navigation_keeps_known_reviewer_peer_message_denied(workspace):
+    started = start(workspace)
+    _spawn(workspace, role="reviewer")
+    child = {"session_id": "first", "turn_id": "reviewer-turn", "agent_id": "reviewer",
+        "agent_type": "thaliris-reviewer"}
+    assert lifecycle._record_subagent_start(workspace, child)
+    assert task_authority.check(workspace)["task_id"] == started["task_id"]
+    assert core._load_state(workspace, active=True)["task_id"] == started["task_id"]
+    lifecycle_path = lifecycle._lifecycle_path(workspace, started["task_id"])
+    assert lifecycle._load_lifecycle(lifecycle_path, started["task_id"])["children"][0]["handoff_bound"] is True
+
+    agent_hash = lifecycle._identity_hash("reviewer")
+    agent_association = lifecycle._association_path(workspace, agent_hash, "agent")
+    agent_association.write_bytes(b"{damaged agent navigation only")
+    core.select_task(workspace, None)
+    assert core.selected_task(workspace) is None
+
+    call = {"cwd": str(workspace), "session_id": "first", "turn_id": "reviewer-turn",
+        "agent_id": "reviewer", "tool_name": "send_message",
+        "tool_input": {"target": "ordinary-peer", "message": "continue independent work"}}
+    assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", call, lifecycle.MANAGED_HOOK_ABI)
+    assert core.selected_task(workspace) is None
+
+    unknown = {**call, "agent_id": "ordinary-agent"}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", unknown, lifecycle.MANAGED_HOOK_ABI) == ""
+    assert core.selected_task(workspace) is None
 
 
 @pytest.mark.parametrize("with_stop", [False, True])
@@ -277,9 +330,8 @@ def test_delegated_controller_can_coordinate_separate_codex_session(workspace, t
         # coordination authority and remains unavailable to known children.
         assert ("deny" in observed) if tool.endswith("create_thread") else observed == ""
     impostor = {**value, "tool_name": "mcp__unrelated__" + tool.rsplit("__", 1)[-1]}
-    assert "CONTROLLER_BOUNDARY" in lifecycle.handle_hook(workspace, "PreToolUse", impostor, lifecycle.MANAGED_HOOK_ABI)
-    for denied in ("Bash", "send_message", "mcp__codex_app__send_message_to_thread"):
-        assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", {**value, "tool_name": denied}, lifecycle.MANAGED_HOOK_ABI)
+    assert lifecycle.handle_hook(workspace, "PreToolUse", impostor, lifecycle.MANAGED_HOOK_ABI) == ""
+    assert lifecycle.handle_hook(workspace, "PreToolUse", {**value, "tool_name": "send_message"}, lifecycle.MANAGED_HOOK_ABI) == ""
 
 
 @pytest.mark.parametrize("actor", [{"readonly": True}, {"fenced": True}])
@@ -400,26 +452,111 @@ def test_same_session_new_task_does_not_inherit_or_guess_old_reservation(workspa
     assert ledger["pending_authorized_spawn"] is None
 
 
-@pytest.mark.parametrize("count,limit,allowed", [(10, 128, True), (1, 128, True),
-    (1000000000, 128, False), (201, 128, False), (10, None, False), (10, 1000000000, False)])
-def test_precise_controller_read_requires_small_slice_and_native_output_cap(workspace, count, limit, allowed):
+@pytest.mark.parametrize("count,limit", [(10, 128), (1, 128), (201, 128), (10, None), (10, 8192)])
+def test_controller_reads_are_not_mechanically_limited(workspace, count, limit):
     start(workspace)
     call = payload(workspace, f"Get-Content README.md -TotalCount {count}")
     call["tool_name"] = "functions.exec_command"
     if limit is not None:
         call["tool_input"]["max_output_tokens"] = limit
     result = lifecycle.handle_hook(workspace, "PreToolUse", call)
-    assert (result == "") == allowed
+    assert result == ""
 
 
-@pytest.mark.parametrize("command", ["Get-Content (dir) -TotalCount 10",
-    "Get-Content @(dir) -TotalCount 10", "Get-Content README.md -TotalCount " + "9" * 5000])
-def test_precise_read_rejects_shell_path_discovery_and_unbounded_numeric_text(workspace, command):
+@pytest.mark.parametrize("command", ["Get-Content (dir) -TotalCount 10", "rg --files src", "rg -n known_symbol src"])
+def test_controller_discovery_tools_remain_available(workspace, command):
     start(workspace)
     call = payload(workspace, command)
     call["tool_name"] = "functions.exec_command"
     call["tool_input"]["max_output_tokens"] = 128
+    assert lifecycle.handle_hook(workspace, "PreToolUse", call) == ""
+
+
+@pytest.mark.parametrize("agent_type", ["worker", "explorer", None])
+def test_unknown_actor_active_native_spawn_is_ordinary_and_cannot_consume_managed_handoff(workspace, agent_type):
+    started = start(workspace)
+    _spawn(workspace)
+    path = lifecycle._lifecycle_path(workspace, started["task_id"])
+    before = path.read_bytes()
+    tool_input = {"message": "Independent native work", "fork_turns": "all", "model": "native-selection"}
+    if agent_type is not None:
+        tool_input["agent_type"] = agent_type
+    call = {"session_id": "first", "tool_name": "spawn_agent", "tool_input": tool_input}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", call) == ""
+    lifecycle.handle_hook(workspace, "PostToolUse", {**call, "tool_response": {"agent_id": "ordinary-child", "nickname": None}})
+    assert path.read_bytes() == before
+    child = {"session_id": "first", "agent_id": "ordinary-child", "agent_type": agent_type or "default"}
+    assert lifecycle.handle_hook(workspace, "SubagentStart", child) == ""
+    assert path.read_bytes() == before
+    for tool in ("send_message", "followup_task", "send_input", "interrupt_agent", "close_agent", "wait_agent", "list_agents"):
+        coordination = {"session_id": "first", "tool_name": tool,
+            "tool_input": {"target": "ordinary-child", "id": "ordinary-child", "message": "Selected supplement"}}
+        assert lifecycle.handle_hook(workspace, "PreToolUse", coordination) == ""
+        lifecycle.handle_hook(workspace, "PostToolUse", {**coordination, "tool_response": {"previous_status": {"completed": "native result"}}})
+        assert path.read_bytes() == before
+    for command in ("Set-Content example.py changed", "git status"):
+        assert lifecycle.handle_hook(workspace, "PreToolUse", {**child,
+            "tool_name": "Bash", "tool_input": {"command": command}}) == ""
+    assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", {**child,
+        "tool_name": "Bash", "tool_input": {"command": "thaliris task-update --role controller --base-revision 1 --input packet.json"}})
+    assert lifecycle._load_lifecycle(path, started["task_id"])["pending_authorized_spawn"] is not None
+
+
+@pytest.mark.parametrize("damage", ["none", "association", "authority"])
+def test_unknown_ordinary_native_spawn_survives_damaged_control_evidence(workspace, damage):
+    start(workspace)
+    if damage == "association":
+        lifecycle._association_path(workspace, lifecycle._identity_hash("first"), "session").write_text("{broken")
+    elif damage == "authority":
+        task_authority.path(workspace).write_text("{broken")
+    call = {"cwd": str(workspace), "session_id": "first", "tool_name": "spawn_agent",
+        "tool_input": {"agent_type": "worker", "message": "Independent native source repair"}}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", call) == ""
+    call["tool_input"]["agent_type"] = "thaliris-implementer"
     assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", call)
+
+
+@pytest.mark.parametrize("tool,response", [
+    ("wait_agent", {"status": {"ordinary-child": {"completed": "native result"}}, "timed_out": False}),
+    ("list_agents", {"agents": [{"agent_name": "ordinary-child", "agent_status": {"completed": "native result"}}]}),
+])
+def test_native_ordinary_completion_shapes_do_not_release_managed_reservation(workspace, tool, response):
+    started = start(workspace)
+    _spawn(workspace)
+    path = lifecycle._lifecycle_path(workspace, started["task_id"])
+    before = path.read_bytes()
+    call = {"session_id": "first", "tool_name": tool, "tool_input": {"targets": ["ordinary-child"]}}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", call) == ""
+    assert lifecycle.handle_hook(workspace, "PostToolUse", {**call, "tool_response": response}) == ""
+    assert path.read_bytes() == before
+    assert lifecycle._load_lifecycle(path, started["task_id"])["pending_authorized_spawn"] is not None
+
+
+@pytest.mark.parametrize("damage", [False, True])
+def test_known_managed_child_cannot_downgrade_peer_messaging_by_omitting_profile(workspace, damage):
+    start(workspace)
+    _spawn(workspace)
+    child = {"session_id": "first", "turn_id": "child-turn", "agent_id": "child", "agent_type": "thaliris-implementer"}
+    assert lifecycle._record_subagent_start(workspace, child)
+    child.pop("agent_type")
+    if damage:
+        task_authority.path(workspace).write_text("{broken")
+    assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", {**child, "tool_name": "send_message",
+        "tool_input": {"target": "ordinary-peer", "message": "new work"}})
+
+
+def test_stale_active_task_and_foreign_cwd_do_not_require_recovery_for_native_repair(workspace):
+    started = start(workspace)
+    old_state = core._state_path(workspace, started["task_id"]).read_bytes()
+    other = workspace / "independent"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    call = {"cwd": str(other), "session_id": "first", "tool_name": "spawn_agent",
+        "tool_input": {"agent_type": "worker", "message": "Independent repair"}}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", call) == ""
+    assert lifecycle.handle_hook(workspace, "PreToolUse", payload(other, "git status")) == ""
+    assert core._state_path(workspace, started["task_id"]).read_bytes() == old_state
+    assert not (other / ".context/audit/lifecycle").exists()
 
 
 @pytest.mark.parametrize("missing", ["session_id", "turn_id", "agent_type"])

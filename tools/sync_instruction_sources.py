@@ -15,12 +15,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--core-root", type=Path, help="also sync the Core repository managed AGENTS span")
+    parser.add_argument("--core-routing-root", type=Path, help="copy shared Core routing docs without replacing Core AGENTS")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     outputs = {
         "AGENTS.md": codex_adapter.render_managed(),
         "docs/thaliris-controller.md": controller_instructions.render(),
         "docs/thaliris-role-packs.md": codex_adapter.render_role_packs(),
+        "docs/thaliris-role-registry.md": roles.render_registry_document().decode("utf-8"),
     }
     drift = []
     for name, expected in outputs.items():
@@ -47,15 +49,17 @@ def main() -> int:
             drift.append(relative)
             if not args.check:
                 path.write_bytes(expected)
-    if args.core_root is not None:
+    routing_root = args.core_routing_root or args.core_root
+    if routing_root is not None:
         # Shared semantics are authored in Core; this adapter reference is a copy.
-        source = args.core_root / "docs/thaliris-routing-protocol.md"
+        source = routing_root / "docs/thaliris-routing-protocol.md"
         path = root / "docs/thaliris-routing-protocol.md"
         expected = source.read_bytes()
         if path.read_bytes() != expected:
             drift.append("docs/thaliris-routing-protocol.md")
             if not args.check:
                 path.write_bytes(expected)
+    if args.core_root is not None:
         path = args.core_root / "AGENTS.md"
         current = path.read_text(encoding="utf-8")
         span = codex_adapter._managed_span(current, "Core AGENTS.md")

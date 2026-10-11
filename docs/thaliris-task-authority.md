@@ -78,8 +78,9 @@ exact identity-bound native Completed evidence from a V1 wait status map or V2 l
 descendants, unbound children or conflicting identities/statuses. This is the same
 execution distinction used in delegated mode: SubagentStop is optional observation,
 and missing/delayed Stop cannot veto proved native completion. Stop, wake signals
-or result prose alone cannot prove completion. Controller semantic acceptance
-remains independent in every mode.
+or result prose alone cannot prove completion. Final product acceptance remains
+separate from native completion; Controller integrates the explicit closing
+handoff result and records mechanical closure.
 The accepted Completed payload is exactly `{"completed": <string or null>}`;
 null proves execution completion without result text and never supplies semantic
 acceptance. Other value types, extra fields and unsupported shapes remain UNKNOWN. A

@@ -15,7 +15,7 @@ import types
 import pytest
 
 from thaliris import core
-from thaliris_codex import cli, codex_adapter, lifecycle, roles
+from thaliris_codex import cli, codex_adapter, lifecycle, roles, task_authority
 
 
 def _sentinel_definition() -> roles.RoleDefinition:
@@ -66,7 +66,7 @@ def test_registry_is_authoritative_for_native_profiles_and_mechanical_facts() ->
         assert definition.native_profile == f"thaliris-{definition.id}"
         assert definition.profile_filename == f"thaliris-{definition.id}.toml"
         assert definition.instructions
-        assert definition.reasoning_effort
+        assert definition.default_model is None and definition.reasoning_effort is None
         assert definition.legacy_profile_hashes or definition.id == "focused-implementer"
     assert roles.native_agent_roles() == {
         profile: definition.id for definition in native
@@ -87,21 +87,17 @@ def test_registry_is_authoritative_for_native_profiles_and_mechanical_facts() ->
     assert roles.notice_roles() == {"curator", "reasoning-specialist", "verifier", "reviewer"}
 
 
-def test_profile_defaults_and_static_astra_selection_are_fixed() -> None:
-    assert codex_adapter._ROLE_MODEL_DEFAULTS == {
-        "controller": (None, None),
-        "investigator": ("gpt-6-luna", "xhigh"),
-        "curator": ("gpt-6-luna", "xhigh"),
-        "reasoning-specialist": ("gpt-6.1-sol", "high"),
-        "implementer": ("gpt-6-luna", "xhigh"),
-        "focused-implementer": ("gpt-6.1-sol", "high"),
-        "verifier": ("gpt-6-luna", "xhigh"),
-        "reviewer": ("gpt-6.1-sol", "high"),
-    }
+def test_ordinary_profiles_inherit_selection_and_static_astra_profiles_stay_fixed() -> None:
+    assert codex_adapter._ROLE_MODEL_DEFAULTS == {role: (None, None) for role in roles.role_choices()}
     assert len(roles.native_codex_role_map()) == len(set(roles.native_codex_role_map()))
     for name, (model, effort, role) in roles.agent_profiles().items():
         value = tomllib.loads(codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode())
-        assert (value["name"], value["model"], value["model_reasoning_effort"]) == (name.removesuffix(".toml"), model, effort)
+        assert value["name"] == name.removesuffix(".toml")
+        if model is None:
+            assert "model" not in value and "model_reasoning_effort" not in value
+        else:
+            assert (value["model"], value["model_reasoning_effort"]) == (model, effort)
+        assert roles.repo_write_allowed(role) is (role not in {"reviewer", "verifier"})
         assert roles.resolve_native_profile(value["name"]).id == role
         assert value["developer_instructions"] == roles.profile_instructions(role, name.removesuffix(".toml"))
         assert "Never select your own model or reasoning effort" not in value["developer_instructions"]
@@ -116,6 +112,51 @@ def test_profile_defaults_and_static_astra_selection_are_fixed() -> None:
             name = f"thaliris-{role}-{suffix}.toml"
             assert roles.agent_profiles()[name] == ("gpt-6-astra", effort, role)
             assert codex_adapter._KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(name, frozenset())
+    for name, (model, effort, role) in roles.agent_profiles("luna-only").items():
+        value = tomllib.loads(codex_adapter._agent_profile(name[:-5], role, model, effort).decode())
+        expected = ("gpt-6-astra", effort) if "astra-medium" in name or name.endswith("-xhigh.toml") else ("gpt-6-luna", "xhigh")
+        assert (value["model"], value["model_reasoning_effort"]) == expected
+
+
+@pytest.mark.parametrize("constraint", [None, "luna-only"])
+def test_fixed_predecessor_profile_upgrade_preserves_user_edits(tmp_path, monkeypatch, pinned_test_thaliris, constraint):
+    base = Path(__file__).parent / "fixtures/role-model-before" / (constraint or "default")
+    home = tmp_path / "host"
+    agents = home / "agents"
+    agents.mkdir(parents=True)
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    for source in base.glob("*.toml"):
+        (agents / source.name).write_bytes(source.read_bytes())
+    assert codex_adapter._installed_execution_constraint() == constraint
+    edited_name = "thaliris-reviewer.toml"
+    edited = (agents / edited_name).read_bytes() + b"\n# user-owned change\n"
+    (agents / edited_name).write_bytes(edited)
+    before = {p.name: p.read_bytes() for p in agents.iterdir()}
+    result = authorized_host_install(tmp_path, pinned_test_thaliris, execution_constraint=constraint,
+        _legacy_owned_bytes=legacy_file_hashes(home, ["agents/" + name for name in before if name != edited_name]))
+    assert any(str(agents / edited_name) in item for item in result["manual_action_required"])
+    assert {p.name: p.read_bytes() for p in agents.iterdir()} == before
+    (agents / edited_name).write_bytes((base / edited_name).read_bytes())
+    result = authorized_host_install(tmp_path, pinned_test_thaliris, execution_constraint=constraint,
+        _legacy_owned_bytes=legacy_file_hashes(home, ["agents/" + name for name in before]))
+    assert not result["manual_action_required"]
+    for name, (model, effort, role) in roles.agent_profiles(constraint).items():
+        assert (agents / name).read_bytes() == codex_adapter._agent_profile(name[:-5], role, model, effort)
+    assert codex_adapter._installed_execution_constraint() == constraint
+
+
+def test_predecessor_partial_luna_refuses_but_default_luna_bytes_do_not_invent_constraint(tmp_path, monkeypatch):
+    base = Path(__file__).parent / "fixtures/role-model-before"
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    name = "thaliris-investigator.toml"
+    (agents / name).write_bytes((base / "default" / name).read_bytes())
+    assert codex_adapter._installed_execution_constraint() is None
+    name = "thaliris-reasoning-specialist.toml"
+    (agents / name).write_bytes((base / "luna-only" / name).read_bytes())
+    with pytest.raises(ValueError, match="EXECUTION_PROFILE_CONSTRAINT_MISMATCH"):
+        codex_adapter._installed_execution_constraint()
 
 
 def test_ba84553_profiles_migrate_by_exact_filename_and_preserve_edits(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
@@ -644,12 +685,19 @@ def test_new_registry_role_appears_in_active_spawn_isolation_diagnostic(tmp_path
     root = _initialized_repo(tmp_path)
     started = core.task_start(root, "registry diagnostic", None, None)
     session_id = "registry-controller-session"
+    monkeypatch.setattr(task_authority, "directory", lambda: tmp_path.parent / "registry-authority")
+    task_authority.establish(root, core._load_state(root), {
+        "human_instruction": "Exercise registered profile isolation diagnostics",
+        "boundary": "Synthetic registry fixture",
+        "invariants": "Named managed profiles require fresh isolation",
+        "acceptance": "Diagnostic includes the registered role",
+    }, hashlib.sha256(session_id.encode()).hexdigest())
     lifecycle.record_task_start_owner(root, started["task_id"], hashlib.sha256(session_id.encode()).hexdigest())
 
     denied = lifecycle._pre_tool_output(root=root, payload={
         "session_id": session_id,
         "tool_name": "spawn_agent",
-        "tool_input": {"fork_turns": "all"},
+        "tool_input": {"agent_type": "thaliris-sentinel", "fork_turns": "all"},
     })
 
     reason = json.loads(denied)["hookSpecificOutput"]["permissionDecisionReason"]
