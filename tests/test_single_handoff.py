@@ -2895,7 +2895,7 @@ def test_v1_wait_native_completed_closes_without_list_or_stop(tmp_path, result):
         "agent_id": "v1-agent-id", "nickname": None}}) == ""
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id="v1-agent-id", agent_type="worker")) == ""
     assert handle_hook(root, "PostToolUse", hook_payload(tool_name="wait_agent",
-        tool_input={"targets": ["v1-agent-id"], "timeout_ms": 30000},
+        tool_input={"targets": ["v1-agent-id"], "timeout_ms": 3600000},
         tool_response=json.dumps({"status": {"v1-agent-id": {"completed": result}}, "timed_out": False}))) == ""
     child = lifecycle(root)["children"][-1]
     assert child["native_terminal_source"] == "wait_agent"
@@ -3073,6 +3073,9 @@ def test_v1_close_does_not_replace_completion_observation(tmp_path):
     ({"status": {"v1-agent-id": {"completed": None}}, "timed_out": "false"}, ["v1-agent-id"]),
     ({"status": {"v1-agent-id": {"completed": None}}}, ["v1-agent-id"]),
     ({"message": "Wait completed.", "timed_out": False}, ["v1-agent-id"]),
+    ({"message": "Ordinary child progress message.", "timed_out": False}, ["v1-agent-id"]),
+    ({"status": {"v1-agent-id": "running"}, "timed_out": True}, ["v1-agent-id"]),
+    ({"status": {}, "timed_out": True}, ["v1-agent-id"]),
     ({"status": {"v1-agent-id": {"completed": None}}, "timed_out": False}, []),
 ])
 def test_v1_wait_rejects_unbound_or_wake_only_evidence(tmp_path, response, targets):

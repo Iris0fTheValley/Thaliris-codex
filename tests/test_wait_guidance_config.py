@@ -11,6 +11,16 @@ from thaliris_codex import host_transition, wait_guidance_config as guidance
 from tests.test_host_maintenance_contract import intent
 
 
+PRE_EVENT_FIRST_GUIDANCE = (
+    "When awaiting a necessary native subagent, the general 60-second blocking-wait "
+    "recommendation is not a fixed timeout limit. Choose an event-aware wait duration "
+    "informed by the expected task, which may take several minutes or longer. Prefer "
+    "native completion events over short polling loops. A timeout alone is not progress. "
+    "Avoid unnecessary model wakeups and preserve responsiveness to interruptions and "
+    "substantive events."
+)
+
+
 @pytest.fixture
 def target(tmp_path, monkeypatch, pinned_test_thaliris):
     home = tmp_path / "home"
@@ -89,7 +99,7 @@ def test_user_edit_to_managed_guidance_survives_upgrade_and_uninstall(tmp_path, 
     assert install(tmp_path, target)["ok"]
     edited_value = guidance.GUIDANCE + " User addition."
     raw = (home / "config.toml").read_bytes()
-    edited = raw.replace(guidance.GUIDANCE.encode(), edited_value.encode(), 1)
+    edited = raw.replace(json.dumps(guidance.GUIDANCE).encode(), json.dumps(edited_value).encode(), 1)
     (home / "config.toml").write_bytes(edited)
 
     upgraded = install(tmp_path, target)
@@ -101,12 +111,13 @@ def test_user_edit_to_managed_guidance_survives_upgrade_and_uninstall(tmp_path, 
     assert (home / "config.toml").read_bytes() == edited
 
 
-def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(tmp_path, target, monkeypatch):
+@pytest.mark.parametrize("upgrade", [False, True], ids=["direct-old-uninstall", "upgrade-then-uninstall"])
+def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(tmp_path, target, monkeypatch, upgrade):
     home, _ = target
     original = b'# user config\r\n[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\r\n'
     (home / "config.toml").write_bytes(original)
-    old_guidance = guidance.GUIDANCE + " Previous wording."
-    current_guidance = guidance.GUIDANCE + " Current wording."
+    old_guidance = PRE_EVENT_FIRST_GUIDANCE
+    current_guidance = guidance.GUIDANCE
     monkeypatch.setattr(guidance, "GUIDANCE", old_guidance)
 
     first = install(tmp_path, target)
@@ -117,11 +128,12 @@ def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(t
     assert tomllib.loads(managed_bytes.decode())[guidance.KEY] == old_guidance
 
     monkeypatch.setattr(guidance, "GUIDANCE", current_guidance)
-    upgraded = install(tmp_path, target)
-    assert upgraded["ok"], upgraded
-    assert upgraded["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
-    assert (home / "config.toml").read_bytes() == managed_bytes
-    assert receipt(home)[guidance.RECORD_KEY] == old_record
+    if upgrade:
+        upgraded = install(tmp_path, target)
+        assert upgraded["ok"], upgraded
+        assert upgraded["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
+        assert (home / "config.toml").read_bytes() == managed_bytes
+        assert receipt(home)[guidance.RECORD_KEY] == old_record
 
     removed = uninstall(tmp_path, target)
     assert removed["ok"], removed
@@ -135,8 +147,8 @@ def test_user_edit_to_historical_template_is_not_reclaimed_on_upgrade_or_uninsta
     original = b'[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\n'
     (home / "config.toml").write_bytes(original)
     baseline_guidance = guidance.GUIDANCE
-    old_guidance = baseline_guidance + " Previous wording."
-    current_guidance = baseline_guidance + " Current wording."
+    old_guidance = PRE_EVENT_FIRST_GUIDANCE
+    current_guidance = baseline_guidance
     monkeypatch.setattr(guidance, "GUIDANCE", old_guidance)
     first = install(tmp_path, target)
     assert first["ok"], first
@@ -198,15 +210,26 @@ def test_invalid_ownership_record_is_not_hidden_by_optional_config_read_error(tm
         guidance.plan_install(home, {guidance.RECORD_KEY: record})
 
 
-def test_guidance_matches_the_accepted_waiting_text():
-    assert guidance.GUIDANCE == (
-        "When awaiting a necessary native subagent, the general 60-second blocking-wait "
-        "recommendation is not a fixed timeout limit. Choose an event-aware wait duration "
-        "informed by the expected task, which may take several minutes or longer. Prefer "
-        "native completion events over short polling loops. A timeout alone is not progress. "
-        "Avoid unnecessary model wakeups and preserve responsiveness to interruptions and "
-        "substantive events."
-    )
+def test_guidance_matches_the_accepted_waiting_priorities():
+    text = guidance.GUIDANCE
+    for clause in (
+        "Prefer event-driven native wait_agent waiting over timed polling",
+        "First confirm", "unconfirmed capabilities remain UNKNOWN",
+        "When meaningful-event early return is confirmed and no dependency needs an interim decision",
+        "default to the supported 60-minute window (timeout_ms=3600000)",
+        "not a required execution duration", "native completion wakes Controller early",
+        "Short historical averages must not force an earlier wake",
+        "60 seconds for very short tasks", "10–60 minutes for ordinary tasks",
+        "about 30 minutes for longer-task stage checks",
+        "reliable events without interim decisions still favor 60 minutes",
+        "higher-level duration limits", "take precedence", "never bypass Host limits",
+        "messages and timeouts do not prove completion", "one available exact native status check",
+        "without confirming the same completion again", "Do not substitute sleep",
+        "per-child timed polling loops", "Executors own local tests and CI",
+        "independent closing owns final acceptance",
+    ):
+        assert clause in text
+    assert "general 60-second blocking-wait recommendation" not in text
 
 
 @pytest.mark.parametrize("reported,supported", [

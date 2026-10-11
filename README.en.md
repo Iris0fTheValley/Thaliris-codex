@@ -273,18 +273,28 @@ invariant has one normal runtime authority; rationale and mechanical design live
 Each necessary dependency has one observation owner: executors run/wait on their tests,
 processes and CI; Controller waits only for a known unfinished child result that remains
 necessary, without checking the same job again. A child FINAL or a decision-changing
-unknown ends that slice; do not keep waiting for it. Choose waiting by available capability,
-meaningful event, dependency and expected task duration; tool maximum is capacity, not a
-default duration. A general recommendation to limit blocking waits to 60 seconds is not an
-intrinsic cap on an event-capable native `wait_agent`; only an explicit applicable
-higher-level limit imposes that bound. Otherwise choose an event-aware window for the
-expected task, which may take several minutes or longer. Prefer native completion events
-over short polling loops, and preserve responsiveness to interruptions and substantive
-events. Do not use `sleep` instead of native waiting or impose one fixed timeout across
-tasks. A timeout alone adds no evidence; continue only while the child remains a necessary
-unfinished dependency, without status snapshots or reasoning rounds for unchanged state. A wake-only V2 `wait_agent` is not
-completion evidence; use one `list_agents` snapshot after a meaningful wake. The Hook
-preserves caller wait arguments. Independent Task IDs may proceed in parallel. Within one
+unknown ends that slice; do not keep waiting for it. Event-driven waiting takes precedence
+over timed polling. First confirm the current Host's actual maximum, meaningful-event
+early return, user interruption and child notifications during waiting; unconfirmed
+capabilities remain UNKNOWN. With confirmed meaningful-event early return and no interim
+dependency decision, default to the supported 60-minute window (`timeout_ms=3600000`).
+This is a maximum waiting window, not a required execution duration: native completion
+wakes Controller early and its result is used directly. A short historical average must
+not force an earlier wake. When timed stage checks are necessary or early return is
+unreliable, recommend 60 seconds for very short tasks, 10–60 minutes for ordinary tasks by
+work scale, and about 30 minutes for longer-task stage checks. Reliable events without
+interim decisions still favor 60 minutes. Actual tool limits, explicit applicable
+higher-level limits, user interruption, recovery and urgent decisions take precedence;
+never bypass or change Host internals to extend a shorter maximum.
+
+Native terminal events, ordinary child messages and timeouts are distinct evidence:
+messages and timeouts do not prove completion. Do not substitute `sleep`, add progress
+pollers or create per-child timed polling loops; wait for native events that can change
+the current decision. Continue waiting only for a necessary unfinished dependency,
+without snapshots or reasoning for unchanged state. A wake-only V2 result needs one
+available exact native status check (such as `list_agents`); proved completion needs no
+second confirmation. The Hook preserves caller wait arguments and does not extend them
+automatically. Independent Task IDs may proceed in parallel. Within one
 Task ID, multiple bound children may run simultaneously, with at most one unbound dispatch
 reservation awaiting association. The Controller chooses parallel work from its dependencies;
 overlapping writes in one worktree need coordination, while independent worktrees can carry

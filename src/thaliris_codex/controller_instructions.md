@@ -329,23 +329,36 @@ timeouts, not_found and prose are not death proof. Explicit dependency dispositi
 may end management without proving termination. Wait only for
 a known unfinished necessary child. After FINAL, use its result; a decision-changing
 unknown returns the decision to Controller and does not trigger another wait or
-repeated recovery of the old task. Choose waiting from the available capability,
-expected meaningful event and necessary dependency; prefer native notifications.
-The tool maximum is capacity, not a recommended duration. Higher-level duration
-limits take precedence; do not impose a universal maximum or fixed wait duration.
+repeated recovery of the old task. Event-driven waiting takes precedence over timed
+polling. First confirm the current Host's actual wait tool maximum and whether it
+returns early for meaningful native events, accepts user interruption and delivers
+child notifications during waiting; do not infer these capabilities from source
+instructions or another Host version. If meaningful-event early return is confirmed
+and no dependency needs an interim decision, default to the supported 60-minute
+window (`timeout_ms=3600000`). This is a maximum waiting window, not a required child
+execution duration: native completion wakes Controller early and its result is used
+directly. A shorter historical average must not force an earlier Controller wake.
+When a timed stage check is actually needed or event early return is unreliable,
+recommend 60 seconds for very short tasks, 10–60 minutes for ordinary tasks according
+to work scale, and about 30 minutes for a longer task's stage check. Reliable events
+with no interim decision still take precedence and favor the 60-minute window.
+Actual tool limits, explicit applicable higher-level duration limits, user
+interruption, recovery and urgent decisions take precedence over these defaults;
+honor a shorter actual maximum without changing or bypassing Host internals.
+Unsupported or unconfirmed wake capabilities remain UNKNOWN; use the applicable
+timed-check recommendation within the real tool limit rather than assuming early return.
 Give each necessary dependency one observation owner: executors run and wait on
 their own tests/processes/CI and report substantive changes or terminal evidence;
 Controller waits for the necessary child result without rechecking the same job.
 Do not poll a finished child or create repeated reasoning turns solely to observe
 unchanged deterministic state when the runtime can wait for a meaningful or terminal
 event. Do not repeatedly set `wait_agent` to its shortest supported interval, and do
-not substitute `sleep` for native waiting. A general recommendation to limit blocking
-waits to 60 seconds is not an intrinsic cap on an event-capable native `wait_agent`;
-only an explicit applicable higher-level limit imposes that bound. Otherwise choose an
-event-aware wait duration informed by the expected task, which may take several minutes
-or longer. Prefer native completion events over short polling loops, and preserve
-responsiveness to interruptions and substantive events. Do not impose one fixed timeout
-across tasks. A timeout alone creates no new decision or evidence and does not justify
+not substitute `sleep` for native waiting, add a progress poller or give each parallel
+child its own timed polling loop. Wait for native events that can change the current
+decision across necessary parallel children. Do not impose one fixed timeout across
+tasks. Distinguish native terminal events, ordinary child messages and wait timeouts:
+an ordinary message or timeout does not prove that a child ended. A timeout alone
+creates no new decision or evidence and does not justify
 a status-only reasoning turn. If the known necessary child remains unfinished after a
 timeout, continue with native waiting without a status snapshot for the unchanged state.
 When a meaningful wake occurs,

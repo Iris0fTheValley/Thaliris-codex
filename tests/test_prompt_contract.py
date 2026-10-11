@@ -128,10 +128,32 @@ def test_waiting_guidance_uses_native_events_and_observation_ownership():
              ("do not repeatedly set wait_agent to its shortest supported interval", "do not substitute sleep for native waiting"),
              ("timeout alone creates no new decision or evidence", "without a status snapshot for the unchanged state"),
              ("wake-only v2 wait_agent does not prove completion", "check list_agents"),
-             ("general recommendation", "60 seconds", "not an intrinsic cap"),
-             ("explicit applicable higher-level limit", "event-aware wait duration", "several minutes or longer"),
-             ("native completion events", "interruptions", "substantive events"),
+             ("event-driven waiting takes precedence over timed polling", "first confirm", "current host"),
+             ("meaningful-event early return is confirmed", "no dependency needs an interim decision",
+              "default", "60-minute", "timeout_ms=3600000"),
+             ("maximum waiting window", "not a required child execution duration", "wakes controller early"),
+             ("shorter historical average", "must not force", "earlier controller wake"),
+             ("60 seconds for very short tasks", "10–60 minutes", "about 30 minutes"),
+             ("actual tool limits", "higher-level duration limits", "take precedence", "unknown"),
+             ("ordinary child messages", "wait timeouts", "does not prove", "child ended"),
+             ("progress poller", "parallel child", "timed polling loop"),
              ("do not impose one fixed timeout across tasks"))
+
+
+def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "docs/thaliris-controller.md").read_text(encoding="utf-8") == controller_instructions.render()
+    for name in ("README.md", "README.en.md", "adapter/codex/README.md"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "timeout_ms=3600000" in text, name
+        assert "UNKNOWN" in text and "10–60" in text, name
+        assert "never a default" not in text, name
+        assert "tool maximum is capacity, not a default duration" not in normalized(text), name
+    waiting = normalized(controller_instructions.render(section="completion"))
+    assert "if meaningful-event early return is confirmed and no dependency needs an interim decision, default" in waiting
+    assert "actual tool limits" in waiting and "take precedence over these defaults" in waiting
+    assert "native terminal events, ordinary child messages and wait timeouts" in waiting
+    assert "an ordinary message or timeout does not prove that a child ended" in waiting
 
 
 def test_shared_entry_keeps_safety_and_discovery_without_controller_execution_routine():
@@ -445,8 +467,11 @@ def test_resident_waiting_observation_and_causal_contract_rejects_negation_rever
     for text in (value, prompt("implementer"), prompt("focused-implementer")):
         concepts(text, ("observation", "tests", "processes", "ci", "controller", "result"),
                  ("substantive changes", "terminal evidence"),
-                 ("tool maximum", "capacity", "higher-level duration limits", "precedence"),
                  ("original failure", "local reproduction", "root cause"))
+    concepts(value, ("actual tool limits", "higher-level duration limits", "precedence"),
+             ("meaningful-event early return", "confirmed", "60-minute", "default"))
+    for text in (prompt("implementer"), prompt("focused-implementer")):
+        concepts(text, ("tool maximum", "capacity", "higher-level duration limits", "precedence"))
         require_local_prohibition(text, action="recommend", target="duration")
         mutant = re.sub(r"\bnot a recommended duration\b", "a recommended duration", text)
         with pytest.raises(AssertionError, match="local prohibition"):

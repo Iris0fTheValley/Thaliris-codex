@@ -74,15 +74,23 @@ not unrelated ordinary reads or independent work.
 An unbound spawn can be recovered only from exact
 trusted name-bound native failure or spawn-failure callback, not timeout/not_found.
 
-Choose waiting by current capability, meaningful event and necessary dependency, with
-native notifications preferred. Controller waits only for a known unfinished child result
+Event-driven waiting takes precedence over timed polling. Controller waits only for a known unfinished child result
 that remains necessary; after child FINAL or a decision-changing unknown, that slice ends
-and the Controller does not keep waiting for it. Tool maximum is capacity, never a default
-duration; higher-level limits take precedence. If the active instruction bounds one
-blocking call to 60 seconds, honor that bound and choose the interval from the expected
-event rather than repeatedly using the shortest accepted interval. Do not substitute
-`sleep` for native waiting or impose one fixed timeout for all tasks. The Hook preserves
-caller wait arguments rather than promoting them to a capacity limit. A timeout creates
+and the Controller does not keep waiting for it. First confirm the actual current Host
+maximum, meaningful-event early return, user interruption and child notifications during
+waiting; unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early
+return and no interim dependency decision, default to the supported 60-minute window
+(`timeout_ms=3600000`). This is a maximum window, not a required execution duration;
+native completion wakes Controller early. Historical averages must not force earlier
+wakes. When timed stage checks are necessary or early return is unreliable, recommend
+60 seconds for very short tasks, 10–60 minutes for ordinary tasks by scale, and about
+30 minutes for longer-task stage checks; reliable events without interim decisions still
+favor 60 minutes. Actual tool limits, explicit applicable higher-level limits, user
+interruption, recovery and urgent decisions take precedence; never bypass Host limits.
+Do not substitute `sleep`, add progress pollers or create per-child timed polling loops.
+Wait for native events that can change the current decision across parallel children.
+The Hook preserves caller wait arguments rather than promoting them to a capacity limit.
+Ordinary child messages and timeouts do not prove completion. A timeout creates
 no new evidence: continue native waiting only while the known child remains necessary and
 unfinished, without status snapshots or reasoning rounds for unchanged state. A wake-only
 V2 `wait_agent` result is not completion evidence; use one `list_agents` snapshot after a
