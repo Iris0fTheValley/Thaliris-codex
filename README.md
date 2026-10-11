@@ -185,6 +185,8 @@ Host 安装后，除非用户明确选择不使用 Thaliris，实质性项目文
 & '<installed pinned runner>' --root '<repo>' codex-bootstrap
 ```
 
+Bootstrap JSON 先序列化紧凑的工作区状态诊断，再序列化回执元数据与指导正文；即使输出截断，前面的诊断仍可读，但缺少 END 标记时不能确认 digest。完整 END 标记包含 SHA-256 与 UTF-8 字节数。仅当完整工具结果和 END 标记都可见时，才能在同一当前上下文为另一个仓库传入 `--controller-guidance-sha256 <digest>`，省略重复正文。该值是显式的内容回执提示，不是进程写出 stdout 的交付证明，也不写入持久会话状态；新 Session 与 Fresh Child 不沿用。若响应被截断或指导内容已更新，省略该参数即可重新取得完整内容；也可运行 `controller-instructions --resident` 恢复完整正常指导。
+
 `READY`（旧版 `DEFINITION_READY_ACTOR_UNKNOWN` 也可继续处理）表示项目定义可用；它不认证 Host actor，也不证明角色配置已由当前进程加载。若项目定义缺失，先按 bootstrap 结果处理，而不要绕过 adapter 直接创建另一个任务账本。
 
 任务准入使用单独的 UTF-8 JSON contract 文件，包含非空 `human_instruction`、`boundary`、`invariants`、`acceptance` 字符串，以及可选 `execution_mode`（`delegated`、`controller-direct` 或 `single-agent`）。未指定时默认 `delegated`：Controller 负责长期决策，短期 Investigator/Implementer 负责主要调查和实施。`controller-direct` 允许 Controller 自行读取、修改、测试、提交和结束工作，并可按需使用辅助角色；`single-agent` 表示不使用子代理的普通单 Agent 工作。明确用户选择优先于效率默认，但不能扩大任务范围，也不能突破角色只读限制或用户文件保护。
@@ -240,9 +242,9 @@ CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使�
 
 ## 运行时提示词层
 
-全局指令保留共享授权/隔离边界与一次性启动入口；必要的 bootstrap 响应将正常 Controller 指导直接交付到任务上下文，包括启动/准入、路由、交接、证据复用、等待、Workstream 终点、验收/独立 review 选择、持久知识准入与因果诊断。项目指令保留共享边界和 canonical 指针；完整 Controller routine 不重复注入每个 fresh child。[Controller 操作程序](docs/thaliris-controller.md) 是权威源；异常恢复、Host 维护按需检索。安装的 pinned runner 的 `controller-instructions` 返回程序索引，`controller-instructions --section <name>` 获取缺失的精确章节。评价完整正常任务上下文、检索成本与交付质量，而非单个最短 prompt。原生角色提示词负责当前角色的执行风格、委派和终点；新鲜 handoff 不向子角色批量注入无关 Controller 程序。所有角色仍可在自身权限内按需检索规则。设计理由与机械实现见 [Codex 协议](adapter/codex/README.md)与 [Core 提示词设计](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)。
+全局指令保留共享授权/隔离边界与一次性启动入口；必要的 bootstrap 响应将正常 Controller 指导直接交付到任务上下文，包括启动/准入、路由、交接、证据复用、等待、Workstream 终点、验收/独立 review 选择、持久知识准入与因果诊断。完整结果用 BEGIN/END 标记；同一当前上下文只在完整工具结果和 END 标记可见后，才可对另一仓库显式传入该 digest 来省略重复指导，不记录持久会话状态。响应截断时可省略 digest 重获完整文本，或用 `controller-instructions --resident` 恢复。项目指令保留共享边界和 canonical 指针；完整 Controller routine 不注入每个 fresh child。[Controller 操作程序](docs/thaliris-controller.md) 是权威源；异常恢复、Host 维护按需检索。安装的 pinned runner 的 `controller-instructions` 返回程序索引，`controller-instructions --resident` 返回完整正常指导，`controller-instructions --section <name>` 获取精确章节。评价完整正常任务上下文、检索成本与交付质量，而非单个最短 prompt。原生角色提示词负责当前角色的执行风格、委派和终点；新鲜 handoff 不向子角色批量注入无关 Controller 程序。所有角色仍可在自身权限内按需检索规则。设计理由与机械实现见 [Codex 协议](adapter/codex/README.md)与 [Core 提示词设计](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)。
 
-每个必要依赖有一个观察 owner：执行角色运行并等待自己的测试、process 与 CI；Controller 只在已知 child 尚未结束且其结果仍属必要依赖时等待，不重复查同一作业。child 返回 FINAL 或 decision-changing unknown 后，该 slice 已结束，不继续等待。等待按当前能力、实质事件和必要依赖选择，工具最长等待是 capacity，不是默认时长；高层时长限制优先，Hook 保留调用者的等待参数。等待成本尚无受控的新比较；五分钟监控周期只是可选的替代观察方式，不是当前功能或要求。不同 Task ID 可独立并行；单个 Task ID 可同时包含多个已绑定的活动 child，但一次只保留一个待关联预约。是否并行由 Controller 按工作依赖决定；同一工作树中重叠写入需协调，独立 worktree 可承载独立修改。
+每个必要依赖有一个观察 owner：执行角色运行并等待自己的测试、process 与 CI；Controller 只在已知 child 尚未结束且其结果仍属必要依赖时等待，不重复查同一作业。child 返回 FINAL 或 decision-changing unknown 后，该 slice 已结束，不继续等待。等待按当前能力、实质事件和必要依赖选择，工具最长等待是 capacity，不是默认时长；高层时长限制优先。若当前指导限制一次阻塞等待为 60 秒，遵守该上限并按预期事件选择间隔，不要反复使用最短等待间隔。不要以 sleep 替代原生等待，也不要为所有任务设同一超时。timeout 没有带来新证据；仅当 child 仍是未完成的必要依赖时继续原生等待，不对未变化状态重复查询或推理。wake-only 的 V2 `wait_agent` 不证明完成；实质唤醒后用一次 `list_agents` 检查。Hook 保留调用者的等待参数，不把工具最大值变成默认时长。不同 Task ID 可独立并行；单个 Task ID 可同时包含多个已绑定的活动 child，但一次只保留一个待关联预约。是否并行由 Controller 按工作依赖决定；同一工作树中重叠写入需协调，独立 worktree 可承载独立修改。
 
 Hook 失败在 stderr 输出有界 JSON，区分 receive、严格 decode、JSON syntax/shape、dispatch、maintenance-contract 与 runtime-identity 的真实边界。诊断不含 payload 或异常内容，不证明更深根因，也不改变拒绝/身份检查。Hook 文档只接受一个起始 UTF-8 BOM 的边界保持不变。Review READY 不替代最终产品验收。
 

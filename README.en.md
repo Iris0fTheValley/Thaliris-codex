@@ -182,6 +182,18 @@ If a new directory lacks Git metadata, initialize Git at the intended project ro
 & '<installed pinned runner>' --root '<repo>' codex-bootstrap
 ```
 
+Bootstrap guidance is wrapped in BEGIN/END markers; the complete END marker carries
+its SHA-256 and UTF-8 byte count. Bootstrap JSON places compact workspace status
+diagnostics before the receipt metadata and guidance body, so truncation leaves the
+diagnosis readable while the missing END marker prevents acknowledgement. Only after
+the complete tool result and END marker are visible may the same active context pass
+`--controller-guidance-sha256 <digest>` for another workspace to omit duplicate text.
+This is an explicit content acknowledgement, not proof that the process wrote stdout,
+and no session state is persisted.
+New sessions and fresh children do not reuse the digest. Omit it after truncation or
+when guidance changes to receive the full current copy, or retrieve it with
+`controller-instructions --resident`.
+
 `READY` (legacy `DEFINITION_READY_ACTOR_UNKNOWN` is also accepted) means project definitions are available; it does not authenticate a Host actor or prove that the current process loaded role configuration. If definitions are missing, follow the bootstrap result instead of bypassing the adapter to create a separate task ledger.
 
 Task admission uses a separate UTF-8 JSON contract file with non-empty `human_instruction`, `boundary`, `invariants`, and `acceptance` strings, plus optional `execution_mode` (`delegated`, `controller-direct`, or `single-agent`). If omitted, the mode defaults to `delegated`: the Controller owns long-lived decisions, while short-lived Investigator/Implementer roles handle the main investigation and implementation. `controller-direct` lets the Controller read, edit, test, commit and close the work, with auxiliary roles available when useful; `single-agent` means ordinary single-agent work with no children. An explicit user choice takes precedence over the efficiency default without expanding task scope or overriding read-only role limits or protection of user-owned files.
@@ -239,12 +251,13 @@ The CI matrix covers Ubuntu and Windows with Python 3.11, 3.12, and 3.13. It use
 
 Global instructions carry shared authority/isolation boundaries and the one-shot
 startup entry. The required bootstrap response delivers resident normal Controller guidance: startup/admission, routing, handoffs, evidence reuse, waiting,
-Workstream endpoints, acceptance/review selection, durable admission and causal diagnosis.
+Workstream endpoints, acceptance/review selection, durable admission and causal diagnosis. Its complete output has BEGIN/END markers; the same active context may suppress duplicate text for another workspace only after the complete result and END marker are visible. This acknowledgement is not persisted, and new sessions or fresh children never reuse it. Omit the digest after truncation to get the full current guidance again.
 Project instructions retain shared boundaries and canonical pointers; the normal
 Controller routine is not injected into every fresh child. The
 [Controller procedures](docs/thaliris-controller.md) are canonical; retrieve exceptional
 recovery/Host maintenance only when needed. The installed pinned runner's
-`controller-instructions` returns an index; `controller-instructions --section <name>`
+`controller-instructions` returns an index; `controller-instructions --resident`
+recovers complete normal guidance; `controller-instructions --section <name>`
 retrieves an exact missing section. Compare complete normal task context plus retrieval
 cost and delivered quality, rather than the shortest prompt.
 Native role prompts own current-role execution style, delegation and endpoints.
@@ -258,10 +271,14 @@ processes and CI; Controller waits only for a known unfinished child result that
 necessary, without checking the same job again. A child FINAL or a decision-changing
 unknown ends that slice; do not keep waiting for it. Choose waiting by available capability,
 meaningful event and dependency; tool maximum is capacity, not a default duration, and
-higher-level duration limits take precedence. The Hook
-preserves caller wait arguments. No new controlled comparison measures wait cost; a
-five-minute monitoring cadence is only an optional observation alternative, not a
-current feature or requirement. Independent Task IDs may proceed in parallel. Within one
+higher-level duration limits take precedence. If an active instruction caps a blocking
+call at 60 seconds, honor the bound and choose a duration for the expected event instead
+of repeatedly using the shortest supported interval. Do not use `sleep` instead of native
+waiting or impose one fixed timeout across tasks. A timeout alone adds no evidence;
+continue only while the child remains a necessary unfinished dependency, without status
+snapshots or reasoning rounds for unchanged state. A wake-only V2 `wait_agent` is not
+completion evidence; use one `list_agents` snapshot after a meaningful wake. The Hook
+preserves caller wait arguments. Independent Task IDs may proceed in parallel. Within one
 Task ID, multiple bound children may run simultaneously, with at most one unbound dispatch
 reservation awaiting association. The Controller chooses parallel work from its dependencies;
 overlapping writes in one worktree need coordination, while independent worktrees can carry

@@ -7,10 +7,21 @@ Normal Controller guidance is resident in the normal bootstrap response/context:
 startup, authority, routing, handoff, Workstream endpoints, durable selection,
 waiting/completion and causal diagnosis. Retrieve task-recovery or host-maintenance
 only when their exceptional operation is needed. Measure the complete normal task
-context plus retrieval cost and quality, not the shortest individual prompt. The
-required startup operation delivers it once; shared inherited instructions do not
-inject the full Controller routine into every fresh child. Missing context can
-retrieve an exact section.
+context plus retrieval cost and quality, not the shortest individual prompt. Shared
+inherited instructions do not inject the full Controller routine into every fresh
+child. A complete bootstrap response wraps guidance in BEGIN/END markers; the END
+marker carries its SHA-256 and UTF-8 byte count. Only after that marker is visible in
+the complete tool result may the same active context pass its digest with
+`--controller-guidance-sha256 <digest>` when bootstrapping another workspace. The
+bootstrap JSON places its compact status and diagnostic fields first, then guidance
+receipt metadata and the potentially large guidance body last. If output truncates,
+the leading diagnosis remains readable but the missing END marker means no digest may
+be acknowledged; `controller-instructions --resident` retrieves the complete normal
+copy. The adapter omits a duplicate only after the explicit caller acknowledgement
+and reports the current digest and byte count. This is not proof inferred from stdout,
+persisted session state, transcript state, or authority. Never pass it to a new session
+or fresh child. Omit it when the END marker is missing or guidance changed; bootstrap
+returns the full current copy. Missing context can also retrieve an exact section.
 Repository docs are rendered from this resource. Assigned children follow their selected handoff and role; they
 may retrieve other rules on demand within their authority. Retrieval grants no authority.
 
@@ -18,8 +29,10 @@ may retrieve other rules on demand within their authority. Retrieval grants no a
 
 For substantive file-changing project work, including README-only changes,
 configuration changes and new project creation, unless the human opts out, the owning
-Controller runs `<installed pinned runner> --root <repo> codex-bootstrap` directly once. Chatting
-and read-only work needs no project bootstrap. When a new project directory has no Git
+Controller runs `<installed pinned runner> --root <repo> codex-bootstrap` directly once. Its response
+contains full resident guidance unless the Controller supplies the exact digest of a
+complete copy already present in the same context. Chatting and read-only work needs
+no project bootstrap. When a new project directory has no Git
 metadata, initialize Git at the intended project root before bootstrap if creating a
 repository is within the user's requested project scope; do not initialize unrelated
 directories or create Git metadata for read-only work. Bootstrap itself still requires
@@ -306,11 +319,18 @@ their own tests/processes/CI and report substantive changes or terminal evidence
 Controller waits for the necessary child result without rechecking the same job.
 Do not poll a finished child or create repeated reasoning turns solely to observe
 unchanged deterministic state when the runtime can wait for a meaningful or terminal
-event. A timeout alone creates no new decision or evidence and does not justify
-another status-only reasoning round. Use the native tool family available in the
-current session: V1 `wait_agent` returns a status map keyed by the exact spawned
-agent ID; V2 `list_agents` returns status entries keyed by canonical task name.
-Either can prove native Completed; no V2 switch or second confirmation is required.
+event. Do not repeatedly set `wait_agent` to its shortest supported interval, and do
+not substitute `sleep` for native waiting. Respect any higher-level duration limit;
+for example, when a blocking call is capped at 60 seconds, keep each call within that
+limit while choosing its duration by the expected event and next useful decision.
+Without such a limit, do not impose a universal fixed timeout. A timeout alone creates
+no new decision or evidence and does not justify a status-only reasoning turn. If the
+known necessary child remains unfinished after a timeout, continue with native waiting
+without a status snapshot for the unchanged state. When a meaningful wake occurs,
+use the available status capability once: a wake-only V2 `wait_agent` does not prove
+completion, so check `list_agents`; a V1 `wait_agent` status map is keyed by the exact
+spawned agent ID. V2 `list_agents` status entries use canonical task names. An exact
+native Completed observation proves execution closure without a second confirmation.
 The one-key `{"completed": <string or null>}` variant proves execution completion;
 null supplies no result text and cannot establish semantic acceptance. A V2 wake-only
 wait, Stop, nickname, missing target or unsupported payload remains UNKNOWN.

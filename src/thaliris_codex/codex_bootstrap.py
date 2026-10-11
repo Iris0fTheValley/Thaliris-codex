@@ -19,6 +19,21 @@ from . import lifecycle, runtime_identity, task_authority
 
 EXPECTED_MANAGED_HOOK_ABI = lifecycle.MANAGED_HOOK_ABI
 EXPECTED_ADAPTER_PROTOCOL_VERSION = lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION
+_GUIDANCE_OUTPUT_FIELDS = (
+    "controller_guidance_delivery",
+    "controller_guidance_delivery_reason",
+    "controller_guidance_sha256",
+    "controller_guidance_utf8_bytes",
+    "controller_guidance",
+)
+
+
+def ordered_response(payload: dict[str, object]) -> dict[str, object]:
+    """Put compact bootstrap diagnosis before the potentially large guidance body."""
+    guidance_names = set(_GUIDANCE_OUTPUT_FIELDS)
+    ordered = {key: value for key, value in payload.items() if key not in guidance_names}
+    ordered.update((key, payload[key]) for key in _GUIDANCE_OUTPUT_FIELDS if key in payload)
+    return ordered
 
 
 def _repo_root(path: Path) -> Path:
@@ -335,27 +350,42 @@ def _bootstrap(root: Path, hook_attestation: str | None = None) -> dict[str, obj
     }
 
 
-def controller_guidance() -> str:
-    """Deliver normal Controller context through the already-required startup.
-
-    This is selected procedure text, not authentication or admission evidence.
-    No new retrieval call, persistent control state or child projection is added.
-    """
+def _controller_guidance_runner() -> str:
     from . import controller_instructions
     runner = controller_instructions.runner_command(lifecycle._host_home_path() / lifecycle.HOST_RUN_SCRIPT_NAME)
-    return controller_instructions.resident(runner)
+    return runner
 
 
-def bootstrap(root: Path, hook_attestation: str | None = None) -> dict[str, object]:
+def controller_guidance_fields(acknowledged_sha256: str | None = None) -> dict[str, object]:
+    """Return complete guidance or an explicit exact-digest deduplication result."""
+    from . import controller_instructions
+    return controller_instructions.guidance_delivery_fields(
+        _controller_guidance_runner(), acknowledged_sha256
+    )
+
+
+def controller_guidance() -> str:
+    """Return the complete normal guidance with truncation-detection markers."""
+    from . import controller_instructions
+    return controller_instructions.delivered_resident(_controller_guidance_runner())
+
+
+def bootstrap(
+    root: Path,
+    hook_attestation: str | None = None,
+    *,
+    controller_guidance_sha256: str | None = None,
+) -> dict[str, object]:
     from . import host_transition
+    guidance = controller_guidance_fields(controller_guidance_sha256)
     if host_transition.pending(lifecycle._host_home_path()):
         return {"ok": False, "status": "HOST_TRANSITION_PENDING", "init_invoked": False,
                 "session_restart_required": False, "ordinary_workspace_work_allowed": True,
                 "controller_actor_assurance": "UNKNOWN",
                 "recovery_action": "Replay the original standalone maintenance contract",
-                "controller_guidance": controller_guidance()}
+                **guidance}
     result = _bootstrap(root, hook_attestation)
-    result["controller_guidance"] = controller_guidance()
+    result.update(guidance)
     assurance = lifecycle._controller_actor_assurance({})
     result.update(controller_actor_assurance=assurance, ordinary_workspace_work_allowed=True)
     if assurance != "CONTROLLER":
@@ -378,17 +408,22 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = _Parser(description="Thaliris one-shot Codex bootstrap")
     parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--controller-guidance-sha256")
     try:
         args = parser.parse_args(argv)
-        result = bootstrap(args.root)
+        result = (bootstrap(args.root) if args.controller_guidance_sha256 is None else
+                  bootstrap(args.root, controller_guidance_sha256=args.controller_guidance_sha256))
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
         result = {
             "ok": False,
             "status": "BOOTSTRAP_UNAVAILABLE",
             "error": str(exc),
             "session_restart_required": False,
+            **controller_guidance_fields(
+                getattr(locals().get("args"), "controller_guidance_sha256", None)
+            ),
         }
-    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    print(json.dumps(ordered_response(result), ensure_ascii=False, separators=(",", ":")))
     return 0 if result.get("ok") else 3
 
 

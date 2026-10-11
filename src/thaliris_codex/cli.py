@@ -71,7 +71,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("runtime-check", help="report this public console's interpreter and package origin without mutation")
     controller_help = sub.add_parser("controller-instructions", help="list or retrieve Controller procedures without admission or mutation")
     from . import controller_instructions
-    controller_help.add_argument("--section", choices=controller_instructions.SECTIONS)
+    controller_selection = controller_help.add_mutually_exclusive_group()
+    controller_selection.add_argument("--section", choices=controller_instructions.SECTIONS)
+    controller_selection.add_argument("--resident", action="store_true", help="retrieve complete normal Controller guidance")
     q = sub.add_parser("init")
     q.add_argument(
         "--accept-managed-instruction-sha256",
@@ -94,6 +96,7 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--execution-constraint", choices=roles.EXECUTION_CONSTRAINTS)
     q = sub.add_parser("codex-bootstrap", help="perform one-shot project-external Codex bootstrap")
     q.add_argument("--hook-attestation", help=argparse.SUPPRESS)
+    q.add_argument("--controller-guidance-sha256", help="omit exact guidance already present in the current context")
     q = sub.add_parser("catalog", help="discover bounded durable document metadata")
     q.add_argument("path", nargs="?")
     q = sub.add_parser("document-get", help="retrieve 1 to 8 explicitly selected durable documents")
@@ -245,9 +248,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "controller-instructions":
             from . import controller_instructions
             runner = controller_instructions.runner_command(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME)
-            content = (controller_instructions.render(runner, section=args.section) if args.section
-                       else controller_instructions.index(runner))
-            print(json.dumps({"ok": True, "content": content}, ensure_ascii=False))
+            if args.resident:
+                delivery = controller_instructions.guidance_delivery_fields(runner)
+                print(json.dumps({
+                    "ok": True,
+                    "controller_guidance_sha256": delivery["controller_guidance_sha256"],
+                    "controller_guidance_utf8_bytes": delivery["controller_guidance_utf8_bytes"],
+                    "content": delivery["controller_guidance"],
+                }, ensure_ascii=False))
+            else:
+                content = (controller_instructions.render(runner, section=args.section) if args.section
+                           else controller_instructions.index(runner))
+                print(json.dumps({"ok": True, "content": content}, ensure_ascii=False))
             return 0
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
@@ -323,14 +335,22 @@ def main(argv: list[str] | None = None) -> int:
                 "host_actor_assurance": "UNKNOWN", "project_files_touched": []}
         elif args.command == "codex-bootstrap":
             try:
-                out = codex_bootstrap.bootstrap(root, args.hook_attestation) if args.hook_attestation else codex_bootstrap.bootstrap(root)
+                if args.controller_guidance_sha256 is None:
+                    out = (codex_bootstrap.bootstrap(root, args.hook_attestation)
+                           if args.hook_attestation else codex_bootstrap.bootstrap(root))
+                else:
+                    out = codex_bootstrap.bootstrap(
+                        root,
+                        args.hook_attestation,
+                        controller_guidance_sha256=args.controller_guidance_sha256,
+                    )
             except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                 out = {
                     "ok": False,
                     "status": "BOOTSTRAP_UNAVAILABLE",
                     "error": str(exc),
                     "session_restart_required": False,
-                    "controller_guidance": codex_bootstrap.controller_guidance(),
+                    **codex_bootstrap.controller_guidance_fields(args.controller_guidance_sha256),
                 }
         elif args.command == "doctor": out = codex_adapter.doctor(root)
         elif args.command == "stale": out = stale(root)
@@ -365,11 +385,21 @@ def main(argv: list[str] | None = None) -> int:
         else: out = {"ok": True, "version": __version__}
         if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote"}:
             task_authority.checkpoint(root)
-        print(json.dumps(out, sort_keys=True, indent=2 if args.pretty else None, separators=None if args.pretty else (",", ":")))
+        if args.command == "codex-bootstrap":
+            out = codex_bootstrap.ordered_response(out)
+            print(json.dumps(out, ensure_ascii=False, indent=2 if args.pretty else None,
+                             separators=None if args.pretty else (",", ":")))
+        else:
+            print(json.dumps(out, sort_keys=True, indent=2 if args.pretty else None, separators=None if args.pretty else (",", ":")))
         return 0 if out.get("ok", False) else 3
     except TaskStateSchemaIncompatible as exc:
         result = codex_adapter.task_state_schema_error(root, exc)
-        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        if args is not None and args.command == "codex-bootstrap":
+            result.update(codex_bootstrap.controller_guidance_fields(args.controller_guidance_sha256))
+            result = codex_bootstrap.ordered_response(result)
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        else:
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 3
     except (ValueError, OSError, RuntimeError, json.JSONDecodeError) as exc:
         if args is not None and args.command == "audit-hook":
@@ -380,7 +410,13 @@ def main(argv: list[str] | None = None) -> int:
         result = {"ok": False, "error": str(exc)}
         if bootstrap_requested or (args is not None and args.command == "codex-bootstrap"):
             result["session_restart_required"] = False
-        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        if args is not None and args.command == "codex-bootstrap":
+            result["status"] = "BOOTSTRAP_UNAVAILABLE"
+            result.update(codex_bootstrap.controller_guidance_fields(args.controller_guidance_sha256))
+            result = codex_bootstrap.ordered_response(result)
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        else:
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 2
 
 

@@ -125,7 +125,7 @@ def test_initialized_workspace_does_not_init(monkeypatch, tmp_path: Path):
     result = bootstrap.bootstrap(tmp_path)
     assert result == {"ok": True, "status": "READY", "project_definition_present": "YES", "init_invoked": False, "session_restart_required": False,
                       "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True,
-                      "controller_guidance": bootstrap.controller_guidance(),
+                      **bootstrap.controller_guidance_fields(),
                       "preserved_manual_followup": []}
     assert calls == ["bootstrap-check"]
 
@@ -329,7 +329,7 @@ def test_no_restart_init_ready_calibrates_false(monkeypatch, tmp_path: Path):
     result = bootstrap.bootstrap(tmp_path)
     assert result == {"ok": True, "status": "READY", "init_invoked": True, "session_restart_required": False,
                       "controller_actor_assurance": "CONTROLLER", "ordinary_workspace_work_allowed": True,
-                      "controller_guidance": bootstrap.controller_guidance(),
+                      **bootstrap.controller_guidance_fields(),
                       "preserved_manual_followup": []}
 
 
@@ -354,7 +354,7 @@ def test_cli_non_git_root_returns_structured_bootstrap_failure(tmp_path: Path, c
         "ok": False,
         "status": "BOOTSTRAP_UNAVAILABLE",
         "session_restart_required": False,
-        "controller_guidance": bootstrap.controller_guidance(),
+        **bootstrap.controller_guidance_fields(),
     }
 
 
@@ -373,7 +373,7 @@ def test_cli_dispatch_exception_has_explicit_restart_boolean(monkeypatch, tmp_pa
         "ok": False,
         "status": "BOOTSTRAP_UNAVAILABLE",
         "session_restart_required": False,
-        "controller_guidance": bootstrap.controller_guidance(),
+        **bootstrap.controller_guidance_fields(),
     }
 
 
@@ -543,7 +543,9 @@ def test_cli_root_resolution_exception_has_bootstrap_restart_boolean(monkeypatch
     assert result == {
         "error": "root resolution failed",
         "ok": False,
+        "status": "BOOTSTRAP_UNAVAILABLE",
         "session_restart_required": False,
+        **bootstrap.controller_guidance_fields(),
     }
     assert result["session_restart_required"] is False
     assert type(result["session_restart_required"]) is bool
@@ -564,6 +566,7 @@ def test_module_entrypoint_exception_has_explicit_restart_boolean(monkeypatch, t
         "ok": False,
         "status": "BOOTSTRAP_UNAVAILABLE",
         "session_restart_required": False,
+        **bootstrap.controller_guidance_fields(),
     }
 
 
@@ -780,6 +783,158 @@ def test_required_bootstrap_delivers_normal_guidance_without_extra_retrieval_or_
         assert result["status"] == "READY"
         assert result["managed_control_authority"] == "EXPLICIT_CONTROLLER_ASSERTION_REQUIRED"
     assert "--maintenance-contract" not in codex_adapter._global_agents_block().decode()
+
+
+def test_bootstrap_deduplicates_only_an_explicit_exact_guidance_digest_across_roots(tmp_path, monkeypatch):
+    from thaliris_codex import host_transition
+
+    monkeypatch.setattr(host_transition, "pending", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_controller_actor_assurance", lambda _payload: "UNKNOWN")
+    roots = [tmp_path / "first", tmp_path / "second"]
+    calls = []
+    monkeypatch.setattr(
+        bootstrap,
+        "_bootstrap",
+        lambda root, attestation: calls.append((root, attestation)) or {
+            "ok": True, "status": "READY", "init_invoked": False,
+        },
+    )
+
+    first = bootstrap.bootstrap(roots[0])
+    digest = first["controller_guidance_sha256"]
+    body = first["controller_guidance"]
+    assert first["controller_guidance_delivery"] == "INCLUDED"
+    assert body.startswith("<!-- THALIRIS CONTROLLER GUIDANCE BEGIN -->\n")
+    assert f"<!-- THALIRIS CONTROLLER GUIDANCE END sha256={digest} utf8_bytes=" in body
+    assert f"sha256={digest}" not in body.split("\n", 1)[0]
+
+    second = bootstrap.bootstrap(roots[1], controller_guidance_sha256=digest)
+    assert second["controller_guidance_delivery"] == "OMITTED_ACKNOWLEDGED"
+    assert second["controller_guidance_sha256"] == digest
+    assert second["controller_guidance_utf8_bytes"] == first["controller_guidance_utf8_bytes"]
+    assert "controller_guidance" not in second
+    assert calls == [(roots[0], None), (roots[1], None)]
+
+    # A fresh context supplies no prior digest and receives the full body again.
+    fresh = bootstrap.bootstrap(roots[1])
+    assert fresh["controller_guidance_delivery"] == "INCLUDED"
+    assert fresh["controller_guidance"] == body
+
+    # A stale or malformed acknowledgement cannot suppress changed guidance.
+    changed_resident = controller_instructions.resident
+    monkeypatch.setattr(
+        controller_instructions,
+        "resident",
+        lambda runner: changed_resident(runner) + "\nChanged instructions.\n",
+    )
+    changed = bootstrap.bootstrap(roots[1], controller_guidance_sha256=digest)
+    assert changed["controller_guidance_delivery"] == "INCLUDED"
+    assert changed["controller_guidance_delivery_reason"] == "GUIDANCE_CHANGED"
+    assert changed["controller_guidance_sha256"] != digest
+    invalid = bootstrap.bootstrap(roots[1], controller_guidance_sha256="not-a-digest")
+    assert invalid["controller_guidance_delivery"] == "INCLUDED"
+    assert invalid["controller_guidance_delivery_reason"] == "INVALID_DIGEST"
+    assert invalid["controller_guidance"] == changed["controller_guidance"]
+    assert calls == [(roots[0], None), (roots[1], None), (roots[1], None), (roots[1], None), (roots[1], None)]
+
+
+def test_bootstrap_acknowledgement_still_reads_current_workspace_state(tmp_path, monkeypatch):
+    from thaliris_codex import host_transition
+
+    monkeypatch.setattr(host_transition, "pending", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_controller_actor_assurance", lambda _payload: "UNKNOWN")
+    states = iter(("READY", "INVALID_STATE"))
+    calls = []
+
+    def inspect_workspace(root, attestation):
+        calls.append((root, attestation))
+        status = next(states)
+        return {"ok": status == "READY", "status": status, "init_invoked": False}
+
+    monkeypatch.setattr(bootstrap, "_bootstrap", inspect_workspace)
+    first = bootstrap.bootstrap(tmp_path)
+    second = bootstrap.bootstrap(tmp_path, controller_guidance_sha256=first["controller_guidance_sha256"])
+    assert first["status"] == "READY"
+    assert second["status"] == "INVALID_STATE"
+    assert second["controller_guidance_delivery"] == "OMITTED_ACKNOWLEDGED"
+    assert "controller_guidance" not in second
+    assert calls == [(tmp_path, None), (tmp_path, None)]
+
+
+def test_truncated_guidance_has_no_complete_receipt_and_resident_retrieval_recovers_it(tmp_path, capsys):
+    complete = bootstrap.controller_guidance()
+    truncated = complete[: complete.rfind("<!-- THALIRIS CONTROLLER GUIDANCE END")]
+    assert "<!-- THALIRIS CONTROLLER GUIDANCE BEGIN -->" in truncated
+    assert "<!-- THALIRIS CONTROLLER GUIDANCE END" not in truncated
+
+    assert cli.main(["controller-instructions", "--resident"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is True
+    assert result["content"].endswith("-->\n")
+    assert "<!-- THALIRIS CONTROLLER GUIDANCE END sha256=" in result["content"]
+    assert result["controller_guidance_sha256"] in result["content"]
+    assert result["controller_guidance_utf8_bytes"] > 0
+
+
+def test_bootstrap_sha256_option_is_passed_through_cli(tmp_path, monkeypatch, capsys):
+    from thaliris_codex import host_transition
+
+    monkeypatch.setattr(host_transition, "pending", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_controller_actor_assurance", lambda _payload: "UNKNOWN")
+    seen = []
+
+    def fake_bootstrap(root, attestation, *, controller_guidance_sha256=None):
+        seen.append((root, attestation, controller_guidance_sha256))
+        return {
+            "ok": True,
+            "status": "READY",
+            **bootstrap.controller_guidance_fields(controller_guidance_sha256),
+            "controller_actor_assurance": "UNKNOWN",
+            "ordinary_workspace_work_allowed": True,
+            "managed_control_authority": "EXPLICIT_CONTROLLER_ASSERTION_REQUIRED",
+        }
+
+    monkeypatch.setattr(bootstrap, "bootstrap", fake_bootstrap)
+    digest = "a" * 64
+    assert cli.main([
+        "--root", str(tmp_path), "codex-bootstrap", "--controller-guidance-sha256", digest,
+    ]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert seen == [(tmp_path.resolve(), None, digest)]
+    assert result["controller_guidance_delivery"] == "INCLUDED"
+    assert result["status"] == "READY"
+    assert list(result).index("status") < list(result).index("controller_guidance_delivery")
+    assert list(result).index("controller_guidance_delivery") < list(result).index("controller_guidance")
+
+
+def test_bootstrap_serialization_leaves_status_diagnostic_before_truncatable_guidance(tmp_path, monkeypatch, capsys):
+    from thaliris_codex import host_transition
+
+    monkeypatch.setattr(host_transition, "pending", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_controller_actor_assurance", lambda _payload: "UNKNOWN")
+
+    def fake_bootstrap(_root, _attestation=None, *, controller_guidance_sha256=None):
+        return {
+            "ok": False,
+            "status": "INVALID_STATE",
+            "init_invoked": False,
+            "recovery": {"status": "INVALID_STATE", "detail": "diagnostic retained"},
+            **bootstrap.controller_guidance_fields(controller_guidance_sha256),
+        }
+
+    monkeypatch.setattr(bootstrap, "bootstrap", fake_bootstrap)
+    exit_code = cli.main(["--root", str(tmp_path), "codex-bootstrap"])
+    response = capsys.readouterr().out
+    assert exit_code == 3
+    body_start = response.index('"controller_guidance":"')
+    diagnostic_prefix = response[:body_start]
+    truncated = response[:body_start + 120]
+    assert response.index('"status":"INVALID_STATE"') < body_start
+    assert response.index('"recovery":{"status":"INVALID_STATE"') < body_start
+    assert '"controller_guidance_delivery":"INCLUDED"' in diagnostic_prefix
+    assert '"controller_guidance_sha256":"' in diagnostic_prefix
+    assert '"controller_guidance":"' in truncated
+    assert "THALIRIS CONTROLLER GUIDANCE END" not in truncated
 
 
 def test_cli_bootstrap_receipt_alias_is_passed_to_task_start(tmp_path: Path, monkeypatch, capsys):

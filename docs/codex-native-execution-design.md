@@ -8,7 +8,13 @@ nor an adapter ledger accepts the meaning or quality of a child result.
 Inherited global/project managed spans contain shared authority, isolation and
 readonly boundaries plus entry pointers. The owning Controller receives normal
 Controller procedures in the existing bootstrap response; it does not retrieve a
-section before each operation. Retrieve an exact section with the installed pinned
+section before each operation. The complete response has BEGIN/END markers; its END
+marker carries SHA-256 and UTF-8 byte count. After the complete tool result and marker
+are visible, the same context may pass that digest to another workspace bootstrap to
+omit duplicate text. This is an explicit caller acknowledgement, not an inference from
+stdout or persisted state; new sessions and fresh children do not reuse it. Use
+`controller-instructions --resident` to recover a complete copy after truncation.
+Retrieve an exact section with the installed pinned
 runner's `controller-instructions --section <name>` only when applicable context is
 missing or exceptional recovery/Host maintenance requires it. The bare command
 returns a small procedure index. This is contextual relevance, not secrecy. Other
@@ -26,10 +32,16 @@ establishes execution closure. SubagentStop is retained when observed; absent or
 delayed Stop cannot veto already proved native completion. Stop alone cannot prove
 native terminal execution. Conflicting identities, unbound children, malformed or
 missing native terminal evidence fail closed. Controller-direct auxiliary children
-use the same execution distinction. Controller acceptance remains independent.
-V1 `wait_agent` returns a status map keyed by the exact spawned agent ID; V2
-`list_agents` returns canonical-name status entries. Neither requires a second
-confirmation once completion is proved. The accepted Completed payload is exactly
+use the same execution distinction. Controller acceptance remains independent. V1
+`wait_agent` returns a status map keyed by the exact spawned agent ID; V2 `list_agents`
+returns canonical-name status entries. A wake-only V2 `wait_agent` is not completion
+evidence; take one `list_agents` snapshot after a meaningful wake. Respect a higher-level
+duration bound for each blocking wait: if it is capped at 60 seconds, choose an
+event-based interval within that bound rather than repeatedly using the shortest
+accepted interval. Do not substitute `sleep`, poll unchanged state after a timeout, or
+impose one fixed timeout across tasks. Executors observe their own tests and CI; the
+Controller does not repeat that observation. Neither native status family requires
+another completion check once exact completion is proved. The accepted Completed payload is exactly
 the one-key `{"completed": <string or null>}` variant. Null proves execution closure
 but supplies no semantic result. Other value types, extra fields and unsupported
 payload shapes remain UNKNOWN. Wake-only V2 waits supply no status evidence.

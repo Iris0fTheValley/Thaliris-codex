@@ -3361,8 +3361,10 @@ def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -
         elif token == "controller-instructions":
             from . import controller_instructions
             tail = tokens[index + 1:]
-            return not tail or (len(tail) == 2 and tail[0] == "--section"
-                                and tail[1] in controller_instructions.SECTIONS)
+            return (not tail
+                    or tail == ["--resident"]
+                    or (len(tail) == 2 and tail[0] == "--section"
+                        and tail[1] in controller_instructions.SECTIONS))
         else:
             return False
     return False

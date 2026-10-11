@@ -7,6 +7,16 @@ sourced from the package's `controller_instructions.md`; shared inherited spans 
 not inject that full routine into every fresh child. Exceptional recovery/Host maintenance and missing
 context use the pinned runner's `controller-instructions --section <name>` on demand.
 The bare command returns the procedure index, without the full Controller manual.
+`controller-instructions --resident` returns the complete normal guidance when a
+bootstrap response is interrupted or truncated. Complete guidance is enclosed by
+BEGIN/END markers. Bootstrap JSON serializes the compact workspace status before
+receipt metadata and the guidance body, leaving the diagnosis readable if the output
+is truncated. The missing END marker still means no digest can be acknowledged. A
+same-context bootstrap for another workspace may pass
+`--controller-guidance-sha256 <digest>` to omit that duplicate. This acknowledgement
+is caller-provided, is not inferred from emitted stdout, and is not persisted. New
+sessions and fresh children do not reuse it. A changed digest or omitted acknowledgement
+returns the full current guidance.
 The [repository Controller document](../../docs/thaliris-controller.md) is rendered
 from that source, including registry bindings. Retrieval grants no authority; other
 roles may retrieve rules on demand within their existing authority.
@@ -66,13 +76,16 @@ Choose waiting by current capability, meaningful event and necessary dependency,
 native notifications preferred. Controller waits only for a known unfinished child result
 that remains necessary; after child FINAL or a decision-changing unknown, that slice ends
 and the Controller does not keep waiting for it. Tool maximum is capacity, never a default
-duration; higher-level limits take precedence. The Hook preserves caller wait arguments
-rather than promoting them to a capacity limit. Executors observe/wait on their own tests,
-processes and CI, reporting substantive changes or terminal evidence; Controller does not
-duplicate those observations. No status-only
-reasoning round is justified by a timeout or unchanged deterministic state alone.
-No new controlled comparison measures wait cost; a five-minute monitoring cadence is
-only an optional observation alternative, not a current feature or requirement.
+duration; higher-level limits take precedence. If the active instruction bounds one
+blocking call to 60 seconds, honor that bound and choose the interval from the expected
+event rather than repeatedly using the shortest accepted interval. Do not substitute
+`sleep` for native waiting or impose one fixed timeout for all tasks. The Hook preserves
+caller wait arguments rather than promoting them to a capacity limit. A timeout creates
+no new evidence: continue native waiting only while the known child remains necessary and
+unfinished, without status snapshots or reasoning rounds for unchanged state. A wake-only
+V2 `wait_agent` result is not completion evidence; use one `list_agents` snapshot after a
+meaningful wake. Executors observe/wait on their own tests, processes and CI, reporting
+substantive changes or terminal evidence; Controller does not duplicate those observations.
 
 Production Hook/maintenance diagnostics emit only allowlisted failed boundary labels
 on stderr: receive, decode, JSON syntax/shape, dispatch, maintenance-contract and

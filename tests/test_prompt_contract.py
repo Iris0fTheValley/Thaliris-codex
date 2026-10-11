@@ -120,6 +120,18 @@ def test_identity_and_mode_distinctions_reach_normal_controller_context():
         assert "fresh isolation does not remove these inherited instructions" in text
 
 
+def test_waiting_guidance_uses_native_events_and_observation_ownership():
+    waiting = normalized(controller_instructions.render(section="completion"))
+    concepts(waiting,
+             ("wait only for a known unfinished necessary child", "one observation owner"),
+             ("executors run and wait on their own tests/processes/ci", "controller waits without rechecking the same job"),
+             ("do not repeatedly set wait_agent to its shortest supported interval", "do not substitute sleep for native waiting"),
+             ("timeout alone creates no new decision or evidence", "without a status snapshot for the unchanged state"),
+             ("wake-only v2 wait_agent does not prove completion", "check list_agents"),
+             ("higher-level duration limit", "60 seconds", "within that limit"),
+             ("without such a limit", "do not impose a universal fixed timeout"))
+
+
 def test_shared_entry_keeps_safety_and_discovery_without_controller_execution_routine():
     for value in (adapter._global_agents_block().decode(), adapter.render_managed()):
         text = normalized(value)

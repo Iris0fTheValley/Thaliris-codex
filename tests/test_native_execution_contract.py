@@ -16,7 +16,13 @@ def test_controller_retrieval_is_readonly_before_admission_and_during_conflict(t
     assert result["ok"]
     text = result["content"]
     assert "--section startup" in text and "--section host-maintenance" in text
+    assert "controller-instructions --resident" in text
     assert "task-recover-authority" not in text
+    assert cli.main(["--root", str(tmp_path), "controller-instructions", "--resident"]) == 0
+    resident = json.loads(capsys.readouterr().out)
+    assert "<!-- THALIRIS CONTROLLER GUIDANCE BEGIN -->" in resident["content"]
+    assert "<!-- THALIRIS CONTROLLER GUIDANCE END sha256=" in resident["content"]
+    assert resident["controller_guidance_sha256"] in resident["content"]
     for section in controller_instructions.SECTIONS:
         assert cli.main(["--root", str(tmp_path), "controller-instructions", "--section", section]) == 0
         selected = json.loads(capsys.readouterr().out)["content"]
@@ -43,6 +49,8 @@ def test_hook_retrieval_during_authority_conflict_grants_no_control_or_compound_
     }}
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload) == ""
     payload["tool_input"]["command"] = "thaliris controller-instructions --section task-recovery"
+    assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload) == ""
+    payload["tool_input"]["command"] = "thaliris controller-instructions --resident"
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", payload) == ""
     assert lifecycle._controller_actor_assurance(payload) == "UNKNOWN"
     payload["tool_input"]["command"] = "thaliris controller-instructions --unexpected"

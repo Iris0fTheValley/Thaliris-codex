@@ -1,6 +1,8 @@
 """Explicit retrieval of Controller procedures; never a child injection."""
 from pathlib import Path
+import hashlib
 import os
+import re
 import shlex
 
 from . import roles
@@ -46,6 +48,7 @@ def render(runner: str = "<installed pinned runner>", *, section: str | None = N
 
 def index(runner: str) -> str:
     return "# Controller procedure index\n\nNormal guidance is delivered in the required bootstrap response. " \
+        f"If that response is truncated, retrieve the complete copy with `{runner} controller-instructions --resident`. " \
         "Retrieve recovery/maintenance when needed, or an exact section when context is missing. " \
         "Retrieval grants no authority.\n\n" + "\n".join(
             f"- {title}: `{runner} controller-instructions --section {name}`"
@@ -58,3 +61,53 @@ def resident(runner: str) -> str:
     return "## Thaliris owning Controller\n\n" + "\n\n".join(
         render(runner, section=name).strip() for name in RESIDENT_SECTIONS
     ) + "\n"
+
+
+def resident_digest(runner: str) -> tuple[str, int, str]:
+    """Return the exact resident guidance and its stable content digest."""
+    content = resident(runner)
+    encoded = content.encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest(), len(encoded), content
+
+
+def delivered_resident(runner: str) -> str:
+    """Wrap the full guidance with boundaries that expose truncated output."""
+    digest, byte_count, content = resident_digest(runner)
+    return (
+        "<!-- THALIRIS CONTROLLER GUIDANCE BEGIN -->\n"
+        f"{content}\n"
+        f"<!-- THALIRIS CONTROLLER GUIDANCE END sha256={digest} utf8_bytes={byte_count} -->\n"
+    )
+
+
+def guidance_delivery_fields(runner: str, acknowledged_sha256: str | None = None) -> dict[str, object]:
+    """Include current guidance unless its exact complete digest was acknowledged.
+
+    The digest is a rendering hint only. It grants no task, session, Host, or
+    control authority, and no delivery state is persisted between invocations.
+    """
+    digest, byte_count, content = resident_digest(runner)
+    valid_acknowledgement = (
+        isinstance(acknowledged_sha256, str)
+        and re.fullmatch(r"[0-9a-f]{64}", acknowledged_sha256) is not None
+    )
+    matched = valid_acknowledgement and acknowledged_sha256 == digest
+    fields: dict[str, object] = {
+        "controller_guidance_delivery": "OMITTED_ACKNOWLEDGED" if matched else "INCLUDED",
+        "controller_guidance_sha256": digest,
+        "controller_guidance_utf8_bytes": byte_count,
+    }
+    if matched:
+        return fields
+    if acknowledged_sha256 is None:
+        fields["controller_guidance_delivery_reason"] = "NO_PRIOR_DIGEST"
+    elif not valid_acknowledgement:
+        fields["controller_guidance_delivery_reason"] = "INVALID_DIGEST"
+    else:
+        fields["controller_guidance_delivery_reason"] = "GUIDANCE_CHANGED"
+    fields["controller_guidance"] = (
+        "<!-- THALIRIS CONTROLLER GUIDANCE BEGIN -->\n"
+        f"{content}\n"
+        f"<!-- THALIRIS CONTROLLER GUIDANCE END sha256={digest} utf8_bytes={byte_count} -->\n"
+    )
+    return fields

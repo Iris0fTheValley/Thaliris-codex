@@ -892,7 +892,12 @@ The owning Controller uses guidance delivered by normal bootstrap for startup/ad
 routing, handoff, waiting, endpoints and acceptance. [Controller instructions](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/thaliris-controller.md)
 are the canonical full reference. The installed pinned runner's `controller-instructions`
 lists retrieval paths; `controller-instructions --section <name>` retrieves an exact
-missing section or exceptional recovery/Host maintenance procedure on demand.
+missing section or exceptional recovery/Host maintenance procedure on demand, and
+`controller-instructions --resident` restores the complete normal guidance after a
+truncated bootstrap response. Only acknowledge an exact bootstrap guidance digest after
+the complete tool result and its END marker are visible; pass it as
+`--controller-guidance-sha256 <digest>` only for another root in this same context.
+New sessions and fresh children do not reuse it.
 Role responsibilities are in native profiles and
 [role docs](docs/thaliris-role-packs.md); mechanical details are in
 [Codex protocol](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/adapter/codex/README.md).
@@ -1389,7 +1394,14 @@ configuration changes and new project creation, unless the human opts out, the
 owning Controller initiates the normal Thaliris bootstrap once by running
 `{route} --root <repo> codex-bootstrap` directly. Its normal response delivers
 resident Controller guidance for admission, routing, handoffs, waiting, endpoints,
-acceptance and causal diagnosis without another procedure get. Follow that guidance
+acceptance and causal diagnosis without another procedure get. Its complete END marker
+contains an exact digest; a same-context bootstrap for another workspace can pass that
+digest as `--controller-guidance-sha256 <digest>` to suppress duplicate text. The fact
+that the CLI wrote stdout is not delivery evidence; require the complete returned tool
+result and END marker. Bootstrap places compact status diagnostics before the guidance
+body so truncation leaves the state readable; a missing END marker still forbids
+acknowledgement. Omit the digest in a new session, a fresh child or after truncation. Use
+`controller-instructions --resident` to restore a complete truncated response. Follow that guidance
 and the project entry. Use `{route} --root <repo> controller-instructions`
 only for a missing-context index or exceptional recovery/Host maintenance;
 `controller-instructions --section <name>` retrieves the exact procedure.
