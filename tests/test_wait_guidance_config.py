@@ -75,6 +75,7 @@ def test_existing_user_developer_instructions_are_never_claimed(tmp_path, target
     result = install(tmp_path, target)
     assert result["ok"], result
     assert result["controller_wait_guidance_compatibility"]["status"] == "USER_CONFIG_PRESERVED"
+    assert result["manual_action_required"] == []
     assert guidance.RECORD_KEY not in receipt(home)
     assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == tomllib.loads(original.decode())[guidance.KEY]
     assert uninstall(tmp_path, target)["ok"]
@@ -107,6 +108,7 @@ def test_unsupported_version_does_not_insert_guidance(tmp_path, target, monkeypa
     result = install(tmp_path, target)
     assert result["ok"], result
     assert result["controller_wait_guidance_compatibility"]["status"] == "VERSION_SUPPORT_UNKNOWN"
+    assert result["manual_action_required"] == []
     assert guidance.RECORD_KEY not in receipt(home)
     assert guidance.GUIDANCE.encode() not in (home / "config.toml").read_bytes()
     assert uninstall(tmp_path, target)["ok"]

@@ -549,8 +549,6 @@ def _finish_install(home, transition):
         manual = ["Host registration or trust incomplete"]
     if hint["status"] in {"USER_CHANGED_PRESERVED", "USER_CUSTOM_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED", "APPLY_OUTCOME_UNKNOWN_PRESERVED"}:
         manual.append("native_mode_hint_compatibility:" + hint["status"])
-    if wait_guidance["status"] in {"USER_CHANGED_PRESERVED", "USER_CONFIG_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED", "APPLY_OUTCOME_UNKNOWN_PRESERVED"}:
-        manual.append("controller_wait_guidance_compatibility:" + wait_guidance["status"])
     return {"ok": ready, "changed": bool(changed_files), "target": str(home),
         "files": sorted(set(changed_files)), "manual_action_required": manual,
         "host_actor_assurance": "UNKNOWN", "maintenance_authority": "EXPLICIT_HUMAN_INTENT",
@@ -692,8 +690,6 @@ def _finish_uninstall(home, transition):
         return result
     host_transition.complete(home, transition)
     manual = (["native_mode_hint_compatibility:USER_CHANGED_PRESERVED"] if hint["status"] == "USER_CHANGED_PRESERVED" else [])
-    if wait_guidance["status"] == "USER_CHANGED_PRESERVED":
-        manual.append("controller_wait_guidance_compatibility:USER_CHANGED_PRESERVED")
     return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed or hint["changed"] or wait_guidance["changed"]), "target": str(home),
         "status": "UNINSTALLED_INERT_RUNNER_RETAINED" if inert else "UNINSTALLED",
         "files": sorted(set(finish["changed_files"] + (["config.toml"] if hint["changed"] or wait_guidance["changed"] else []))), "preserved_files": preserved,
