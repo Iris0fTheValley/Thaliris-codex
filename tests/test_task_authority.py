@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from thaliris import core
-from thaliris_codex import cli, codex_adapter, codex_bootstrap, lifecycle, task_authority
+from thaliris_codex import cli, codex_adapter, codex_bootstrap, lifecycle, roles, task_authority
 
 
 @pytest.fixture
@@ -27,6 +27,11 @@ def workspace(tmp_path, monkeypatch):
 def payload(root, command, session="first", **actor):
     return {"cwd": str(root), "session_id": session, "tool_name": "Bash",
             "tool_input": {"command": command}, **actor}
+
+
+def _model_selection(role):
+    model, effort = roles.ROLE_MODEL_ROUTING_DEFAULTS[role]
+    return {"model": model, "reasoning_effort": effort}
 
 
 def start(root, mode="delegated"):
@@ -83,7 +88,8 @@ def test_reconnect_and_daemon_turn_changes_preserve_authority(workspace, monkeyp
     lifecycle.associate_task(workspace, record["task_id"], lifecycle._identity_hash("reconnected"), task_authority.digest(task_authority.path(workspace)))
     assert lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, command, session="reconnected"), lifecycle.MANAGED_HOOK_ABI) == ""
     spawn = {"cwd": str(workspace), "session_id": "reconnected", "turn_id": "new-turn", "tool_name": "spawn_agent",
-             "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "Implement the accepted repair"}}
+             "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "Implement the accepted repair",
+                 **_model_selection("implementer")}}
     assert lifecycle.handle_hook(workspace, "PreToolUse", spawn, lifecycle.MANAGED_HOOK_ABI) == ""
     assert lifecycle._record_subagent_start(workspace, {"session_id": "reconnected", "turn_id": "child-turn", "agent_id": "new-child", "agent_type": "thaliris-implementer"})
 
@@ -137,7 +143,8 @@ def test_explicit_execution_overrides_allow_ordinary_work_and_close_without_spaw
     start(workspace, mode)
     for command in ("Get-Content src/example.py", "Set-Content src/example.py fixed", "pytest tests/test_example.py", "git commit -m repair"):
         assert lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, command, session="first"), lifecycle.MANAGED_HOOK_ABI) == ""
-    spawn = {"session_id": "first", "tool_name": "spawn_agent", "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "implement"}}
+    spawn = {"session_id": "first", "tool_name": "spawn_agent", "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "implement",
+        **_model_selection("implementer")}}
     assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", spawn, lifecycle.MANAGED_HOOK_ABI)
     assert codex_adapter.task_close(workspace, 1)["ok"]
     assert task_authority.read(workspace)["status"] == "DONE"
@@ -208,6 +215,7 @@ def test_controller_direct_auxiliary_close_requires_native_completed_independent
     identity = {"session_id": "first", "turn_id": "aux-turn"}
     spawn = {**identity, "tool_name": "spawn_agent", "tool_input": {
         "agent_type": "thaliris-reviewer", "fork_turns": "none", "message": "selected review",
+        **_model_selection("reviewer"),
     }}
     assert lifecycle.handle_hook(workspace, "PreToolUse", spawn, lifecycle.MANAGED_HOOK_ABI) == ""
     child = {**identity, "agent_id": "reviewer-id", "agent_type": "thaliris-reviewer"}
@@ -355,7 +363,7 @@ def test_unknown_actor_invalid_contract_is_not_admitted(workspace, capsys):
 def _spawn(root, message="Selected repair", call="dispatch-1", role="implementer"):
     value = {"session_id": "first", "turn_id": "controller-turn", "tool_use_id": call,
         "tool_name": "spawn_agent", "tool_input": {"agent_type": "thaliris-" + role,
-        "fork_turns": "none", "message": message}}
+        "fork_turns": "none", "message": message, **_model_selection(role)}}
     assert lifecycle.handle_hook(root, "PreToolUse", value, lifecycle.MANAGED_HOOK_ABI) == ""
     return value
 
@@ -645,7 +653,8 @@ def test_interleaved_spawn_callback_cannot_upgrade_foreign_native_identity(works
     lifecycle.associate_task(workspace, first["task_id"], lifecycle._identity_hash("fresh-session"),
         task_authority.digest(task_authority.path(workspace)))
     call_a = {"session_id": "fresh-session", "turn_id": "A-controller-turn", "tool_use_id": "call-A",
-        "tool_name": "spawn_agent", "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "A handoff"}}
+        "tool_name": "spawn_agent", "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "A handoff",
+            **_model_selection("implementer")}}
     assert lifecycle.handle_hook(workspace, "PreToolUse", call_a) == ""
     assert lifecycle.handle_hook(workspace, "SubagentStart", {**child_b, "session_id": "fresh-session", "turn_id": "A-child-turn"}) == ""
     map_path = lifecycle._association_path(workspace, lifecycle._identity_hash("native-X"), "agent")

@@ -123,21 +123,22 @@ def test_identity_and_mode_distinctions_reach_normal_controller_context():
 def test_waiting_guidance_uses_native_events_and_observation_ownership():
     waiting = normalized(controller_instructions.render(section="completion"))
     concepts(waiting,
-             ("wait only for a known unfinished necessary child", "one observation owner"),
-             ("executors run and wait on their own tests/processes/ci", "controller waits without rechecking the same job"),
-             ("do not repeatedly set wait_agent to its shortest supported interval", "do not substitute sleep for native waiting"),
-             ("timeout alone creates no new decision or evidence", "without a status snapshot for the unchanged state"),
+             ("unfinished direct child whose result is necessary", "one observation owner"),
+             ("tests, builds, ci and external processes", "their direct executor", "actual waiting capability"),
+             ("controller waits", "without rechecking", "executor"),
+             ("do not substitute sleep", "status-only model wakeups"),
+             ("after timeout, reassess", "do not repeat useless waits indefinitely"),
              ("wake-only v2 wait_agent does not prove completion", "check list_agents"),
-             ("event-driven waiting takes precedence over timed polling", "first confirm", "current host"),
-             ("meaningful-event early return is confirmed", "no dependency needs an interim decision",
+             ("first confirm", "current host", "child notifications", "actual tool maximum"),
+             ("confirmed meaningful-event early return", "user interruption", "no interim decision",
               "default", "60-minute", "timeout_ms=3600000"),
-             ("maximum waiting window", "not a required child execution duration", "wakes controller early"),
-             ("shorter historical average", "must not force", "earlier controller wake"),
+             ("windows are not execution deadlines", "completion can wake the parent early"),
+             ("historical averages", "must not force early wakes"),
              ("60 seconds for very short tasks", "10–60 minutes", "about 30 minutes"),
-             ("actual tool limits", "higher-level duration limits", "take precedence", "unknown"),
-             ("ordinary child messages", "wait timeouts", "does not prove", "child ended"),
-             ("progress poller", "parallel child", "timed polling loop"),
-             ("do not impose one fixed timeout across tasks"))
+             ("actual tool limits", "higher-level limits", "take precedence", "unknown"),
+             ("ordinary messages", "timeout", "messages and timeouts do not prove completion"),
+             ("parallel direct dependencies", "without per-child polling loops"),
+             ("neither fixed 60 seconds nor fixed 60 minutes fits every task"))
 
 
 def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
@@ -150,10 +151,10 @@ def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
         assert "never a default" not in text, name
         assert "tool maximum is capacity, not a default duration" not in normalized(text), name
     waiting = normalized(controller_instructions.render(section="completion"))
-    assert "if meaningful-event early return is confirmed and user interruption is confirmed and no dependency needs an interim decision, default" in waiting
-    assert "actual tool limits" in waiting and "take precedence over these defaults" in waiting
-    assert "native terminal events, ordinary child messages, wait timeouts" in waiting
-    assert "an ordinary message or timeout does not prove that a child ended" in waiting
+    assert "with confirmed meaningful-event early return and user interruption and no interim decision, default" in waiting
+    assert "actual tool limits" in waiting and "take precedence" in waiting
+    assert "distinguish native completion, ordinary messages, timeout, exceptions and unknown" in waiting
+    assert "messages and timeouts do not prove completion" in waiting
 
 
 def test_shared_entry_keeps_safety_and_discovery_without_controller_execution_routine():
@@ -277,7 +278,7 @@ def test_controller_selects_roles_and_accounts_for_goals():
     concepts(value, ("minimum necessary", "work shape", "not a ladder", "threshold"),
              ("investigator", "broad facts", "architecture"),
              ("ordinary implementer", "deterministic convergence", "focused implementer", "coupled"),
-             ("no fixed model or effort", "astra", "current-task", "authorization"),
+             ("default native model/effort", "gpt-6-luna/max", "gpt-6.1-sol/high", "astra", "current-task", "authorization"),
              ("luna-only", "semantic roles", "forbids astra"),
              ("every explicit user goal", "addressed", "deferred", "dependency"))
     assert not {"scanner", "executor", "astra"} & set(roles.role_choices())
@@ -444,19 +445,37 @@ def test_role_model_predecessor_is_independent_and_filename_bound():
         assert state(edited) == "user"
 
 
-def test_explicit_closing_handoff_and_dynamic_model_selection_reach_resident_context():
+def test_explicit_closing_handoff_and_model_routing_reach_resident_context():
     controller = controller_instructions.render()
     concepts(controller, ("separate explicit closing handoff", "suitable existing executor"),
              ("original user objective", "acceptance criteria", "exact candidate"),
              ("conclusion", "criterion-linked evidence", "unknown", "mechanical task closure"),
              ("reviewer", "challenge", "cannot replace", "core task-close", "mechanical record"),
-             ("ordinary roles", "no fixed model or effort", "native spawn", "configuration", "user selection"),
+             ("investigator", "implementer", "curator", "reviewer", "focused implementer", "reasoning specialist",
+              "explicit", "model", "reasoning_effort", "root model", "missing pair", "before making a reservation"),
+             ("profiles remain model-free", "configured role model after spawn arguments", "task's explicit execution constraint",
+              "necessary verification exception", "verifier", "controller's own model remains unchanged", "permissions"),
              ("astra", "current-task user authorization", "luna-only", "frozen constraint"))
     concepts(controller, ("does not require a spawn in every mode", "single-agent", "controller-direct"),
              ("already authorized available executor", "human acceptance", "unverified", "closing decision"),
              ("do not create a child", "change mode automatically"))
     require_local_prohibition(controller, action="perform", target="acceptance")
     assert "200 lines" not in controller and "4096" not in controller
+    for role in ("investigator", "implementer", "curator"):
+        assert f"| {role.title()} |" in controller
+        assert "gpt-6-luna/max" in controller
+    for role in ("reviewer", "focused-implementer", "reasoning-specialist"):
+        assert f"| {role.replace('-', ' ').title()} |" in controller
+        assert "gpt-6.1-sol/high" in controller
+    for role in ("investigator", "implementer", "curator", "reviewer", "focused-implementer", "reasoning-specialist"):
+        child = prompt(role)
+        assert "gpt-6.1-sol/high" not in child
+        assert "gpt-6-luna/max" not in child
+    for role in ("implementer", "focused-implementer", "reviewer"):
+        assert 'model="gpt-6-luna"' in prompt(role)
+        assert 'reasoning_effort="max"' in prompt(role)
+        concepts(prompt(role), ("execution constraint", "verified necessary exception", "both fields explicitly",
+                                "frozen luna-only", "fixed role profile", "forbids per-spawn overrides"))
     for role in ("implementer", "focused-implementer"):
         concepts(prompt(role), ("explicit closing handoff", "final product acceptance", "original objective"),
                  ("conclusion", "criterion-linked evidence", "unknown", "controller integrates", "mechanical closure"))
@@ -468,7 +487,7 @@ def test_resident_waiting_observation_and_causal_contract_rejects_negation_rever
         concepts(text, ("observation", "tests", "processes", "ci", "controller", "result"),
                  ("substantive changes", "terminal evidence"),
                  ("original failure", "local reproduction", "root cause"))
-    concepts(value, ("actual tool limits", "higher-level duration limits", "precedence"),
+    concepts(value, ("actual tool limits", "higher-level limits", "precedence"),
              ("meaningful-event early return", "confirmed", "60-minute", "default"))
     for text in (prompt("implementer"), prompt("focused-implementer")):
         concepts(text, ("actual tool limits", "higher-level limits", "precedence"),

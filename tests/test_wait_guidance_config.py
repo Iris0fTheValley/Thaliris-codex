@@ -85,7 +85,8 @@ def test_existing_user_developer_instructions_are_never_claimed(tmp_path, target
 
     result = install(tmp_path, target)
     assert result["ok"], result
-    assert result["controller_wait_guidance_compatibility"]["status"] == "USER_CONFIG_PRESERVED"
+    expected = "USER_EMPTY_PRESERVED" if value == '""' else "USER_CONFIG_PRESERVED"
+    assert result["controller_wait_guidance_compatibility"]["status"] == expected
     assert result["manual_action_required"] == []
     assert guidance.RECORD_KEY not in receipt(home)
     assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == tomllib.loads(original.decode())[guidance.KEY]
@@ -107,12 +108,34 @@ def test_user_edit_to_managed_guidance_survives_upgrade_and_uninstall(tmp_path, 
     assert upgraded["ok"], upgraded
     assert upgraded["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
     assert (home / "config.toml").read_bytes() == edited
-    result = uninstall(tmp_path, target)
-    assert result["ok"], result
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert removed["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
     assert (home / "config.toml").read_bytes() == edited
 
 
-@pytest.mark.parametrize("old_guidance", [PRE_EVENT_FIRST_GUIDANCE, (Path(__file__).parent / "fixtures/all-layer-wait-predecessor/guidance.txt").read_text(encoding="utf-8")], ids=["pre-event", "41157f5-event-first"])
+def test_empty_user_edit_to_managed_guidance_is_distinguished_and_preserved(tmp_path, target):
+    home, _ = target
+    original = b'# keep this prefix\n'
+    (home / "config.toml").write_bytes(original)
+    assert install(tmp_path, target)["ok"]
+    edited = (home / "config.toml").read_bytes().replace(
+        json.dumps(guidance.GUIDANCE).encode(), b'""', 1)
+    (home / "config.toml").write_bytes(edited)
+
+    upgraded = install(tmp_path, target)
+    assert upgraded["ok"], upgraded
+    assert upgraded["controller_wait_guidance_compatibility"]["status"] == "USER_EMPTY_PRESERVED"
+    assert (home / "config.toml").read_bytes() == edited
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert removed["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
+    removed_raw = (home / "config.toml").read_bytes()
+    assert removed_raw.startswith(original)
+    assert tomllib.loads(removed_raw.decode())[guidance.KEY] == ""
+
+
+@pytest.mark.parametrize("old_guidance", [PRE_EVENT_FIRST_GUIDANCE, (Path(__file__).parent / "fixtures/all-layer-wait-predecessor/guidance.txt").read_text(encoding="utf-8"), (Path(__file__).parent / "fixtures/role-wait-scope-predecessor/guidance.txt").read_text(encoding="utf-8")], ids=["pre-event", "41157f5-event-first", "5d65c128-all-layer"])
 @pytest.mark.parametrize("upgrade", [False, True], ids=["direct-old-uninstall", "upgrade-then-uninstall"])
 def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(tmp_path, target, monkeypatch, upgrade, old_guidance):
     home, _ = target
@@ -133,8 +156,24 @@ def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(t
         upgraded = install(tmp_path, target)
         assert upgraded["ok"], upgraded
         assert upgraded["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
-        assert (home / "config.toml").read_bytes() == managed_bytes
+        assert upgraded["controller_wait_guidance_compatibility"]["changed"] is True
+        migrated_record = receipt(home)[guidance.RECORD_KEY]
+        assert migrated_record["fragment"] == guidance._fragment("\r\n")
+        assert old_record["fragment"] in migrated_record["history"]
+        expected_bytes = managed_bytes.replace(old_record["fragment"].encode(),
+                                               migrated_record["fragment"].encode(), 1)
+        assert (home / "config.toml").read_bytes() == expected_bytes
+        assert tomllib.loads(expected_bytes.decode())[guidance.KEY] == current_guidance
+        stable_receipt = receipt(home)
+        repeated = install(tmp_path, target)
+        assert repeated["ok"], repeated
+        assert repeated["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
+        assert repeated["controller_wait_guidance_compatibility"]["changed"] is False
+        assert receipt(home) == stable_receipt
+        assert (home / "config.toml").read_bytes() == expected_bytes
+    else:
         assert receipt(home)[guidance.RECORD_KEY] == old_record
+        assert (home / "config.toml").read_bytes() == managed_bytes
 
     removed = uninstall(tmp_path, target)
     assert removed["ok"], removed
@@ -164,10 +203,184 @@ def test_user_edit_to_historical_template_is_not_reclaimed_on_upgrade_or_uninsta
     assert upgraded["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
     assert (home / "config.toml").read_bytes() == edited
 
+
+def test_successive_guidance_receipts_keep_exact_history_for_uninstall(tmp_path, target, monkeypatch):
+    home, _ = target
+    original = b'# unrelated bytes\r\n[features.multi_agent_v2]\r\nmulti_agent_mode_hint_text = "user"\r\n'
+    (home / "config.toml").write_bytes(original)
+    first_text = "First historically managed guidance."
+    second_text = "Second historically managed guidance."
+    current_text = guidance.GUIDANCE
+    monkeypatch.setattr(guidance, "GUIDANCE", first_text)
+    assert install(tmp_path, target)["ok"]
+    first_record = receipt(home)[guidance.RECORD_KEY]
+
+    monkeypatch.setattr(guidance, "GUIDANCE", second_text)
+    second = install(tmp_path, target)
+    assert second["ok"], second
+    second_record = receipt(home)[guidance.RECORD_KEY]
+    assert first_record["fragment"] in second_record["history"]
+    assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == second_text
+
+    monkeypatch.setattr(guidance, "GUIDANCE", current_text)
+    latest = install(tmp_path, target)
+    assert latest["ok"], latest
+    latest_record = receipt(home)[guidance.RECORD_KEY]
+    assert first_record["fragment"] in latest_record["history"]
+    assert second_record["fragment"] in latest_record["history"]
+    assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == current_text
+    assert uninstall(tmp_path, target)["ok"]
+    assert (home / "config.toml").read_bytes() == original
+
+
+@pytest.mark.parametrize("when,expected", [
+    ("before", "APPLY_OUTCOME_UNKNOWN_PRESERVED"),
+    ("after", "MANAGED"),
+])
+def test_interrupted_guidance_migration_recovers_from_journal_without_reacquisition(
+        tmp_path, target, monkeypatch, when, expected):
+    home, exe = target
+    original = b'# keep this exact prefix\r\n[other]\r\nvalue = "preserve"\r\n'
+    (home / "config.toml").write_bytes(original)
+    old_text = "Receipt-proven prior guidance."
+    current_text = guidance.GUIDANCE
+    monkeypatch.setattr(guidance, "GUIDANCE", old_text)
+    assert install(tmp_path, target)["ok"]
+    old_raw = (home / "config.toml").read_bytes()
+    old_record = receipt(home)[guidance.RECORD_KEY]
+    monkeypatch.setattr(guidance, "GUIDANCE", current_text)
+    contract = intent(tmp_path, home, exe)
+    write = adapter._atomic_host_write
+
+    class Interrupted(BaseException):
+        pass
+
+    def interrupt_migration(path, contents):
+        if path == home / "config.toml":
+            if when == "after":
+                write(path, contents)
+            raise Interrupted()
+        return write(path, contents)
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", interrupt_migration)
+    with pytest.raises(Interrupted):
+        adapter.codex_install(maintenance_contract=contract)
+    assert host_transition.pending(home)
+    assert (home / "config.toml").read_bytes() == (
+        old_raw if when == "before" else old_raw.replace(old_record["fragment"].encode(),
+                                                          guidance._fragment("\r\n").encode(), 1))
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", write)
+    recovered = adapter.codex_install(maintenance_contract=contract)
+    assert recovered["ok"], recovered
+    assert recovered["controller_wait_guidance_compatibility"]["status"] == expected
+    assert not host_transition.pending(home)
+    current_record = receipt(home)[guidance.RECORD_KEY]
+    assert old_record["fragment"] in current_record["history"]
+    if when == "after":
+        assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == current_text
+    else:
+        assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == old_text
+        # A later explicit install may retry after the prior journal has safely
+        # completed; recovery itself never repeats an uncertain write.
+        retried = install(tmp_path, target)
+        assert retried["ok"], retried
+        assert retried["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
+        assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == current_text
     removed = uninstall(tmp_path, target)
     assert removed["ok"], removed
-    assert removed["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
-    assert (home / "config.toml").read_bytes() == edited
+    assert (home / "config.toml").read_bytes() == original
+
+
+def test_migration_checkpoint_failure_preserves_old_field_and_original_receipt(tmp_path, target, monkeypatch):
+    home, exe = target
+    original = b'root_value = "unchanged"\n'
+    (home / "config.toml").write_bytes(original)
+    old_text = "Still owned before the checkpoint."
+    monkeypatch.setattr(guidance, "GUIDANCE", old_text)
+    assert install(tmp_path, target)["ok"]
+    old_raw = (home / "config.toml").read_bytes()
+    old_record = receipt(home)[guidance.RECORD_KEY]
+    monkeypatch.setattr(guidance, "GUIDANCE", "New value after durable checkpoint.")
+    contract = intent(tmp_path, home, exe)
+    write = host_transition._write
+
+    def fail_attempt_checkpoint(path, transition):
+        if transition["finish"].get("wait_guidance_phase") == "ATTEMPTING":
+            raise OSError("simulated required migration journal failure")
+        return write(path, transition)
+
+    monkeypatch.setattr(host_transition, "_write", fail_attempt_checkpoint)
+    failed = adapter.codex_install(maintenance_contract=contract)
+    assert not failed["ok"], failed
+    assert failed["transition_pending"] is True
+    assert host_transition.pending(home)
+    assert (home / "config.toml").read_bytes() == old_raw
+    pending_record = receipt(home)[guidance.RECORD_KEY]
+    assert old_record["fragment"] in pending_record["history"]
+
+    monkeypatch.setattr(host_transition, "_write", write)
+    recovered = adapter.codex_install(maintenance_contract=contract)
+    assert recovered["ok"], recovered
+    assert not host_transition.pending(home)
+    assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == "New value after durable checkpoint."
+    current_record = receipt(home)[guidance.RECORD_KEY]
+    assert (home / "config.toml").read_bytes() == old_raw.replace(
+        old_record["fragment"].encode(), current_record["fragment"].encode(), 1)
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert (home / "config.toml").read_bytes() == original
+
+
+@pytest.mark.parametrize("outcome,expected", [
+    ("before", "OPTIONAL_WRITE_FAILED_PRESERVED"),
+    ("after", "MANAGED"),
+    ("user_edit", "APPLY_OUTCOME_UNKNOWN_PRESERVED"),
+])
+def test_migration_write_errors_preserve_field_and_unrelated_config(
+        tmp_path, target, monkeypatch, outcome, expected):
+    home, _ = target
+    original = b'# preserve exactly\r\n[other]\r\nvalue = "unrelated"\r\n'
+    (home / "config.toml").write_bytes(original)
+    old_text = "Prior value for write-error test."
+    current_text = guidance.GUIDANCE
+    monkeypatch.setattr(guidance, "GUIDANCE", old_text)
+    assert install(tmp_path, target)["ok"]
+    old_raw = (home / "config.toml").read_bytes()
+    old_record = receipt(home)[guidance.RECORD_KEY]
+    monkeypatch.setattr(guidance, "GUIDANCE", current_text)
+    write = adapter._atomic_host_write
+
+    def fail_guidance_migration(path, contents):
+        if path == home / "config.toml":
+            if outcome == "after":
+                write(path, contents)
+            elif outcome == "user_edit":
+                path.write_bytes(b'developer_instructions = "user edit"\n' + original)
+            raise OSError("simulated guidance migration write error")
+        return write(path, contents)
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", fail_guidance_migration)
+    result = install(tmp_path, target)
+    assert result["ok"], result
+    assert result["host_integration_ready"] == "YES"
+    assert result["transition_pending"] is False
+    assert result["controller_wait_guidance_compatibility"]["status"] == expected
+    installed_record = receipt(home)[guidance.RECORD_KEY]
+    assert old_record["fragment"] in installed_record["history"]
+    expected_bytes = {
+        "before": old_raw,
+        "after": old_raw.replace(old_record["fragment"].encode(),
+                                  installed_record["fragment"].encode(), 1),
+        "user_edit": b'developer_instructions = "user edit"\n' + original,
+    }[outcome]
+    assert (home / "config.toml").read_bytes() == expected_bytes
+
+    monkeypatch.setattr(adapter, "_atomic_host_write", write)
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert (home / "config.toml").read_bytes() == (
+        expected_bytes if outcome == "user_edit" else original)
 
 
 def test_unsupported_version_does_not_insert_guidance(tmp_path, target, monkeypatch):
@@ -197,6 +410,28 @@ def test_invalid_ownership_record_fails_closed_before_config_mutation(tmp_path, 
     assert host_transition.pending(home) is False
 
 
+def test_damaged_history_receipt_is_not_used_for_migration_or_overwrite(tmp_path, target, monkeypatch):
+    home, _ = target
+    original = b'# retain these unrelated bytes\r\n[other]\r\nvalue = "kept"\r\n'
+    (home / "config.toml").write_bytes(original)
+    old_text = "Trusted old exact field value."
+    monkeypatch.setattr(guidance, "GUIDANCE", old_text)
+    assert install(tmp_path, target)["ok"]
+    monkeypatch.setattr(guidance, "GUIDANCE", "Current migration target.")
+    assert install(tmp_path, target)["ok"]
+    before = (home / "config.toml").read_bytes()
+    tampered = receipt(home)
+    tampered[guidance.RECORD_KEY]["history"][0] = "# incomplete ownership fragment\n"
+    (home / maintenance.RECEIPT_NAME).write_text(json.dumps(tampered), encoding="utf-8")
+
+    monkeypatch.setattr(guidance, "GUIDANCE", "A later migration target.")
+    result = install(tmp_path, target)
+    assert not result["ok"]
+    assert (home / "config.toml").read_bytes() == before
+    assert receipt(home) == tampered
+    assert not host_transition.pending(home)
+
+
 def test_invalid_ownership_record_is_not_hidden_by_optional_config_read_error(tmp_path, target, monkeypatch):
     home, _ = target
     assert install(tmp_path, target)["ok"]
@@ -211,26 +446,18 @@ def test_invalid_ownership_record_is_not_hidden_by_optional_config_read_error(tm
         guidance.plan_install(home, {guidance.RECORD_KEY: record})
 
 
-def test_guidance_matches_the_accepted_waiting_priorities():
+def test_guidance_keeps_only_generic_work_and_evidence_principles():
     text = guidance.GUIDANCE
     for clause in (
-        "Prefer event-driven native wait_agent waiting over timed polling",
-        "First confirm", "unconfirmed capabilities remain UNKNOWN",
-        "When meaningful-event early return and user interruption are confirmed and no dependency needs an interim decision",
-        "default to the supported 60-minute window (timeout_ms=3600000)",
-        "not a required execution duration", "native completion wakes the parent early",
-        "Short historical averages must not force an earlier wake",
-        "60 seconds for very short tasks", "10–60 minutes for ordinary tasks",
-        "about 30 minutes for longer-task stage checks",
-        "reliable events without interim decisions still favor 60 minutes",
-        "higher-level duration limits", "take precedence", "never bypass Host limits",
-        "messages and timeouts do not prove completion", "one available exact native status check",
-        "without confirming the same completion again", "Do not substitute sleep",
-        "per-child timed polling loops", "Executors own local tests,",
-        "independent closing owns final acceptance",
+        "Continue necessary independent work before waiting", "meaningful native notifications",
+        "do not wake models merely to observe unchanged state",
+        "Messages, timeouts and exceptions do not prove completion", "preserve UNKNOWN",
+        "without confirming the same completion again", "Observe your own tests or external processes",
+        "Follow applicable role instructions and the selected handoff", "grants no role or authority",
     ):
         assert clause in text
-    assert "general 60-second blocking-wait recommendation" not in text
+    for role_policy in ("wait_agent", "3600000", "60-minute", "Controller", "Implementer", "Scanner", "final acceptance"):
+        assert role_policy not in text
 
 
 @pytest.mark.parametrize("reported,supported", [

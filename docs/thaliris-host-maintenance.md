@@ -94,7 +94,17 @@ writes; uninstall preserves edited profiles. Unrelated profiles are preserved.
 ### Native multi-agent mode hint compatibility
 
 This narrow compatibility edit targets only the source-verified Codex CLI
-`0.162.0-alpha.2`: upstream tag `rust-v0.162.0-alpha.2`, peeled commit
+`0.162.0-alpha.17.2` and `0.162.0-alpha.2`, as an exact allowlist rather than a version
+family. For `0.162.0-alpha.17.2`, the pinned upstream schema declares the field as a string,
+the native mode resolver recognizes `Some("")`, and the instruction renderer
+returns no text for an empty custom value; the upstream mode-hint regression
+covers this behavior at the same immutable revision:
+[schema](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/config.schema.json#L2927),
+[mode resolver](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/session/multi_agents.rs#L77),
+[instruction renderer](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/context/multi_agent_mode_instructions.rs#L14), and
+[native regression](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/multi_agent_mode.rs#L387).
+For `0.162.0-alpha.2`, the source witness is upstream tag
+`rust-v0.162.0-alpha.2`, peeled commit
 `74e804deeb1241d5fe699b31fb319f7d46454c42`. It writes the empty string to
 `features.multi_agent_v2.multi_agent_mode_hint_text` only when that user-level
 leaf is absent. At this CLI revision, the empty value suppresses the native
@@ -131,18 +141,46 @@ The field writer rereads bytes immediately before atomic replacement, but this
 does not provide compare-and-swap protection against an external editor racing
 that final check.
 
-On Codex 0.162, the existing install/upgrade path can also add a concise
-root-level `developer_instructions` value when that user-config field is absent.
-It states that a general 60-second blocking-wait recommendation is not an
-intrinsic native `wait_agent` cap, and asks for event-aware waits informed by
-expected task duration, native completion events, and responsiveness to
-interruptions. The result reports `controller_wait_guidance_compatibility` and
-the ownership receipt stores a separate `controller_wait_guidance` field record.
-An existing user value, including an empty value, is preserved; later edits to
-the managed value are preserved on upgrade and uninstall. Uninstall removes only
-the exact recorded TOML fragment. The whole config file remains outside
-`owned_bytes` and generation rollback. A source or fixture pass does not prove a
-fresh Host session loaded the setting or that a model follows its wait guidance.
+On Codex 0.162, the existing install/upgrade path can add a concise,
+role-neutral root-level `developer_instructions` value when that user-config
+field is absent. It asks agents to continue necessary independent work, prefer
+meaningful notifications over repeated polling, preserve UNKNOWN when completion
+is unproved, and follow their role and selected handoff. An existing empty or
+custom user value is preserved.
+
+The result reports `controller_wait_guidance_compatibility`, and the ownership
+receipt stores a separate `controller_wait_guidance` field record. On upgrade,
+the field is migrated only when its complete TOML fragment exactly matches a
+fragment in the trusted prior receipt. The next receipt stores the current
+fragment and exact previous managed fragments, so recovery and uninstall retain
+ownership evidence without comparing old text with today's guidance. A changed
+value, malformed history, or unconfirmed ownership is preserved or rejected
+before the optional field write. During migration, the Host transition journal
+records the prior receipt and write phase before atomically replacing the field.
+Recovery recognizes an exact completed replacement; an uncertain outcome is
+reported as `APPLY_OUTCOME_UNKNOWN_PRESERVED` and is not silently retried in
+that recovery pass. A later explicit install may plan a new migration if the
+old exact fragment remains. Repeating a completed upgrade does not rewrite the
+config field. Uninstall removes only an exact current or receipt-recorded prior
+fragment; user edits remain. The whole config file stays outside `owned_bytes`
+and Host generation rollback. The writer rereads bytes before atomic replace,
+which still cannot prevent an editor racing that final check. Source or fixture
+tests do not prove a fresh Host session loaded the setting or that a model
+follows its guidance.
+
+### Fresh Child instruction provenance
+
+At the same pinned Codex `0.162.0-alpha.17.2` source revision, V2 child setup copies the
+parent turn's developer instructions when no child override is supplied, and
+the selected role may contribute its own developer instructions. The upstream
+app-server regression covers inheritance with no override:
+[child setup](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/agent/child_config.rs#L131),
+[role instructions](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/agent/role.rs#L182), and
+[V2 inheritance test](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/v2/multi_agent_v2_developer_instructions.rs#L472).
+This establishes the instruction propagation path; it does not prove that a
+running Host loaded a profile or that an agent follows it. Thaliris keeps the
+selected handoff in the spawn message and renders role-owned child instructions
+separately from the resident Controller program.
 
 For removal, use the existing `codex-maintenance-plan codex-uninstall` and
 `codex-uninstall --maintenance-contract FILE` path. Uninstall removes only a
@@ -304,7 +342,14 @@ contract 保留证据并停止。trust 未完成会明确报告，用户配置�
 ### 原生 multi-agent mode hint 兼容
 
 此字段级兼容修改只针对已通过源码核实的 Codex CLI
-`0.162.0-alpha.2`：上游 tag `rust-v0.162.0-alpha.2`，peeled commit
+`0.162.0-alpha.17.2` 与 `0.162.0-alpha.2` 两个精确版本，而非整个版本系列。`0.162.0-alpha.17.2` 的固定上游源码
+schema 将字段定义为字符串，原生 mode resolver 识别 `Some("")`，指令 renderer 对空 custom
+值返回无提示；同一不可变 revision 的原生回归覆盖该行为：
+[schema](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/config.schema.json#L2927)、
+[mode resolver](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/session/multi_agents.rs#L77)、
+[instruction renderer](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/context/multi_agent_mode_instructions.rs#L14) 和
+[原生回归测试](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/multi_agent_mode.rs#L387)。
+`0.162.0-alpha.2` 对应上游 tag `rust-v0.162.0-alpha.2`，peeled commit
 `74e804deeb1241d5fe699b31fb319f7d46454c42`。仅当用户级
 `features.multi_agent_v2.multi_agent_mode_hint_text` 不存在时写入空字符串；
 在此 CLI 版本中，该空值会取消原生默认的 explicit-request-only mode hint。
@@ -333,14 +378,22 @@ executor 使用原 operation 和同一 contract 重放。安装中断时，journ
 报告 `APPLY_OUTCOME_UNKNOWN_PRESERVED`，不会再次插入。
 字段写入在原子替换前会重读 bytes；这不能防止外部编辑器在最终检查期间并发写入。
 
-Codex 0.162 的既有安装/升级流程还可在用户配置不存在该字段时写入根级
-`developer_instructions`，内容简述 60 秒通用阻塞等待建议不等于原生
-`wait_agent` 的内在上限，并指导按预期任务时长选择事件等待、优先原生完成事件、
-响应中断。结果报告 `controller_wait_guidance_compatibility`，ownership receipt
-另存 `controller_wait_guidance` 字段记录。若已有用户值（包括空值），则保留；之后
-对受管值的修改也会在升级和卸载时保留。卸载只移除精确记录的 TOML 片段。整个 config
-文件仍不属于 `owned_bytes` 或 generation rollback。源码或 fixture 测试通过不能证明
-新的 Host session 已加载该设置，也不能证明模型按等待提示行动。
+Codex 0.162 的既有安装/升级流程可在用户配置缺少该字段时写入简短、角色中立的根级
+`developer_instructions`。它要求先继续必要的独立工作、优先使用有意义的通知而非重复轮询、
+在完成证据不足时保留 UNKNOWN，并遵循角色和选定 handoff。已有空值或自定义用户值会保留。
+
+结果报告 `controller_wait_guidance_compatibility`，ownership receipt 另存
+`controller_wait_guidance` 字段记录。升级时，只有完整 TOML 片段与可信旧回执中的某个片段
+精确匹配才会迁移。新回执记录当前片段和精确的历史受管片段，使恢复与卸载可以沿用历史
+ownership 证据，而不拿旧文案与今天的文本比较。不同字段值、损坏历史或无法确认的
+ownership 会保留，且不会写入该可选字段。迁移前，Host transition journal 会先记录旧回执
+和写入阶段，然后原子替换字段。恢复会识别精确完成的新片段；无法确认的结果报告为
+`APPLY_OUTCOME_UNKNOWN_PRESERVED`，本次恢复不会静默重试。若旧精确片段仍在，之后一次
+明确安装可以重新计划迁移。重复已完成的升级不会重写 config 字段。卸载只移除精确匹配的
+当前或回执记录的历史片段；用户编辑保留。整个 config 文件仍不属于 `owned_bytes` 或
+Host generation rollback。写入器在原子替换前重读 bytes，但仍无法阻止外部编辑器恰好在最终
+检查时写入。源码或 fixture 测试不能证明新的 Host session 已加载该设置，也不能证明模型
+按等待提示行动。
 
 卸载仍使用既有 `codex-maintenance-plan codex-uninstall` 与
 `codex-uninstall --maintenance-contract FILE`。只有仍精确匹配的受管字段才会删除；原始
@@ -353,6 +406,17 @@ TOML 片段完整时会恢复之前迁移的 `enabled` 布尔值。用户修改�
 `fork_context=false` 隔离，并确认仍只收到选定 handoff，同时既有任务准入、角色、
 隔离和安全行为保持正常。优先级更高的 project 配置或 CLI `-c` 可能覆盖用户级设置；
 实际观察前应把生效状态报告为 UNKNOWN。测试和安装文件本身不构成此项验收。
+
+### Fresh Child 指令来源
+
+同一固定 Codex `0.162.0-alpha.17.2` revision 中，V2 child setup 在未提供 child override 时复制父 turn 的
+developer instructions，选定 role 也可提供自己的 developer instructions。上游 app-server 回归覆盖
+没有 override 时的继承路径：
+[child setup](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/agent/child_config.rs#L131)、
+[role instructions](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/agent/role.rs#L182) 和
+[V2 inheritance test](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/v2/multi_agent_v2_developer_instructions.rs#L472)。
+这证明指令传播路径，不证明运行中的 Host 已加载 profile 或 Agent 遵循指令。Thaliris 将选定 handoff
+放在 spawn message 中，并将角色自己的 Fresh Child 指令与 resident Controller 程序分开生成。
 
 未知 role 文档以 `preserved_manual_followup` 保留，不单独阻止项目 admission；
 真正 AGENTS、activation、hook 等控制冲突仍阻止 admission。磁盘安装、Hook 注册和

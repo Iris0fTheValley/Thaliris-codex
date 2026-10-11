@@ -68,6 +68,15 @@ def test_registry_is_authoritative_for_native_profiles_and_mechanical_facts() ->
         assert definition.instructions
         assert definition.default_model is None and definition.reasoning_effort is None
         assert definition.legacy_profile_hashes or definition.id == "focused-implementer"
+    assert roles.ROLE_MODEL_ROUTING_DEFAULTS == {
+        "investigator": ("gpt-6-luna", "max"),
+        "implementer": ("gpt-6-luna", "max"),
+        "curator": ("gpt-6-luna", "max"),
+        "reviewer": ("gpt-6.1-sol", "high"),
+        "focused-implementer": ("gpt-6.1-sol", "high"),
+        "reasoning-specialist": ("gpt-6.1-sol", "high"),
+    }
+    assert not set(roles.ROLE_MODEL_ROUTING_DEFAULTS) & {"verifier", "controller"}
     assert roles.native_agent_roles() == {
         profile: definition.id for definition in native
         for profile in (definition.native_profile, definition.astra_medium_native_profile, definition.exceptional_native_profile) if profile

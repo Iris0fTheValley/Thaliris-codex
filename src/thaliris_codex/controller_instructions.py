@@ -20,6 +20,11 @@ SECTIONS = {
     "diagnosis": "Causal diagnosis and acceptance",
 }
 
+
+def _role_model_selection(role: str) -> str:
+    defaults = roles.ROLE_MODEL_ROUTING_DEFAULTS.get(role)
+    return "/".join(defaults) if defaults is not None else "Host/user/selected"
+
 # Frequency belongs to the canonical Controller layer, not to shared child prompts.
 RESIDENT_SECTIONS = tuple(name for name in SECTIONS if name not in {"task-recovery", "host-maintenance"})
 
@@ -35,10 +40,12 @@ def render(runner: str = "<installed pinned runner>", *, section: str | None = N
     source = Path(__file__).with_suffix(".md").read_text(encoding="utf-8")
     rows = "\n".join(
         f"| {role.replace('-', ' ').title()} | {roles.get_role(role).purpose or role} | "
-        f"{roles.get_codex_binding(role).model or 'Host/user'}/{roles.get_codex_binding(role).reasoning_effort or 'selected'} |"
+        f"{_role_model_selection(role)} |"
         for role in roles.role_choices() if role != "controller"
     )
-    rendered = source.replace("@RUNNER@", runner).replace("@ROLE_ROWS@", rows)
+    rendered = source.replace("@RUNNER@", runner).replace("@ROLE_ROWS@", rows).replace(
+        "@WAITING_INSTRUCTIONS@", roles._WAITING_INSTRUCTIONS.strip()
+    )
     if section is None:
         return rendered
     heading = "## " + SECTIONS[section] + "\n"

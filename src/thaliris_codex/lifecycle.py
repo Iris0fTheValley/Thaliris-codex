@@ -2443,6 +2443,10 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
         if binding is not None and expected_agent_type != binding.native_profile:
             return _permission_deny("THALIRIS_EXECUTION_CONSTRAINT: luna-only permits only the ordinary semantic role profiles.")
     target_binding = roles.get_codex_binding(role)
+    ordinary_native_profile = (
+        target_binding is not None
+        and expected_agent_type == target_binding.native_profile
+    )
     if overrides and target_binding is not None and expected_agent_type != target_binding.native_profile:
         return _permission_deny("THALIRIS_ROLE_MODEL_OVERRIDE: an exceptional compatibility profile retains its selected binding.")
     if nested and target_binding is not None and expected_agent_type != target_binding.native_profile:
@@ -2466,6 +2470,17 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exact bound depth-one Executor/Reviewer parent and Investigator target required.")
             if not nested and not roles.delegation_allowed("controller", role):
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: unsupported Controller target.")
+            if (
+                (authority is None or authority["contract"].get("execution_constraint") != "luna-only")
+                and role in roles.ROLE_MODEL_ROUTING_DEFAULTS
+                and ordinary_native_profile
+            ):
+                model = tool_input.get("model")
+                reasoning_effort = tool_input.get("reasoning_effort")
+                if not isinstance(model, str) or not model.strip() or not isinstance(reasoning_effort, str) or not reasoning_effort.strip():
+                    return _permission_deny(
+                        "THALIRIS_ROLE_MODEL_SELECTION_REQUIRED: managed spawn for this role requires explicit non-empty model and reasoning_effort arguments."
+                    )
             if state.get("identity_collisions") or any(isinstance(child, dict) and child.get("native_status_conflict") for child in state["children"]):
                 return _permission_deny("THALIRIS_NATIVE_IDENTITY_COLLISION: conflicting native spawn identities block new role-session authorization.")
             if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"} for child in state["children"]):

@@ -14,9 +14,9 @@ from thaliris_codex import codex_adapter as adapter, controller_instructions, ro
 FIXTURES = Path(__file__).parent / "fixtures/all-layer-wait-predecessor"
 
 
-@pytest.mark.parametrize("role", [role for role in roles.role_choices() if role != "controller"])
-def test_every_role_checks_independent_work_before_waiting(role):
-    text = roles.get_role(role).instructions
+@pytest.mark.parametrize("role", ["controller", "implementer", "focused-implementer", "reviewer"])
+def test_delegating_roles_check_independent_work_before_waiting(role):
+    text = roles._instructions(role)
     assert text.index("First continue independent work") < text.index("Only call wait_agent")
     assert "unfinished direct child whose result is necessary" in text
     assert "no other higher-priority work" in text
@@ -42,29 +42,45 @@ def test_scanner_parents_use_shared_events_and_direct_process_observation(role):
         "After timeout, reassess the necessary direct dependency and available independent work",
         "do not repeat useless waits indefinitely", "Do not substitute sleep",
         "high-frequency queries, heartbeat services or status-only model wakeups",
-        "continue work without elapsed-time progress messages",
+        "Continue work without elapsed-time progress messages",
         "report only completion, key blockers, major discoveries or necessary upper-level decisions",
         "corresponding tool's actual waiting capability, not wait_agent parameters",
     ):
         assert clause in text
 
 
-def test_controller_and_install_guidance_apply_all_layer_priority():
-    for text in (controller_instructions.render(section="completion"), wait_guidance_config.GUIDANCE):
-        text = " ".join(text.split())
-        assert "independent work" in text and "higher-priority work" in text
-        assert "direct dependencies" in text
-        assert "user interruption" in text and "confirmed" in text
-        assert "3600000" in text
-        assert "exceptions do not fabricate terminal evidence" in text
-        assert "After timeout, reassess" in text
-        assert "avoid infinite useless waits" in text
-        assert "only completion, key blockers, major discoveries" in text
-        assert "elapsed-time" in text
-        assert "not execution deadlines" in text or "not a required child execution duration" in text
+@pytest.mark.parametrize("role", ["investigator", "curator", "verifier", "reasoning-specialist"])
+def test_non_delegating_roles_only_receive_work_notification_evidence_principles(role):
+    text = roles.get_role(role).instructions
+    assert "Continue necessary independent work before waiting" in text
+    assert "Messages, timeouts and exceptions do not prove completion" in text
+    assert "no ordinary progress, heartbeat or partial-completion messages" in text
+    for parent_policy in ("wait_agent", "3600000", "60-minute", "direct child", "wake-only", "per-child polling"):
+        assert parent_policy not in text
+    assert "Do not delegate" in text
 
 
-def test_exact_previous_profiles_keep_filename_bound_ownership():
+def test_controller_uses_the_canonical_parent_wait_policy_once():
+    text = controller_instructions.render(section="completion")
+    assert text.count(roles._WAITING_INSTRUCTIONS.strip()) == 1
+    assert "child notifications" in text
+    assert "@WAITING_INSTRUCTIONS@" not in controller_instructions.resident("runner")
+
+
+def test_optional_user_guidance_grants_no_parent_or_closing_role():
+    text = wait_guidance_config.GUIDANCE
+    assert "grants no role or authority" in text
+    assert "applicable role instructions and the selected handoff" in text
+    for role_policy in ("wait_agent", "3600000", "Controller", "Implementer", "Scanner", "final acceptance"):
+        assert role_policy not in text
+
+
+@pytest.mark.parametrize("fixture_name,hash_registry", [
+    ("all-layer-wait-predecessor", adapter._ALL_LAYER_WAIT_PREDECESSOR_PROFILE_HASHES),
+    ("role-wait-scope-predecessor", adapter._ROLE_WAIT_SCOPE_PREDECESSOR_PROFILE_HASHES),
+])
+def test_exact_previous_profiles_keep_filename_bound_ownership(fixture_name, hash_registry):
+    FIXTURES = Path(__file__).parent / "fixtures" / fixture_name
     manifest = json.loads((FIXTURES / "provenance.json").read_text(encoding="utf-8"))
     source = (FIXTURES / "roles.py.blob").read_bytes()
     git_blob = hashlib.sha1(b"blob " + str(len(source)).encode() + b"\0" + source).hexdigest()
@@ -77,7 +93,7 @@ def test_exact_previous_profiles_keep_filename_bound_ownership():
         exec(compile(source, "historical_roles.py", "exec"), old.__dict__)
         namespace = {"roles": old, "json": json}
         exec(compile(renderer, "historical_profile_renderer.py", "exec"), namespace)
-        assert adapter._ALL_LAYER_WAIT_PREDECESSOR_PROFILE_HASHES == manifest["profiles"]
+        assert hash_registry == manifest["profiles"]
         for policy, expected in manifest["profiles"].items():
             for name, (model, effort, role) in old.agent_profiles(None if policy == "default" else policy).items():
                 raw = namespace["_agent_profile"](name[:-5], role, model, effort)

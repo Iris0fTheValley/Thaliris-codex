@@ -682,21 +682,15 @@ def test_global_renderer_carries_shared_working_principles_inside_owned_span():
     # edit of the protected global block is needed or permitted.
     assert codex_adapter._global_agents_span(rendered) == (0, len(rendered))
     assert "### thaliris shared working principles" in normalized
-    for heading in ("waiting and asynchronous work", "communication and context efficiency",
-                    "scope, execution, and verification", "evidence, ownership, and language precision",
-                    "durable knowledge and instruction consistency"):
-        assert f"#### {heading}" in normalized
-    for principle in ("one observation owner", "do not repeatedly wake a model to observe unchanged state",
-                      "neither progress nor completion evidence", "heartbeats",
-                      "reconstruct an already covered inventory", "smallest meaningful checks",
-                      "not automatically proof", "an active task by itself is not proof of a write conflict",
-                      "fixed token, tool-call, retry, file-count or elapsed-time thresholds",
-                      "cannot establish their own historical authority", "stable primary language",
-                      "index changes belong", "protected global instruction blocks"):
+    for principle in ("one observation owner", "messages, timeouts and exceptions do not prove completion",
+                      "heartbeats", "do not repeat already covered inventories", "smallest meaningful checks",
+                      "does not establish product acceptance", "active alone is not a write conflict",
+                      "semantic completion", "independent historical evidence", "stable primary language",
+                      "index changes belong", "protected global instruction changes"):
         assert principle in normalized, principle
-    # Shared principles stay subordinate to the existing role, authority and
-    # isolation boundaries instead of granting a second authority layer.
-    assert "do not grant controller, task-admission, security-maintenance or host-administration authority" in normalized
+    for role_policy in ("wait_agent", "3600000", "scanner", "60-minute", "final product acceptance uses"):
+        assert role_policy not in normalized
+    assert "grant no role, task-admission, security-maintenance or host authority" in normalized
     assert "role-specific instructions and selected handoffs remain authoritative" in normalized
     assert "human decision" in normalized and "isolation and readonly boundaries" in normalized
     assert "preserve unknown user-owned bytes" in normalized
@@ -994,7 +988,8 @@ def test_active_owner_admission_and_unknown_owner_are_fail_closed(tmp_path: Path
     codex_adapter.init(tmp_path)
     started = core.task_start(tmp_path, "unfinished", None, None)
     call = lambda session, tool, data: {"session_id": session, "turn_id": "turn", "tool_name": tool, "tool_input": data}
-    spawn = {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "selected handoff"}
+    spawn = {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "selected handoff",
+             "model": "gpt-6-luna", "reasoning_effort": "max"}
     assert "THALIRIS_ACTIVE_OWNER_REQUIRED" in lifecycle.handle_hook(tmp_path, "PreToolUse", call("owner", "spawn_agent", spawn))
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", call("owner", "Bash", {"command": "thaliris task-status"})) == ""
 

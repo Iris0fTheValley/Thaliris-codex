@@ -387,7 +387,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         safe(home / "config.toml")
         record = ownership(home, prior, intent)
         hint_record, hint_status = mode_hint_config.plan_install(home, record)
-        wait_guidance_record, wait_guidance_status = wait_guidance_config.plan_install(home, record)
+        wait_guidance_record, wait_guidance_status, wait_guidance_previous_record = wait_guidance_config.plan_install(home, record)
         if record.get("execution_constraint") == "luna-only" and execution_constraint != "luna-only":
             raise ValueError("existing luna-only installation requires the same explicit constraint; omission cannot remove it")
         exe, sha, problem = adapter._host_install_executable(home, candidate, executable_sha256 or json.loads(approved)["executable_sha256"])
@@ -459,7 +459,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             if not hook_handlers[event]:
                 hook_handlers[event] = [entry for entry in merged.get("hooks", {}).get(event, [])
                     if entry in record.get("hook_handlers", {}).get(event, [])]
-        installation_changed = hint_status["status"] == "PLANNED" or wait_guidance_status["status"] == "PLANNED" or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
+        installation_changed = hint_status["status"] == "PLANNED" or wait_guidance_status["status"] in {"PLANNED", "MIGRATION_PLANNED"} or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
             before.get(name) != contents for name, contents in writes.items()
         )
         receipt = {"format": RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
@@ -489,6 +489,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
               "execution_constraint": execution_constraint, "changed_files": changed_files,
               "mode_hint_record": hint_record, "mode_hint_status": hint_status,
               "wait_guidance_record": wait_guidance_record,
+              "wait_guidance_previous_record": wait_guidance_previous_record,
               "wait_guidance_status": wait_guidance_status}
     try:
         with host_transition.locked(home):
@@ -534,7 +535,7 @@ def _finish_install(home, transition):
         if hint["changed"]:
             changed_files.append("config.toml")
     wait_guidance = finish.get("wait_guidance_status", wait_guidance_config.status("LEGACY_UNMANAGED"))
-    if ready and wait_guidance["status"] in {"PLANNED", "MANAGED"}:
+    if ready and wait_guidance["status"] in {"PLANNED", "MIGRATION_PLANNED", "MANAGED"}:
         wait_guidance = wait_guidance_config.finish_install(home, transition)
         if wait_guidance["changed"]:
             changed_files.append("config.toml")

@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 from thaliris import core
-from thaliris_codex import cli, codex_adapter, lifecycle
+from thaliris_codex import cli, codex_adapter, lifecycle, roles
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +33,9 @@ def _fixture(tmp_path):
         "turn_id": "turn",
         "tool_name": "spawn_agent",
         "tool_use_id": "old-native-call",
-        "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "old handoff"},
+        "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "old handoff",
+                       "model": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][0],
+                       "reasoning_effort": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][1]},
     }
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
     # Emulate the older ledger format whose depth-one pending reservation was
@@ -311,7 +313,9 @@ def test_owner_abort_fences_bound_old_child_identity_but_retains_owner(tmp_path)
     owner = {"session_id": "old-controller-session", "tool_name": "Bash", "tool_input": {"command": "thaliris task-status"}}
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", owner) == ""
     spawn = {"session_id": "old-controller-session", "turn_id": "fresh-turn", "tool_name": "spawn_agent",
-             "tool_use_id": "fresh-native-call", "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff"}}
+             "tool_use_id": "fresh-native-call", "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff",
+                 "model": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][0],
+                 "reasoning_effort": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][1]}}
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
     fresh_path = lifecycle._lifecycle_path(tmp_path, fresh["task_id"])
     before = json.loads(fresh_path.read_text(encoding="utf-8"))
@@ -349,7 +353,9 @@ def test_late_posttooluse_collision_cannot_attach_old_result_to_fresh_reservatio
         "turn_id": "fresh-turn",
         "tool_name": "spawn_agent",
         "tool_use_id": "fresh-native-call",
-        "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff"},
+        "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff",
+                       "model": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][0],
+                       "reasoning_effort": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][1]},
     }
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
     fresh_path = lifecycle._lifecycle_path(tmp_path, fresh["task_id"])
@@ -381,7 +387,9 @@ def test_owner_abort_same_turn_and_handoff_fails_closed_without_native_call_id(t
     fresh = core.task_start(tmp_path, "fresh task", None, None)
     lifecycle.record_task_start_owner(tmp_path, fresh["task_id"], hashlib.sha256(b"old-controller-session").hexdigest())
     spawn = {"session_id": "old-controller-session", "turn_id": "turn", "tool_name": "spawn_agent",
-             "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "old handoff"}}
+             "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "old handoff",
+                 "model": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][0],
+                 "reasoning_effort": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][1]}}
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
     fresh_path = lifecycle._lifecycle_path(tmp_path, fresh["task_id"])
     before = fresh_path.read_bytes()
@@ -396,7 +404,9 @@ def test_late_old_callbacks_cannot_change_fresh_task_lifecycle(tmp_path):
     lifecycle.record_task_start_owner(tmp_path, fresh["task_id"], hashlib.sha256(b"new-controller-session").hexdigest())
     spawn = {
         "session_id": "new-controller-session", "turn_id": "new-turn", "tool_name": "spawn_agent",
-        "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff"},
+        "tool_input": {"fork_turns": "none", "agent_type": "thaliris-implementer", "message": "fresh handoff",
+                       "model": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][0],
+                       "reasoning_effort": roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"][1]},
     }
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", spawn) == ""
     child = {"session_id": "new-controller-session", "turn_id": "child-turn", "agent_id": "same-child", "agent_type": "thaliris-implementer"}

@@ -111,7 +111,7 @@ Codex 提供原生 Controller 会话、角色会话、工具和协作能力；ad
 
 全局指令同时承载共享工作原则：复用选定证据，按工作依赖协调写入，用最小但有意义的检查验证行为，并让一个 owner 观察必要依赖。正常 Controller 指导由 Bootstrap 交付；异常恢复和 Host 维护按需检索。详细运行时协议见[集成说明](adapter/codex/README.md)，任务边界见[Authority 契约](docs/thaliris-task-authority.md)。
 
-普通生成的角色 profile 省略 model 和 effort，由原生 spawn、配置与用户选择解析，同时保留角色指令和只读边界。按工作选择足够的能力，适合时降低成本，不固定角色与模型映射。Astra 仍需当前任务的人类 opt-in；静态 Astra 兼容 profile 保持固定绑定，luna-only 继续冻结。历史安装的 profile 可能仍固定模型；源码变化不证明当前 Host 已加载更新。见[原生选择优先级](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning)。
+普通生成的角色 profile 故意省略 model 和 effort，因为 Codex 会在 spawn 参数之后应用 role model 配置。Controller 默认让 Investigator、Implementer、Curator 使用 gpt-6-luna/max，让 Reviewer、Focused Implementer、Reasoning Specialist 使用 gpt-6.1-sol/high；原生派遣必须显式传入 model 与 reasoning_effort，managed Hook 会在 reservation 前拒绝缺项。明确的 execution constraint 或经验证的必要例外可以指定其他受支持组合；这只改变执行选择，不改变角色职责或权限。Verifier 保持现有配置，Controller 自身模型不变。Astra 仍需当前任务的人类 opt-in；静态 Astra 兼容 profile 保持固定绑定，luna-only 继续冻结并禁止 per-spawn 覆盖。历史安装的 profile 可能仍固定模型；源码变化不证明当前 Host 已加载更新。见[原生选择优先级](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning)。
 
 ## 安装与本地开发
 
@@ -140,12 +140,13 @@ $exe = $runtime.executable
 请将 adapter commit 占位符替换为独立审阅的已发布不可变版本。Host 维护使用 `codex-maintenance-plan` 和明确的 `--maintenance-contract FILE`，不依赖项目 init/task admission。原始授权安装记录证明 bytes ownership；候选内容相同不证明 ownership。未知项目 role 文档保留且不单独阻止 admission，真正控制指令冲突仍阻止。受支持的卸载和正常重装保留用户配置及恢复证据。公共流程和 legacy 批准边界见 [Host 维护](docs/thaliris-host-maintenance.md)。
 
 `multi_agent_mode_hint_text` 兼容项仅支持源码已核实的 Codex CLI
-`0.162.0-alpha.2`（tag `rust-v0.162.0-alpha.2`，commit
-`74e804deeb1241d5fe699b31fb319f7d46454c42`），且只在用户级字段缺失时写入空字符串；
+`0.162.0-alpha.17.2` 与 `0.162.0-alpha.2` 两个精确版本，且只在用户级字段缺失时写入空字符串；
+`0.162.0-alpha.17.2` 的 schema 和原生空值处理按不可变 Codex 源码核验，`0.162.0-alpha.2` 对应 tag
+`rust-v0.162.0-alpha.2`、commit `74e804deeb1241d5fe699b31fb319f7d46454c42`；
 未知版本和用户已有值均保留。高优先级 project 配置或 CLI `-c` 仍可能覆盖它。字段
 ownership、正常升级/卸载入口和 fresh-session/Fresh Child 验收见 [Host 维护](docs/thaliris-host-maintenance.md)。
 
-可选等待指导的配置读写失败会报告结果，不阻断安装；无法确认的写入结果保持 UNKNOWN。升级/卸载的 ownership 以先前回执的精确字节为依据；当前文案不能证明历史 ownership，用户编辑继续保留。开始配置写入前仍须先持久化其 ownership journal。
+可选等待指导只在字段缺失且 Codex 版本受支持时写入；已有空值或自定义值保持原样。升级时，只有字段完整匹配可信旧回执中的精确片段才会自动迁移到当前文案；回执保留这些历史片段供恢复与卸载。用户编辑或无法验证的历史记录不会被覆盖。读写失败不阻断 Host 安装，写前先持久化 ownership journal；无法确认的结果保持 UNKNOWN。
 
 
 setup 在创建候选目录前，通过 OS handle 解析自动发现的 Host LocalCache 物理 base，
@@ -236,7 +237,7 @@ Authority 恢复必须通过显式 Task ID，或已经关联到该任务的 sess
 {"execution_constraint": "luna-only"}
 ```
 
-Core 将该可选非空字符串作为不可变 intent 保存；适配器只接受 luna-only，并验证每个执行绑定。外部 anchor 固定已校验的 profile/config hashes，子角色与可变配置不能扩展或解除约束。安装后需要新的 Host session。Admission 比较 SessionStart 时记录的 role profile 和公开 config 文件快照；磁盘快照不能证明 Host 实际加载的 role map 或 CLI -c 覆盖。SubagentStart 核对受约束子角色的 Host model；缺失或不匹配时 handoff 不绑定，之后该子角色的工具会被拒绝，但 hook 无法阻止模型调用。约束禁止 Astra profile 和每次 spawn 的模型覆盖；未启用约束时普通 profile 继承原生选择。详细迁移说明见 [执行约束移植说明](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md)。
+Core 将该可选非空字符串作为不可变 intent 保存；适配器只接受 luna-only，并验证每个执行绑定。外部 anchor 固定已校验的 profile/config hashes，子角色与可变配置不能扩展或解除约束。安装后需要新的 Host session。Admission 比较 SessionStart 时记录的 role profile 和公开 config 文件快照；磁盘快照不能证明 Host 实际加载的 role map 或 CLI -c 覆盖。SubagentStart 核对受约束子角色的 Host model；缺失或不匹配时 handoff 不绑定，之后该子角色的工具会被拒绝，但 hook 无法阻止模型调用。约束禁止 Astra profile 和每次 spawn 的模型覆盖；该模式使用固定的 Luna/xhigh role profile。未启用约束时，六个默认路由角色仍须显式传入 model 与 reasoning_effort，缺项会在 reservation 前拒绝；执行约束或经验证的必要例外可优先于默认路由。详细迁移说明见 [执行约束移植说明](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md)。
 
 该功能需要 thaliris>=0.4.4。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
 

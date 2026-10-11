@@ -540,6 +540,14 @@ for _profile_set in _ALL_LAYER_WAIT_PREDECESSOR_PROFILE_HASHES.values():
 _KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'77b0f582764de7a713f008e51194e21b85a49539d51151e432415f2596551657'})
 
 
+# Immutable 5d65c128 predecessor; source and renderer are pinned in fixtures.
+_ROLE_WAIT_SCOPE_PREDECESSOR_PROFILE_HASHES = {'default': {'thaliris-investigator.toml': 'c83ce88656ec2b81b1cd028e67fef5b4342346eadb6689841408638dc0d05a96', 'thaliris-curator.toml': '8f607364e0bdde6db5e969d00f0450b25060c7ace187c868d7b659d4dbd1d67c', 'thaliris-reasoning-specialist.toml': '34c27f7edf7d48a433e9d77153f4a68bbaec0e7a7b79b69eb61a1bfb5797cdca', 'thaliris-implementer.toml': '3304aa453e614949803e72257e6dff0632fbfed7f8cef23df7eb31bc1a2aacf9', 'thaliris-focused-implementer.toml': '43e3f17c3ded67848b991251079d3323183c23b12be75f6f036955a8ad7a395f', 'thaliris-verifier.toml': 'de4d50487e34772b763076fc996f2dade84c99f89dc9479753697edbc454fd6a', 'thaliris-reviewer.toml': '314ff6d2846d753212b7ead1c2d21f0f66c5d5fe23c03e41e147a0cd6a393c0c', 'thaliris-reasoning-specialist-astra-medium.toml': 'ff780e0f49a5b7b405cdb5f08f1351878e658ad7b032ca03000db33b7bc4f756', 'thaliris-reasoning-specialist-xhigh.toml': '7018d45917a41e50ebd692a8e9ac5282fa8f19772d08f627338d9a0470ce7b8c', 'thaliris-focused-implementer-astra-medium.toml': 'aaeb64e8aa62f551d2786e00a7e2a3c06c767bbaa4938c91902ba363f4cbd159', 'thaliris-focused-implementer-xhigh.toml': '1fa63dbf7105cbf3327e40a5b29f0efb8842046d5ecc978de0a491ba6107bd4a'}, 'luna-only': {'thaliris-investigator.toml': '0a0311de57b0931b3a96fe235868bc8ff3ee2a8421efd9915558a3e49e5e9e32', 'thaliris-curator.toml': 'e98208e47358706270fdbd5d671039a7caa43e4c39559efeed36bca434c4a03a', 'thaliris-reasoning-specialist.toml': 'a055e348e1ae49a2538829e2e41248fe95a9310743984ae8130faa19538c1635', 'thaliris-implementer.toml': '64ff2a185f2f90995aed66f566585df5e8364e7b053e3d85a211288e49645fce', 'thaliris-focused-implementer.toml': 'd86c068d9f8babbd9c0e7975774605ff353a663c21f0a8a880fe3f15cff43f67', 'thaliris-verifier.toml': '63f6aced59ac0f9e2399209dd09ab6d809261d16e2dbee1dadc6c0f464a6b38e', 'thaliris-reviewer.toml': '89e1d000fe3d7a5f8c8f62cc4ced49bf02bc9cd8c4ac364499f58b8bd6ad82da', 'thaliris-reasoning-specialist-astra-medium.toml': 'ff780e0f49a5b7b405cdb5f08f1351878e658ad7b032ca03000db33b7bc4f756', 'thaliris-reasoning-specialist-xhigh.toml': '7018d45917a41e50ebd692a8e9ac5282fa8f19772d08f627338d9a0470ce7b8c', 'thaliris-focused-implementer-astra-medium.toml': 'aaeb64e8aa62f551d2786e00a7e2a3c06c767bbaa4938c91902ba363f4cbd159', 'thaliris-focused-implementer-xhigh.toml': '1fa63dbf7105cbf3327e40a5b29f0efb8842046d5ecc978de0a491ba6107bd4a'}}
+for _profile_set in _ROLE_WAIT_SCOPE_PREDECESSOR_PROFILE_HASHES.values():
+    for _profile_name, _profile_hash in _profile_set.items():
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash})
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'07b0565e3790ae2768c557a50ce6e48feb6a366ec8eae3e4b0768a44129d22a1'})
+
+
 def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
     # isolation instructions contain quotes that must not terminate the value.
@@ -997,12 +1005,14 @@ recovery/Host maintenance retrieved on demand. Full mechanical
 design belongs to [Codex protocol](../adapter/codex/README.md), not repeated prompts.
 
 {_native_profile_facts()}
-Ordinary profiles omit model and effort: native spawn, configuration and user selection
-resolve them, while role instructions and readonly boundaries remain binding. Static
-Astra variants retain fixed bindings and require current-task human authorization.
-Dedicated luna-only policy freezes Luna/xhigh bindings and forbids model overrides;
-it changes execution, not role responsibilities. Source rendering does not prove that
-a running Host loaded these profiles.
+Ordinary profiles omit model and effort. Controller's resident routing table supplies
+the default model/effort pair, and managed native spawns must pass both fields
+explicitly. Codex applies a configured role model after spawn arguments, so keeping
+these profiles model-free preserves explicit task exceptions. Static Astra variants
+retain fixed bindings and require current-task human authorization. Dedicated
+luna-only policy freezes Luna/xhigh bindings and forbids model overrides; it changes
+execution, not role responsibilities. Source rendering does not prove that a running
+Host loaded these profiles.
 
 {role_sections}
 """
@@ -1495,90 +1505,33 @@ installs into Host.
 
 ### Thaliris shared working principles
 
-These principles apply to all agents. Role-specific instructions and selected
-handoffs remain authoritative. Shared instructions do not grant Controller,
-task-admission, security-maintenance or Host-administration authority.
+Role-specific instructions and selected handoffs remain authoritative. These shared
+principles grant no role, task-admission, security-maintenance or Host authority.
 
-#### Waiting and asynchronous work
-
-- Wait only for unfinished work whose result is necessary. Prefer native
-  notifications or waiting for meaningful events over repeated status polling.
-- Choose wait durations according to the expected event, available capabilities and
-  applicable time limits. A tool's maximum permitted duration is not its recommended
-  default. Do not impose universal waiting durations.
-- Assign one observation owner to each operation or dependency. The agent running a
-  test, build, process or CI job should ordinarily monitor it and report substantive
-  changes or terminal results. Other agents should not duplicate that observation.
-- Do not repeatedly wake a model to observe unchanged state. A timeout alone is
-  neither progress nor completion evidence and does not justify another status-only
-  reasoning round.
-- Once reliable completion evidence or a final result is available, use it without
-  waiting for or confirming the same completion again. Preserve UNKNOWN when
-  completion cannot be established.
-
-#### Communication and context efficiency
-
-- Avoid routine agent-to-agent progress messages, heartbeats, partial-completion
-  reports and repeated unchanged status updates. Communicate substantive findings,
-  necessary corrections, decision-changing blockers and final results. This does not
-  prohibit user-requested progress reporting.
-- Keep large investigation working sets, tool logs and intermediate reasoning within
-  the responsible agent's context. Transfer concise findings, authoritative source
-  locations, relevant evidence, unresolved contradictions and verification results
-  instead of raw histories.
-- Reuse established facts, selected inventories and authoritative sources. Reopen
-  specific originals when necessary for a decision, but do not repeat broad searches
-  or reconstruct an already covered inventory without a material new evidence gap.
-
-#### Scope, execution, and verification
-
-- Preserve the original task objective, explicit constraints, selected handoff and
-  acceptance criteria. Resolve ordinary in-scope defects within the assigned work
-  rather than repeatedly escalating or creating unnecessary stages. Do not silently
-  change the accepted direction or expand the task.
-- Treat unrelated workspace anomalies as observations unless the current changes
-  caused them, the modification boundary owns them or the original acceptance
-  requires addressing them. Report relevant out-of-scope findings without
-  automatically repairing them.
-- Verify changes against the behavior and risks relevant to the task. Start with the
-  smallest meaningful checks and broaden verification only when there is a concrete
-  integration or compatibility reason. Do not introduce arbitrary test gates,
-  repeated full test suites or mandatory review stages for routine changes.
-- A passing test, successful build, completed tool call or apparently clean diff is
-  not automatically proof that the requested outcome is satisfied. Distinguish
-  observed evidence from inference and leave unsupported acceptance claims
-  unverified.
-- Independent work may proceed in parallel where useful. Coordinate overlapping
-  writes to shared files or use isolated worktrees. An ACTIVE task by itself is not
-  proof of a write conflict.
-- Do not use fixed token, tool-call, retry, file-count or elapsed-time thresholds as
-  substitutes for task-specific judgment, actual evidence and semantic completion.
-
-#### Evidence, ownership, and language precision
-
-- Historical ownership, authorization and compatibility claims require relevant
-  independent evidence. Current HEAD, matching generated output or a successful
-  local test cannot establish their own historical authority.
-- Preserve unknown or user-owned content and distinguish authoritative source files
-  from generated or derived outputs. Synchronize derived artifacts through their
-  established canonical sources rather than independently editing conflicting
-  copies.
-- Use a stable primary language while preserving precision-bearing original
-  terminology, quotations, distinctions and user formulations where translation
-  could change meaning. Avoid unnecessary full translation, bilingual repetition or
-  arbitrary language switching.
-
-#### Durable knowledge and instruction consistency
-
-- Do not create memory candidates, registers, counters or mandatory memory
-  checkpoints as routine task overhead. Durable knowledge and INDEX changes belong
-  to the explicitly responsible role or assignment; ordinary agents return relevant
-  facts and evidence without independently creating a memory-management workflow.
-- When modifying Thaliris roles, startup behavior, routing, trust boundaries or task
-  contracts, identify corresponding repository, generated and Host instruction
-  surfaces that may need synchronization. Preserve their ownership boundaries.
-  Source changes do not authorize direct modification of installed Host integration
-  or protected global instruction blocks.
+- Continue necessary independent work before waiting. Prefer meaningful native
+  notifications over repeated status polling. Use available completion evidence
+  without repeated confirmation; messages, timeouts and exceptions do not prove
+  completion. Preserve UNKNOWN when evidence is unavailable.
+- Assign one observation owner to each operation: observe your own tests, builds,
+  processes and CI using their tools. Avoid unchanged-state wakeups and routine
+  agent heartbeats; communicate substantive findings, blockers and final results.
+  User-requested progress reporting remains allowed.
+- Keep working sets private and transfer selected facts, source pointers, unknowns,
+  contradictions and verification. Reuse established discovery; reopen originals
+  when a decision requires them. Do not repeat already covered inventories.
+- Preserve the objective, scope, constraints and acceptance. Resolve in-scope
+  defects; report unrelated anomalies without expanding the modification boundary.
+  Start with the smallest meaningful checks and broaden for concrete risks. A
+  passing check alone does not establish product acceptance. Do not use fixed
+  time, token, call, retry or file thresholds as substitutes for semantic completion.
+- Coordinate overlapping writes or isolate them. ACTIVE alone is not a write
+  conflict. Preserve unknown/user-owned bytes; render derived outputs through
+  canonical sources. Historical ownership needs independent historical evidence.
+- Use a stable primary language and retain precision-bearing original terms.
+  Durable knowledge and INDEX changes belong to the explicitly assigned role;
+  do not add routine memory-management workflows. Synchronize affected repository
+  instruction surfaces within their ownership boundaries; source edits do not
+  authorize installed Host or protected global instruction changes.
 
 <!-- thaliris:global:end -->
 """.encode("utf-8")

@@ -371,9 +371,13 @@ def test_field_management_with_real_trust_code_and_disk_rpc_fake(tmp_path, targe
     assert writes[-1]["expectedVersion"].startswith("sha256:")
 
 
-@pytest.mark.parametrize("reported", ["codex-cli 0.162.0-alpha.2", "codex-cli 0.161.0", "codex-cli 0.163.0", "garbage"])
+@pytest.mark.parametrize("reported", [
+    "codex-cli 0.162.0-alpha.17.2", "codex-cli 0.162.0-alpha.2",
+    "codex-cli 0.162.0-alpha.17.3", "codex-cli 0.162.0-alpha.17.20",
+    "codex-cli 0.17.2", "codex-cli 0.161.0", "codex-cli 0.163.0", "garbage",
+])
 def test_version_support_boundary(monkeypatch, reported):
     import subprocess
     monkeypatch.setattr(hint.shutil, "which", lambda name: "controlled-fake-codex")
     monkeypatch.setattr(hint.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, reported, ""))
-    assert hint.capability() == ("SUPPORTED" if reported == hint.SUPPORTED_VERSION else "UNKNOWN")
+    assert hint.capability() == ("SUPPORTED" if reported in hint.SUPPORTED_VERSIONS else "UNKNOWN")

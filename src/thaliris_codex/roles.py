@@ -129,7 +129,7 @@ _WAITING_INSTRUCTIONS = (
     "for an unfinished direct child whose result is necessary, with no other higher-priority work. "
     "This policy applies at every authorized delegation layer, including Implementer or Reviewer "
     "waiting for an Investigator Scanner; observe only your direct dependencies. First confirm the "
-    "current Host's meaningful-event early return, user interruption and actual tool maximum; "
+    "current Host's meaningful-event early return, user interruption, child notifications and actual tool maximum; "
     "unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early return and "
     "user interruption and no interim decision, default to the supported 60-minute window "
     "(timeout_ms=3600000); completion can wake the parent early. Windows are not execution "
@@ -144,10 +144,20 @@ _WAITING_INSTRUCTIONS = (
     "check; use valid completion once without repeated confirmation. After timeout, reassess the "
     "necessary direct dependency and available independent work before any further wait; do not "
     "repeat useless waits indefinitely. Do not substitute sleep, high-frequency queries, heartbeat "
-    "services or status-only model wakeups. While executing, continue work without elapsed-time "
-    "progress messages; report only completion, key blockers, major discoveries or necessary "
-    "upper-level decisions. Tests, builds, CI and external processes belong to their direct "
+    "services or status-only model wakeups. Do not poll a finished child or create repeated "
+    "status-only reasoning turns solely to observe unchanged state when native waiting is available. "
+    "Tests, builds, CI and external processes belong to their direct "
     "executor: use the corresponding tool's actual waiting capability, not wait_agent parameters. "
+)
+
+
+_WORK_NOTIFICATION_INSTRUCTIONS = (
+    "Continue necessary independent work before waiting. Prefer meaningful native notifications "
+    "over repeated status polling; do not wake models merely to observe unchanged state. "
+    "Messages, timeouts and exceptions do not prove completion; preserve UNKNOWN when "
+    "native completion evidence is unavailable. Use an available completed result without "
+    "confirming the same completion again. Observe your own tests or external processes "
+    "with their corresponding tools. "
 )
 
 
@@ -161,6 +171,8 @@ _SHARED_INSTRUCTIONS = (
     "the owning Controller remains the Thaliris task owner. "
     "Return decision-changing unknowns or unverified external dependencies in FINAL for Controller routing. Keep working sets and "
     "tool logs private; send no ordinary progress, heartbeat or partial-completion messages. "
+    "Continue work without elapsed-time progress messages; report only completion, key blockers, "
+    "major discoveries or necessary upper-level decisions. "
     "Return Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, "
     "Verification performed and optional repo-relative Artifact refs. "
 )
@@ -191,7 +203,12 @@ _EXECUTOR_INSTRUCTIONS = (
     "their corresponding tool capabilities. "
     "Reuse original failures and minimal local reproductions; distinguish failed boundaries "
     "from inferred root causes and preserve refusal/identity/ownership guarantees. "
-    "You may delegate an independent, "
+    "When delegating a Scanner, pass model=\"gpt-6-luna\" and reasoning_effort=\"max\", "
+    "unless frozen luna-only applies; that constraint uses its fixed role profile and "
+    "forbids per-spawn overrides. Another explicit execution constraint or verified "
+    "necessary exception may require a different supported pair; preserve it and pass "
+    "both fields explicitly. This model choice does not change selected scope or role "
+    "permissions. You may delegate an independent, "
     "genuinely uncovered discovery set to a fresh Investigator Scanner, fork_turns=\"none\" (V2) or fork_context=false (V1), "
     "under the selected task model constraints. Wait only while its needed result is unfinished; use its "
     "FINAL without another wait or repeated discovery. Only one Scanner may be active/pending "
@@ -237,8 +254,8 @@ def _instructions(role: str) -> str:
             'non-conflicting; modify, merge, split, narrow, supersede, or delete only selected '
             'entries. Report no write when existing knowledge is sufficient. Return a missing '
             'selection to the Controller if reconciliation depends on unselected material. Keep '
-            'detailed evidence in canonical sources or Artifacts. Do not scan the corpus, decide '
-            'architecture, or delegate.'
+            'detailed evidence in canonical sources or Artifacts. Do not delegate or scan the corpus '
+            'or decide architecture.'
         ),
         'reasoning-specialist': (
             'Independently challenge the selected framing and decision basis: hidden assumptions, '
@@ -246,8 +263,8 @@ def _instructions(role: str) -> str:
             'alternatives. Challenge coherent framing or unexpected outcomes when they could change '
             'direction. Distinguish evidence from inference; report the strongest material challenge, '
             'direction-changing alternatives, and critical missing facts for the Controller to route. '
-            'Do not gather broad facts, implement, conduct routine review, solve an ordinary hard '
-            'problem for its own sake, make the final task decision, or delegate.'
+            'Do not delegate. Do not gather broad facts, implement, conduct routine review, solve an '
+            'ordinary hard problem for its own sake, or make the final task decision.'
         ),
         'implementer': (
             'Implement the stable accepted direction through deterministic convergence. Resolve '
@@ -286,7 +303,13 @@ def _instructions(role: str) -> str:
             'invariant, scope, acceptance, or decision basis requires Controller reopen. Return the '
             'finding, invariant, affected surface, and needed validation without private review '
             'history. Treat unrelated workspace anomalies as observations. Historical/generated '
-            'ownership requires independent historical evidence, not current HEAD. Delegate '
+            'ownership requires independent historical evidence, not current HEAD. When delegating '
+            'a Scanner, pass model="gpt-6-luna" and reasoning_effort="max", unless frozen '
+            'luna-only applies; that constraint uses its fixed role profile and forbids per-spawn '
+            'overrides. Another explicit execution constraint or verified necessary exception may '
+            'require a different supported pair; preserve it and pass both fields explicitly. This '
+            'model choice does not change '
+            'selected scope or role permissions. Delegate '
             'independent broad discovery to a fresh Investigator doing Scanner work, '
             'fork_turns="none" (V2) or fork_context=false (V1), under selected task model constraints; retain independent semantic judgment '
             'and wait only while its needed result is unfinished. Only one Scanner may be '
@@ -307,7 +330,11 @@ def _instructions(role: str) -> str:
     }
     if role == "controller":
         return (_WAITING_INSTRUCTIONS + role_instructions[role]).strip()
-    shared = _SHARED_INSTRUCTIONS + _WAITING_INSTRUCTIONS
+    shared = _SHARED_INSTRUCTIONS
+    if role in {"implementer", "focused-implementer", "reviewer"}:
+        shared += _WAITING_INSTRUCTIONS
+    else:
+        shared += _WORK_NOTIFICATION_INSTRUCTIONS
     if role in {"implementer", "focused-implementer"}:
         shared += _EXECUTOR_INSTRUCTIONS
     return (shared + role_instructions[role]).strip()
@@ -595,6 +622,20 @@ def native_profile_names() -> frozenset[str]:
 
 
 EXECUTION_CONSTRAINTS = ("luna-only",)
+
+# Controller routing defaults are deliberately separate from native profile
+# model fields. Codex applies a selected role's configured model after the
+# spawn call's model arguments, so profiles stay model-free and Controller
+# dispatch must send these values explicitly. This mapping carries no role
+# permission or delegation semantics.
+ROLE_MODEL_ROUTING_DEFAULTS: dict[str, tuple[str, str]] = {
+    "investigator": ("gpt-6-luna", "max"),
+    "implementer": ("gpt-6-luna", "max"),
+    "curator": ("gpt-6-luna", "max"),
+    "reviewer": ("gpt-6.1-sol", "high"),
+    "focused-implementer": ("gpt-6.1-sol", "high"),
+    "reasoning-specialist": ("gpt-6.1-sol", "high"),
+}
 
 
 def agent_profiles(execution_constraint: str | None = None) -> dict[str, tuple[str | None, str | None, str]]:

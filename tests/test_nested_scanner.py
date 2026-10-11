@@ -52,9 +52,13 @@ def identity(role="implementer", agent="executor"):
     return event(agent_id=agent, agent_type=f"thaliris-{role}", turn_id=f"{agent}-turn")
 
 
-def spawn(actor=None, role="investigator", **overrides):
+def spawn(actor=None, role="investigator", *, use_route_defaults=True, **overrides):
+    model_pair = roles.ROLE_MODEL_ROUTING_DEFAULTS.get(role) if use_route_defaults else None
+    selection = ({"model": model_pair[0], "reasoning_effort": model_pair[1]}
+                 if model_pair is not None else {})
+    selection.update(overrides)
     return {**(actor or event()), "tool_name": "spawn_agent", "tool_input": {
-        "agent_type": f"thaliris-{role}", "fork_turns": "none", "message": "Selected facts only", **overrides,
+        "agent_type": f"thaliris-{role}", "fork_turns": "none", "message": "Selected facts only", **selection,
     }}
 
 
@@ -64,7 +68,11 @@ def state(root):
 
 
 def start(root, role="implementer", agent="executor", actor=None):
-    request = spawn(actor, role)
+    model_pair = roles.ROLE_MODEL_ROUTING_DEFAULTS.get(role)
+    request = spawn(actor, role, **(
+        {"model": model_pair[0], "reasoning_effort": model_pair[1]}
+        if model_pair is not None else {}
+    ))
     assert lifecycle.handle_hook(root, "PreToolUse", request) == ""
     child = identity(role, agent)
     assert lifecycle._record_subagent_start(root, child)
@@ -444,7 +452,10 @@ def test_nested_pending_recovery_is_exact_and_controller_owned(active):
 @pytest.mark.parametrize("overrides", [{"model": "gpt-6-luna"}, {"reasoning_effort": "xhigh"},
     {"thinking": "xhigh"}, {"model_reasoning_effort": "xhigh"}, {"model": "gpt-6-astra", "reasoning_effort": "high"}])
 def test_native_model_selection_preserves_managed_handoff(active, overrides):
-    request = spawn(role="implementer", **overrides)
+    model_pair = roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"]
+    selection = {"model": model_pair[0], "reasoning_effort": model_pair[1]}
+    selection.update(overrides)
+    request = spawn(role="implementer", **selection)
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
     assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == "thaliris-implementer"
     assert lifecycle._record_subagent_start(active, identity())
@@ -465,26 +476,49 @@ def test_nested_scanner_cannot_select_astra_without_controller_handoff(active):
 
 @pytest.mark.parametrize("field", ["model", "reasoning_effort", "thinking", "model_reasoning_effort"])
 def test_top_level_fallback_native_model_selection_is_authorized(active, field):
+    model_pair = roles.ROLE_MODEL_ROUTING_DEFAULTS["implementer"]
+    selection = {"model": model_pair[0], "reasoning_effort": model_pair[1]}
+    selection[field] = "gpt-6-astra" if field == "model" else "xhigh"
     request = event(
         tool_name="spawn_agent",
         agentType="thaliris-implementer",
         fork_turns="none",
         message="Selected facts only",
-        **{field: "gpt-6-astra" if field == "model" else "xhigh"},
+        **selection,
     )
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
     assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == "thaliris-implementer"
 
 
-def test_top_level_fallback_spawn_without_override_remains_authorized(active):
+@pytest.mark.parametrize("role", ["investigator", "implementer"])
+@pytest.mark.parametrize("selection", [{}, {"model": "gpt-6-luna"}, {"reasoning_effort": "max"}])
+def test_top_level_fallback_spawn_without_model_pair_is_denied_without_reservation(active, role, selection):
     request = event(
         tool_name="spawn_agent",
-        agentType="thaliris-implementer",
+        agentType=f"thaliris-{role}",
         fork_turns="none",
         message="Selected facts only",
+        **selection,
+    )
+    before = state(active)
+    denied = lifecycle.handle_hook(active, "PreToolUse", request)
+    assert "ROLE_MODEL_SELECTION_REQUIRED" in denied
+    assert state(active) == before
+
+
+@pytest.mark.parametrize("role", ["investigator", "implementer"])
+def test_top_level_fallback_explicit_luna_max_pair_is_authorized(active, role):
+    model, effort = roles.ROLE_MODEL_ROUTING_DEFAULTS[role]
+    request = event(
+        tool_name="spawn_agent",
+        agentType=f"thaliris-{role}",
+        fork_turns="none",
+        message="Selected facts only",
+        model=model,
+        reasoning_effort=effort,
     )
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
-    assert state(active)["pending_authorized_spawn"] is not None
+    assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == f"thaliris-{role}"
 
 
 @pytest.mark.parametrize("role", ["focused-implementer", "reasoning-specialist"])
@@ -492,7 +526,7 @@ def test_controller_selects_static_exceptional_profile(active, role):
     profile = f"thaliris-{role}-xhigh"
     assert roles.resolve_native_profile(profile).id == role
     assert roles.agent_profiles()[profile + ".toml"] == ("gpt-6-astra", "xhigh", role)
-    request = spawn(role=role)
+    request = spawn(role=role, use_route_defaults=False)
     request["tool_input"]["agent_type"] = profile
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
     parent = {**identity(role), "agent_type": profile}
@@ -507,11 +541,22 @@ def test_controller_selects_static_exceptional_profile(active, role):
 @pytest.mark.parametrize("role", ["focused-implementer", "reasoning-specialist"])
 def test_executor_cannot_select_exceptional_profile(active, role):
     parent = start(active)
-    request = spawn(parent, role)
+    request = spawn(parent, role, use_route_defaults=False)
     request["tool_input"]["agent_type"] += "-xhigh"
     assert "DELEGATION" in lifecycle.handle_hook(active, "PreToolUse", request)
     default = (Path(__file__).parent / "fixtures" / f"phase2-{'reasoning-specialist' if role == 'focused-implementer' else role}.toml").read_bytes()
     assert codex_adapter._agent_profile_state(default, f"thaliris-{role}-xhigh.toml") == "user"
+
+
+@pytest.mark.parametrize("role", ["focused-implementer", "reasoning-specialist"])
+def test_static_exceptional_profile_still_rejects_per_spawn_model_override(active, role):
+    profile = f"thaliris-{role}-xhigh"
+    request = spawn(role=role, use_route_defaults=False)
+    request["tool_input"]["agent_type"] = profile
+    request["tool_input"]["model"] = "gpt-6-astra"
+    request["tool_input"]["reasoning_effort"] = "xhigh"
+    assert "ROLE_MODEL_OVERRIDE" in lifecycle.handle_hook(active, "PreToolUse", request)
+    assert state(active)["pending_authorized_spawn"] is None
 
 
 def test_previous_flat_lifecycle_state_is_not_nested_authority(active):

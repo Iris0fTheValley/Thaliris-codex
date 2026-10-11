@@ -176,17 +176,27 @@ to Controller; diagnose the management failure and keep assurance UNKNOWN.
 
 Choose the minimum necessary fresh role for the Workstream's work shape:
 
-| Role | Responsibility | Native model/effort selection |
+| Role | Responsibility | Default native model/effort |
 | --- | --- | --- |
 @ROLE_ROWS@
 
-Ordinary roles have no fixed model or effort. Generated profiles retain semantic
-instructions and readonly boundaries, while native spawn, configuration and user
-selection resolve model and effort. An omitted selection inherits the parent; an
-explicit native model selection can use its supported default effort. Select suitable
-capability for the current work and prefer lower cost when sufficient, without a
-fixed role/model map or automatic escalation by count. The installed Host may still
-have historical fixed profiles; source changes do not prove native activation.
+For Investigator, Implementer, Curator, Reviewer, Focused Implementer and Reasoning
+Specialist, pass the table's model and effort as explicit `model` and
+`reasoning_effort` arguments on every native `spawn_agent` call. This avoids
+inheriting the root model when an argument is omitted. A task's explicit execution
+constraint or a necessary verification exception may select another pair; let Codex
+reject unsupported choices and do not retry with omitted fields. Verifier keeps its
+existing configuration and has no new explicit-pair requirement. Controller's own
+model remains unchanged.
+
+Generated role profiles remain model-free. Codex applies a configured role model
+after spawn arguments, so adding model fields to these profiles would override an
+explicit task selection. The managed spawn check rejects a missing pair for the six
+default-routed roles before making a reservation. The frozen `luna-only` constraint
+is the exception: it forbids per-spawn overrides and installs Luna/xhigh role
+profiles. Model choice does not change role responsibilities or permissions. The
+installed Host may still have historical profiles; source changes do not prove
+native activation.
 Investigator gathers broad facts, not architecture decisions. Reasoning Specialist
 independently challenges a decision basis when that could change direction.
 Scanner is a nested Investigator discovery working pattern. Executor is a category
@@ -326,52 +336,21 @@ change mode automatically. Controller integration never substitutes for acceptan
 Use only trusted direct runtime commands and native coordination allowed by the
 current execution mode. Native failure reconciliation needs exact trusted evidence;
 timeouts, not_found and prose are not death proof. Explicit dependency disposition
-may end management without proving termination. First continue independent work that
-should take priority; decide whether waiting is necessary before choosing its duration.
-Wait only for a known unfinished necessary child, with no other higher-priority work.
-The same policy applies at every authorized parent layer, including an Implementer,
-Focused Implementer or Reviewer waiting for an Investigator Scanner; each observes
-only its direct dependencies. After FINAL, use its result; a decision-changing
-unknown returns the decision to Controller and does not trigger another wait or
-repeated recovery of the old task. Event-driven waiting takes precedence over timed
-polling. First confirm the current Host's actual wait tool maximum and whether it
-returns early for meaningful native events, accepts user interruption and delivers
-child notifications during waiting; do not infer these capabilities from source
-instructions or another Host version. If meaningful-event early return is confirmed
-and user interruption is confirmed and no dependency needs an interim decision,
-default to the supported 60-minute window (`timeout_ms=3600000`). This is a maximum waiting window, not a required child
-execution duration: native completion wakes Controller early and its result is used
-directly. A shorter historical average must not force an earlier Controller wake.
-When a timed stage check is actually needed or event early return is unreliable,
-recommend 60 seconds for very short tasks, 10–60 minutes for ordinary tasks according
-to work scale, and about 30 minutes for a longer task's stage check. Reliable events
-with no interim decision still take precedence and favor the 60-minute window.
-Actual tool limits, explicit applicable higher-level duration limits, user
-interruption, recovery and urgent decisions take precedence over these defaults;
-honor a shorter actual maximum without changing or bypassing Host internals.
-Unsupported or unconfirmed wake capabilities remain UNKNOWN; use the applicable
-timed-check recommendation within the real tool limit rather than assuming early return.
-Give each necessary dependency one observation owner: executors run and wait on
-their own tests/processes/CI using the corresponding tool's actual wait capability,
-not wait_agent parameters, and report substantive changes or terminal evidence;
-Controller waits for the necessary child result without rechecking the same job.
-Do not poll a finished child or create repeated reasoning turns solely to observe
-unchanged deterministic state when the runtime can wait for a meaningful or terminal
-event. Do not repeatedly set `wait_agent` to its shortest supported interval, and do
-not substitute `sleep` for native waiting, add a progress poller or give each parallel
-child its own timed polling loop. Wait for native events that can change the current
-decision across necessary parallel children. Do not impose one fixed timeout across
-tasks; neither fixed 60 seconds nor fixed 60 minutes applies universally. While
-executing, children continue work and report only completion, key blockers, major
-discoveries or necessary upper-level decisions, never elapsed-time heartbeats.
-Distinguish native terminal events, ordinary child messages, wait timeouts, exceptions
-and UNKNOWN: exceptions do not fabricate terminal evidence;
-an ordinary message or timeout does not prove that a child ended. A timeout alone
-creates no new decision or evidence and does not justify
-a status-only reasoning turn. After timeout, reassess the necessary direct dependency
-and available independent work before any further wait; avoid infinite useless waits.
-Only if the known necessary child remains unfinished and no other work takes priority,
-continue with native waiting without a status snapshot for the unchanged state.
+may end management without proving termination. After FINAL, use its result; a decision-changing unknown returns the decision to
+Controller and does not trigger another wait or repeated recovery of the old task.
+
+@WAITING_INSTRUCTIONS@
+
+Give each necessary dependency one observation owner. Controller waits for the
+necessary child result without rechecking the executor's tests, processes or CI.
+Executors report substantive changes or terminal evidence. Executing children
+continue work and report only completion, key blockers, major discoveries or
+necessary upper-level decisions, never elapsed-time heartbeats.
+Do not infer current Host wake capabilities from source instructions or another
+Host version. Unsupported or unconfirmed wake capabilities remain UNKNOWN; use
+an applicable timed stage check within the real tool limit. Actual user interruption,
+recovery and urgent decisions take precedence over recommended windows.
+
 When a meaningful wake occurs,
 use the available status capability once: a wake-only V2 `wait_agent` does not prove
 completion, so check `list_agents`; a V1 `wait_agent` status map is keyed by the exact

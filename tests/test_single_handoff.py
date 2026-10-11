@@ -1101,6 +1101,20 @@ def hook_payload(**values: object) -> dict[str, object]:
     tool_input = values.get("tool_input")
     if isinstance(tool_input, dict) and tool_input.get("agent_type") == "worker":
         values["tool_input"] = {**tool_input, "agent_type": "thaliris-implementer"}
+        tool_input = values["tool_input"]
+    if values.get("tool_name") == "spawn_agent" and isinstance(tool_input, dict):
+        target_profile = tool_input.get("agent_type")
+        role_spec = roles.resolve_native_profile(target_profile) if isinstance(target_profile, str) else None
+        binding = roles.get_codex_binding(role_spec.id) if role_spec is not None else None
+        has_selection = any(key in tool_input or key in values
+                            for key in ("model", "reasoning_effort", "thinking", "model_reasoning_effort"))
+        if (binding is not None and target_profile == binding.native_profile
+                and role_spec.id in roles.ROLE_MODEL_ROUTING_DEFAULTS and not has_selection):
+            values["tool_input"] = {
+                **tool_input,
+                "model": roles.ROLE_MODEL_ROUTING_DEFAULTS[role_spec.id][0],
+                "reasoning_effort": roles.ROLE_MODEL_ROUTING_DEFAULTS[role_spec.id][1],
+            }
     if values.get("agent_type") == "worker":
         values["agent_type"] = "thaliris-implementer"
     return {"session_id": "controller-session", "turn_id": "controller-turn", **values}
@@ -1815,6 +1829,12 @@ def test_all_exact_bound_roles_pass_active_child_lifecycle(tmp_path: Path, agent
         "tool_name": "spawn_agent",
         "tool_input": {"fork_turns": "none", "agent_type": agent_type, "message": "handoff"},
     }
+    resolved = roles.resolve_native_profile(agent_type)
+    if resolved is not None and resolved.id in roles.ROLE_MODEL_ROUTING_DEFAULTS:
+        payload["tool_input"].update({
+            "model": roles.ROLE_MODEL_ROUTING_DEFAULTS[resolved.id][0],
+            "reasoning_effort": roles.ROLE_MODEL_ROUTING_DEFAULTS[resolved.id][1],
+        })
     assert handle_hook(root, "PreToolUse", payload) == ""
     child = {
         "session_id": payload["session_id"], "turn_id": payload["turn_id"],

@@ -14,14 +14,17 @@ import tomllib
 
 KEY = "features.multi_agent_v2.multi_agent_mode_hint_text"
 RECORD_KEY = "native_mode_hint"
-SUPPORTED_VERSION = "codex-cli 0.162.0-alpha.2"
+SUPPORTED_VERSIONS = frozenset({
+    "codex-cli 0.162.0-alpha.17.2",
+    "codex-cli 0.162.0-alpha.2",
+})
 MARKER = '# thaliris:multi-agent-mode-hint\nmulti_agent_mode_hint_text = ""\n'
 BOOL_MARKER = '# thaliris:multi-agent-v2-bool '
 BOOL_LINE = r'[ \t]*(?:features\.)?multi_agent_v2[ \t]*=[ \t]*(true|false)[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)'
 
 
 def capability() -> str:
-    """Only the source-verified CLI version is admitted; newer is not evidence."""
+    """Admit only exact source-verified CLI versions; nearby versions stay unknown."""
     executable = shutil.which("codex")
     if executable is None:
         return "UNKNOWN"
@@ -30,7 +33,7 @@ def capability() -> str:
                                 text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
         return "UNKNOWN"
-    return "SUPPORTED" if result.returncode == 0 and result.stdout.strip() == SUPPORTED_VERSION else "UNKNOWN"
+    return "SUPPORTED" if result.returncode == 0 and result.stdout.strip() in SUPPORTED_VERSIONS else "UNKNOWN"
 
 
 def read(home: Path) -> tuple[bytes, dict]:

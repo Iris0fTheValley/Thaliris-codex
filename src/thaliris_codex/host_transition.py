@@ -179,6 +179,8 @@ def load(home, intent):
         mode_hint_config.validate(finish["mode_hint_record"], home)
     if "wait_guidance_record" in finish:
         wait_guidance_config.validate(finish["wait_guidance_record"], home)
+        if finish.get("wait_guidance_previous_record") is not None:
+            wait_guidance_config.validate(finish["wait_guidance_previous_record"], home)
     if intent["operation"] == "codex-install":
         executable, approved = maintenance.selected_runtime(intent["candidate"])
         if after.get(runtime_identity.MANIFEST_NAME) != approved or finish.get("candidate") != str(executable) or (
@@ -207,15 +209,24 @@ def load(home, intent):
                 type(finish["mode_hint_result"].get("changed")) is not bool):
             raise ValueError("invalid Host transition native mode hint result")
         if "wait_guidance_status" in finish and (not isinstance(finish["wait_guidance_status"], dict) or
-                finish["wait_guidance_status"].get("status") not in {"PLANNED", "MANAGED", "USER_CHANGED_PRESERVED",
-                    "USER_CONFIG_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED"}):
+                finish["wait_guidance_status"].get("status") not in {"PLANNED", "MIGRATION_PLANNED", "MANAGED",
+                    "USER_CHANGED_PRESERVED", "USER_EMPTY_PRESERVED", "USER_CONFIG_PRESERVED",
+                    "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED",
+                    "OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"}):
             raise ValueError("invalid Host transition Controller wait guidance status")
         if finish.get("wait_guidance_status", {}).get("status") == "PLANNED" and ownership.get(wait_guidance_config.RECORD_KEY) is not None:
             raise ValueError("Host transition cannot reacquire Controller wait guidance")
-        if finish.get("wait_guidance_status", {}).get("status") in {"PLANNED", "MANAGED"} and finish.get("wait_guidance_record") is None:
+        if finish.get("wait_guidance_status", {}).get("status") in {"PLANNED", "MIGRATION_PLANNED", "MANAGED"} and finish.get("wait_guidance_record") is None:
             raise ValueError("Host transition Controller wait guidance lacks ownership evidence")
+        if finish.get("wait_guidance_status", {}).get("status") == "MIGRATION_PLANNED":
+            previous = finish.get("wait_guidance_previous_record")
+            if previous is None or previous != ownership.get(wait_guidance_config.RECORD_KEY):
+                raise ValueError("Host transition Controller wait guidance migration lacks prior receipt evidence")
+            wait_guidance_config.validate_migration(previous, finish.get("wait_guidance_record"), home)
+        elif finish.get("wait_guidance_previous_record") is not None:
+            raise ValueError("Host transition has unexpected Controller wait guidance history")
         if "wait_guidance_phase" in finish and (finish["wait_guidance_phase"] not in {"ATTEMPTING", "APPLIED"} or
-                finish.get("wait_guidance_status", {}).get("status") != "PLANNED"):
+                finish.get("wait_guidance_status", {}).get("status") not in {"PLANNED", "MIGRATION_PLANNED"}):
             raise ValueError("invalid Host transition Controller wait guidance attempt")
         if finish.get("wait_guidance_phase") == "APPLIED" and (not isinstance(finish.get("wait_guidance_result"), dict) or
                 type(finish["wait_guidance_result"].get("changed")) is not bool or

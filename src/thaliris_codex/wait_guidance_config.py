@@ -16,36 +16,15 @@ import tomllib
 RECORD_KEY = "controller_wait_guidance"
 KEY = "developer_instructions"
 GUIDANCE = (
-    "First continue independent work that should take priority; decide whether to wait before "
-    "choosing duration. Only call wait_agent for an unfinished necessary direct child result "
-    "with no other higher-priority work. Apply this at every authorized delegation layer, "
-    "including Implementer/Reviewer waiting for an Investigator Scanner; observe only direct "
-    "dependencies. Prefer event-driven native wait_agent waiting over timed polling. First confirm "
-    "the current Host's actual maximum, meaningful-event early return, user interruption "
-    "and child notification capabilities; unconfirmed capabilities remain UNKNOWN. "
-    "When meaningful-event early return and user interruption are confirmed and no dependency needs an interim "
-    "decision, default to the supported 60-minute window (timeout_ms=3600000). This is "
-    "a maximum waiting window, not a required execution duration; native completion "
-    "wakes the parent early. Short historical averages must not force an earlier wake. "
-    "If timed stage checks are needed or early return is unreliable, recommend 60 "
-    "seconds for very short tasks, 10–60 minutes for ordinary tasks by work scale, and "
-    "about 30 minutes for longer-task stage checks; reliable events without interim "
-    "decisions still favor 60 minutes. Actual tool limits, explicit applicable "
-    "higher-level duration limits, user interruption, recovery and urgent decisions "
-    "take precedence; never bypass Host limits. Distinguish native terminal evidence "
-    "from ordinary child messages and timeouts: messages and timeouts do not prove "
-    "completion; exceptions do not fabricate terminal evidence and unproved status remains UNKNOWN. "
-    "After timeout, reassess necessary direct dependencies and available independent work before "
-    "any further wait; avoid infinite useless waits. A wake-only result needs one available exact native status check. "
-    "Use a completed result directly without confirming the same completion again. "
-    "Do not substitute sleep, add progress pollers, create per-child timed polling "
-    "loops, heartbeat services or repeatedly wake models for unchanged state. Neither fixed "
-    "60 seconds nor fixed 60 minutes applies universally; windows are not execution deadlines. "
-    "Executing children continue work; report only completion, key blockers, major discoveries "
-    "or necessary upper-level decisions, never elapsed-time progress. Executors own local tests, "
-    "builds, CI and external processes, using their tools' actual waiting capabilities rather than "
-    "wait_agent parameters; independent closing owns final acceptance."
+    "Continue necessary independent work before waiting. Prefer meaningful native notifications "
+    "over repeated status polling; do not wake models merely to observe unchanged state. "
+    "Messages, timeouts and exceptions do not prove completion; preserve UNKNOWN when "
+    "native completion evidence is unavailable. Use an available completed result without "
+    "confirming the same completion again. Observe your own tests or external processes "
+    "with their corresponding tools. Follow applicable role instructions and the selected handoff "
+    "for authorized delegation and waiting; this guidance grants no role or authority."
 )
+
 MARKER = "# thaliris:controller-wait-guidance\n"
 _SUPPORTED_VERSION = re.compile(r"^codex-cli 0\.162\.\d+(?:-[A-Za-z0-9.-]+)?$")
 
@@ -106,9 +85,28 @@ def _recorded_guidance(fragment: str) -> str:
     return value
 
 
-def _matches(raw: bytes, config: dict, record: dict) -> bool:
-    fragment = record["fragment"].encode("utf-8")
+def _fragments(record: dict) -> tuple[str, ...]:
+    return (record["fragment"], *record.get("history", []))
+
+
+def _matching_fragment(raw: bytes, config: dict, record: dict) -> bytes | None:
     try:
+        for text in _fragments(record):
+            fragment = text.encode("utf-8")
+            if config.get(KEY) != _recorded_guidance(text) or raw.count(fragment) != 1:
+                continue
+            removed = tomllib.loads(raw.replace(fragment, b"", 1).decode("utf-8"))
+            if KEY not in removed:
+                return fragment
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, ValueError, TypeError):
+        return None
+    return None
+
+
+def _matches_current(raw: bytes, config: dict, record: dict) -> bool:
+    """Match only the current receipt fragment, for install/recovery success."""
+    try:
+        fragment = record["fragment"].encode("utf-8")
         if config.get(KEY) != _recorded_guidance(record["fragment"]) or raw.count(fragment) != 1:
             return False
         removed = tomllib.loads(raw.replace(fragment, b"", 1).decode("utf-8"))
@@ -120,16 +118,23 @@ def _matches(raw: bytes, config: dict, record: dict) -> bool:
 def validate(record: object, home: Path | None = None) -> None:
     if record is None:
         return
-    if not isinstance(record, dict) or set(record) != {"path", "prior", "fragment"}:
+    if not isinstance(record, dict) or set(record) not in (
+            {"path", "prior", "fragment"}, {"path", "prior", "fragment", "history"}):
         raise ValueError("invalid Controller wait guidance ownership record")
     if not isinstance(record["path"], str) or record["prior"] != {"present": False}:
         raise ValueError("invalid Controller wait guidance prior state")
     if home is not None and record["path"] != str((home / "config.toml").absolute()):
         raise ValueError("Controller wait guidance path differs from CODEX_HOME")
     _recorded_guidance(record["fragment"])
+    history = record.get("history", [])
+    if (not isinstance(history, list) or any(not isinstance(item, str) for item in history)
+            or len(set(history)) != len(history) or record["fragment"] in history):
+        raise ValueError("invalid Controller wait guidance history")
+    for item in history:
+        _recorded_guidance(item)
 
 
-def plan_install(home: Path, ownership: dict) -> tuple[dict | None, dict]:
+def plan_install(home: Path, ownership: dict) -> tuple[dict | None, dict, dict | None]:
     record = ownership.get(RECORD_KEY)
     validate(record, home)
     try:
@@ -138,18 +143,48 @@ def plan_install(home: Path, ownership: dict) -> tuple[dict | None, dict]:
         # This field is optional to Host installation. Keep an existing valid
         # ownership record so later uninstall can still restore its bytes;
         # never turn a config read failure into permission to claim the field.
-        return record, status("OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED")
+        return record, status("OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"), None
     if record is not None:
-        return record, status("MANAGED" if _matches(raw, config, record) else "USER_CHANGED_PRESERVED")
+        matched = _matching_fragment(raw, config, record)
+        if matched is None:
+            if KEY in config and config[KEY] == "":
+                return record, status("USER_EMPTY_PRESERVED"), None
+            return record, status("USER_CHANGED_PRESERVED"), None
+        old_fragment = matched.decode("utf-8")
+        if _recorded_guidance(old_fragment) == GUIDANCE:
+            if record["fragment"] == old_fragment:
+                return record, status("MANAGED"), None
+            # The source text has returned to an already owned exact historical
+            # generation. Promote it as the current fragment without editing
+            # the user's bytes.
+            history = [item for item in _fragments(record) if item != old_fragment]
+            promoted = {"path": record["path"], "prior": record["prior"],
+                        "fragment": old_fragment}
+            if history:
+                promoted["history"] = list(dict.fromkeys(history))
+            return promoted, status("MANAGED"), None
+        if capability() != "SUPPORTED":
+            return record, status("VERSION_SUPPORT_UNKNOWN"), None
+        newline = "\r\n" if "\r\n" in old_fragment else "\n"
+        current_fragment = _fragment(newline)
+        history = [item for item in _fragments(record) if item != current_fragment]
+        updated = {"path": record["path"], "prior": record["prior"],
+                   "fragment": current_fragment, "history": list(dict.fromkeys(history))}
+        validate(updated, home)
+        if _recorded_guidance(old_fragment) == GUIDANCE:
+            return updated, status("MANAGED"), None
+        return updated, status("MIGRATION_PLANNED"), record
     if KEY in config:
-        return None, status("USER_CONFIG_PRESERVED")
+        if config[KEY] == "":
+            return None, status("USER_EMPTY_PRESERVED"), None
+        return None, status("USER_CONFIG_PRESERVED"), None
     if capability() != "SUPPORTED":
-        return None, status("VERSION_SUPPORT_UNKNOWN")
+        return None, status("VERSION_SUPPORT_UNKNOWN"), None
     newline = "\r\n" if b"\r\n" in raw else "\n"
     fragment = _fragment(newline)
     record = {"path": str((home / "config.toml").absolute()),
               "prior": {"present": False}, "fragment": fragment}
-    return record, status("PLANNED")
+    return record, status("PLANNED"), None
 
 
 def _insert(raw: bytes, fragment: bytes) -> bytes:
@@ -167,21 +202,21 @@ def apply(home: Path, record: dict | None, *, remove: bool = False, allow_insert
     if record is None:
         return status("UNMANAGED_PRESERVED")
     raw, config = read(home)
+    matched = _matching_fragment(raw, config, record)
     fragment = record["fragment"].encode("utf-8")
-    matched = _matches(raw, config, record)
     if remove:
         if KEY not in config:
             return status("ALREADY_ABSENT")
         if not matched:
             return status("USER_CHANGED_PRESERVED")
-        after = raw.replace(fragment, b"", 1)
+        after = raw.replace(matched, b"", 1)
         try:
             if KEY in tomllib.loads(after.decode("utf-8")):
                 return status("USER_CHANGED_PRESERVED")
         except (UnicodeDecodeError, tomllib.TOMLDecodeError):
             return status("USER_CHANGED_PRESERVED")
     else:
-        if matched:
+        if _matches_current(raw, config, record):
             return status("MANAGED")
         if KEY in config or not allow_insert:
             return status("USER_CHANGED_PRESERVED")
@@ -200,14 +235,53 @@ def apply(home: Path, record: dict | None, *, remove: bool = False, allow_insert
     return status("RESTORED_ABSENT" if remove else "MANAGED", changed=True)
 
 
+def apply_migration(home: Path, previous: dict, record: dict) -> dict:
+    """Replace only a value proven by the previous exact ownership receipt."""
+    from .codex_adapter import _atomic_host_write
+    validate_migration(previous, record, home)
+    raw, config = read(home)
+    if _matches_current(raw, config, record):
+        return status("MANAGED")
+    old_fragment = _matching_fragment(raw, config, previous)
+    if old_fragment is None:
+        return status("USER_CHANGED_PRESERVED")
+    if old_fragment == record["fragment"].encode("utf-8"):
+        return status("MANAGED")
+    after = raw.replace(old_fragment, record["fragment"].encode("utf-8"), 1)
+    try:
+        parsed = tomllib.loads(after.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return status("STRUCTURE_UNSUPPORTED_PRESERVED")
+    if not _matches_current(after, parsed, record):
+        return status("STRUCTURE_UNSUPPORTED_PRESERVED")
+    if read(home)[0] != raw:
+        raise ValueError("Codex user config changed before Controller wait guidance migration")
+    _atomic_host_write(home / "config.toml", after)
+    if read(home)[0] != after:
+        raise ValueError("Controller wait guidance migration could not be verified")
+    return status("MANAGED", changed=True)
+
+
+def validate_migration(previous: dict, record: dict, home: Path | None = None) -> None:
+    """Require the new receipt to retain every exact prior managed fragment."""
+    validate(previous, home)
+    validate(record, home)
+    if (previous is None or record is None or previous["path"] != record["path"]
+            or previous["prior"] != record["prior"]
+            or not set(_fragments(previous)).issubset(set(_fragments(record)))):
+        raise ValueError("Controller wait guidance migration lacks historical receipt evidence")
+
+
 def finish_install(home: Path, transition: dict) -> dict:
     """Journal the field write before applying it; never reacquire after a crash."""
     from . import host_transition
     finish = transition["finish"]
     selected = finish.get("wait_guidance_status", status("LEGACY_UNMANAGED"))
-    if selected["status"] not in {"PLANNED", "MANAGED"}:
+    if selected["status"] not in {"PLANNED", "MIGRATION_PLANNED", "MANAGED"}:
         return selected
     record = finish["wait_guidance_record"]
+    previous = finish.get("wait_guidance_previous_record")
+    migrate = selected["status"] == "MIGRATION_PLANNED"
     if selected["status"] == "MANAGED":
         try:
             return apply(home, record)
@@ -226,7 +300,7 @@ def finish_install(home: Path, transition: dict) -> dict:
             raw, config = read(home)
         except (OSError, ValueError, RuntimeError):
             return status("APPLY_OUTCOME_UNKNOWN_PRESERVED")
-        if not _matches(raw, config, record):
+        if not _matches_current(raw, config, record):
             return status("APPLY_OUTCOME_UNKNOWN_PRESERVED")
         result = status("MANAGED", changed=True)
     else:
@@ -240,7 +314,8 @@ def finish_install(home: Path, transition: dict) -> dict:
         # safely proceed as part of the Host transaction.
         host_transition._write(home, transition)
         try:
-            result = apply(home, record, allow_insert=True)
+            result = (apply_migration(home, previous, record) if migrate
+                      else apply(home, record, allow_insert=True))
         except (OSError, ValueError, RuntimeError):
             try:
                 after, config = read(home)
@@ -253,7 +328,7 @@ def finish_install(home: Path, transition: dict) -> dict:
                 finish.pop("wait_guidance_phase", None)
                 host_transition._write(home, transition)
                 return status("OPTIONAL_WRITE_FAILED_PRESERVED")
-            if not _matches(after, config, record):
+            if not _matches_current(after, config, record):
                 # Do not roll back bytes whose ownership cannot be proved.
                 # The Host transaction can still complete because this field
                 # is optional; the persisted ATTEMPTING phase prevents replay

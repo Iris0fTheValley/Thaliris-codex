@@ -114,7 +114,7 @@ Ordinary reads, edits, tests and Git work have different boundaries from managed
 
 Global instructions also carry shared working principles: reuse selected evidence, coordinate writes by work dependencies, verify behavior with the smallest meaningful checks, and give each necessary dependency one observation owner. Bootstrap delivers normal Controller guidance; exceptional recovery and Host maintenance are retrieved when needed. See the [integration protocol](adapter/codex/README.md) and [Authority contract](docs/thaliris-task-authority.md).
 
-Ordinary generated role profiles omit model and effort; native spawn, configuration and user selection resolve them while role instructions and readonly boundaries remain binding. Choose suitable capability and lower cost when sufficient, without fixed role/model mapping. Astra still requires current-task human opt-in; static Astra compatibility profiles retain their fixed bindings, and luna-only stays frozen. Historical installed profiles can still be fixed; these source changes do not prove current Host activation. See [native selection precedence](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning).
+Ordinary generated role profiles intentionally omit model and effort because Codex applies a configured role model after spawn arguments. Controller defaults Investigator, Implementer and Curator to gpt-6-luna/max, and Reviewer, Focused Implementer and Reasoning Specialist to gpt-6.1-sol/high. Native dispatch must pass both `model` and `reasoning_effort`; the managed Hook rejects a missing field before reservation. An explicit execution constraint or verified necessary exception may select another supported pair; this changes execution selection, not role responsibilities or permissions. Verifier keeps its existing configuration, and Controller's own model is unchanged. Astra still requires current-task human opt-in; static Astra compatibility profiles retain their fixed bindings, and luna-only stays frozen and forbids per-spawn overrides. Historical installed profiles can still be fixed; these source changes do not prove current Host activation. See [native selection precedence](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning).
 
 ## Installation and local development
 
@@ -145,14 +145,17 @@ For an intentional custom location, pass `--runtime 'D:\chosen\runtime'`; that p
 Replace the adapter commit placeholder with the independently reviewed published revision. Host maintenance uses `codex-maintenance-plan` and an explicit `--maintenance-contract FILE`, independently of project init/task admission. Prior authorized installation receipts establish byte ownership; candidate equality does not. Unknown project role documentation is preserved without blocking admission, while unknown control instructions remain blocking. Supported uninstall and normal reinstall preserve user configuration and recovery evidence. See [Host maintenance](docs/thaliris-host-maintenance.md) for the public sequence and legacy approval boundary.
 
 The `multi_agent_mode_hint_text` compatibility edit supports only the
-source-verified Codex CLI `0.162.0-alpha.2` (tag `rust-v0.162.0-alpha.2`, peeled
-commit `74e804deeb1241d5fe699b31fb319f7d46454c42`) and writes an empty string
+two exact source-verified Codex CLI versions `0.162.0-alpha.17.2` and `0.162.0-alpha.2`,
+and writes an empty string
 only when the user-level leaf is absent; unknown versions and existing values
 are preserved. Higher-priority project configuration or CLI `-c` can still
 override it. Field ownership, the normal upgrade/uninstall entrypoints, and
 fresh-session/Fresh Child acceptance are documented in [Host maintenance](docs/thaliris-host-maintenance.md).
+The `0.162.0-alpha.17.2` schema and native empty-value handling are pinned there to immutable
+upstream source; `0.162.0-alpha.2` is tag `rust-v0.162.0-alpha.2`, peeled commit
+`74e804deeb1241d5fe699b31fb319f7d46454c42`.
 
-Optional waiting-guidance configuration read/write failures are reported without blocking installation; an uncertain write outcome stays UNKNOWN. Exact prior receipt bytes govern upgrade/uninstall ownership; current wording cannot prove historical ownership, and user edits remain preserved. A configuration write still requires its ownership journal to be persisted first.
+Optional wait guidance is added only when the field is absent and the Codex version is supported; empty or custom user values are preserved. An upgrade migrates the field only when its complete TOML fragment exactly matches a trusted prior receipt. The next receipt retains those exact historical fragments for recovery and uninstall. User edits or unverifiable history are never overwritten. Read/write failures do not block Host installation; the ownership journal is persisted before writing, and uncertain outcomes remain UNKNOWN.
 
 
 Setup resolves the automatic Host LocalCache base through an OS handle before
@@ -243,7 +246,7 @@ Semantic roles, responsibilities, routing, and readonly limits remain separate f
 {"execution_constraint": "luna-only"}
 ```
 
-Core stores this optional non-empty string as immutable intent. The adapter accepts only luna-only and validates each execution binding. The external anchor freezes validated profile and configuration hashes; children and mutable configuration cannot expand or remove the constraint. A fresh Host session is required after installation. Admission compares role-profile and public-config snapshots recorded at SessionStart; those disk observations do not prove the effective Host role map or CLI -c overrides. SubagentStart checks the Host-reported model for a constrained child. Missing or mismatched values leave the handoff unbound and deny later child tools, but the Hook cannot prevent the model invocation. The constraint forbids Astra profiles and per-spawn model overrides; ordinary profiles inherit native selection when it is absent. See the [execution-constraint port notes](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md).
+Core stores this optional non-empty string as immutable intent. The adapter accepts only luna-only and validates each execution binding. The external anchor freezes validated profile and configuration hashes; children and mutable configuration cannot expand or remove the constraint. A fresh Host session is required after installation. Admission compares role-profile and public-config snapshots recorded at SessionStart; those disk observations do not prove the effective Host role map or CLI -c overrides. SubagentStart checks the Host-reported model for a constrained child. Missing or mismatched values leave the handoff unbound and deny later child tools, but the Hook cannot prevent the model invocation. The constraint forbids Astra profiles and per-spawn model overrides; this mode uses fixed Luna/xhigh role profiles. Outside this constraint, the six default-routed roles must pass both `model` and `reasoning_effort`, and a missing field is rejected before reservation. An execution constraint or verified necessary exception may take precedence over those defaults. See the [execution-constraint port notes](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md).
 
 This feature requires thaliris>=0.4.4. Development tests must install the Core checkout used for this fix; the older monolithic wheel does not satisfy the split-package boundary.
 
