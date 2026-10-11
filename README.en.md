@@ -270,13 +270,15 @@ Each necessary dependency has one observation owner: executors run/wait on their
 processes and CI; Controller waits only for a known unfinished child result that remains
 necessary, without checking the same job again. A child FINAL or a decision-changing
 unknown ends that slice; do not keep waiting for it. Choose waiting by available capability,
-meaningful event and dependency; tool maximum is capacity, not a default duration, and
-higher-level duration limits take precedence. If an active instruction caps a blocking
-call at 60 seconds, honor the bound and choose a duration for the expected event instead
-of repeatedly using the shortest supported interval. Do not use `sleep` instead of native
-waiting or impose one fixed timeout across tasks. A timeout alone adds no evidence;
-continue only while the child remains a necessary unfinished dependency, without status
-snapshots or reasoning rounds for unchanged state. A wake-only V2 `wait_agent` is not
+meaningful event, dependency and expected task duration; tool maximum is capacity, not a
+default duration. A general recommendation to limit blocking waits to 60 seconds is not an
+intrinsic cap on an event-capable native `wait_agent`; only an explicit applicable
+higher-level limit imposes that bound. Otherwise choose an event-aware window for the
+expected task, which may take several minutes or longer. Prefer native completion events
+over short polling loops, and preserve responsiveness to interruptions and substantive
+events. Do not use `sleep` instead of native waiting or impose one fixed timeout across
+tasks. A timeout alone adds no evidence; continue only while the child remains a necessary
+unfinished dependency, without status snapshots or reasoning rounds for unchanged state. A wake-only V2 `wait_agent` is not
 completion evidence; use one `list_agents` snapshot after a meaningful wake. The Hook
 preserves caller wait arguments. Independent Task IDs may proceed in parallel. Within one
 Task ID, multiple bound children may run simultaneously, with at most one unbound dispatch

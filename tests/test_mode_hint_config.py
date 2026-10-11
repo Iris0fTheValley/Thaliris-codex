@@ -5,7 +5,7 @@ import tomllib
 
 import pytest
 
-from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, host_transition, mode_hint_config as hint
+from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, host_transition, mode_hint_config as hint, wait_guidance_config
 from tests.test_host_maintenance_contract import intent, snapshot
 from thaliris_codex.codex_app_server import owned_hook_keys_from_host as real_owned_keys, remove_owned_hook_trust as real_remove_trust
 
@@ -319,6 +319,7 @@ def test_field_management_with_real_trust_code_and_disk_rpc_fake(tmp_path, targe
     from thaliris_codex import codex_app_server, lifecycle
     from tests.test_codex_hook_trust import FakeAppServer
     home, _ = target
+    monkeypatch.setattr(wait_guidance_config, "capability", lambda: "SUPPORTED")
     original = b'# user flags\n[features]\nmulti_agent_v2 = false # user choice\n'
     (home / "config.toml").write_bytes(original)
     state = {"hashes": {event: f"sha256:{event}" for event in lifecycle.HOOK_EVENTS},
@@ -354,13 +355,16 @@ def test_field_management_with_real_trust_code_and_disk_rpc_fake(tmp_path, targe
     monkeypatch.setattr(codex_app_server, "remove_owned_hook_trust", real_remove_trust)
     result = install(tmp_path, target)
     assert result["ok"], result
+    assert result["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
     assert hint.leaf(hint.read(home)[1]) == (True, "")
     assert hint.read(home)[1]["features"]["multi_agent_v2"]["enabled"] is False
+    assert hint.read(home)[1][wait_guidance_config.KEY] == wait_guidance_config.GUIDANCE
     result = uninstall(tmp_path, target)
     assert result["ok"], result
     raw, config = hint.read(home)
     assert raw.startswith(original)
     assert config["features"]["multi_agent_v2"] is False
+    assert wait_guidance_config.KEY not in config
     assert config["hooks"]["state"] == {"user-owned": {"enabled": False, "trusted_hash": "user-hash"}}
     writes = [params for method, params in calls if method == "config/batchWrite"]
     assert all(params["edits"][0]["keyPath"] == "hooks.state" for params in writes)

@@ -135,7 +135,7 @@ def _profile_name(name):
 
 
 def load(home, intent):
-    from . import host_maintenance as maintenance, runtime_identity, lifecycle, host_preflight, roles, mode_hint_config
+    from . import host_maintenance as maintenance, runtime_identity, lifecycle, host_preflight, roles, mode_hint_config, wait_guidance_config
     path = home / NAME
     maintenance.safe(path)
     record = json.loads(path.read_bytes())
@@ -174,8 +174,11 @@ def load(home, intent):
     old_receipt = before.get(maintenance.RECEIPT_NAME)
     ownership = maintenance.validate_ownership(old_receipt, prior, intent)
     mode_hint_config.validate(ownership.get(mode_hint_config.RECORD_KEY), home)
+    wait_guidance_config.validate(ownership.get(wait_guidance_config.RECORD_KEY), home)
     if "mode_hint_record" in finish:
         mode_hint_config.validate(finish["mode_hint_record"], home)
+    if "wait_guidance_record" in finish:
+        wait_guidance_config.validate(finish["wait_guidance_record"], home)
     if intent["operation"] == "codex-install":
         executable, approved = maintenance.selected_runtime(intent["candidate"])
         if after.get(runtime_identity.MANIFEST_NAME) != approved or finish.get("candidate") != str(executable) or (
@@ -184,8 +187,11 @@ def load(home, intent):
             raise ValueError("Host transition candidate differs from original approval")
         next_receipt = maintenance.validate_ownership(after.get(maintenance.RECEIPT_NAME), approved, intent)
         mode_hint_config.validate(next_receipt.get(mode_hint_config.RECORD_KEY), home)
+        wait_guidance_config.validate(next_receipt.get(wait_guidance_config.RECORD_KEY), home)
         if "mode_hint_record" in finish and finish["mode_hint_record"] != next_receipt.get(mode_hint_config.RECORD_KEY):
             raise ValueError("Host transition native mode hint differs from receipt")
+        if "wait_guidance_record" in finish and finish["wait_guidance_record"] != next_receipt.get(wait_guidance_config.RECORD_KEY):
+            raise ValueError("Host transition Controller wait guidance differs from receipt")
         if "mode_hint_status" in finish and (not isinstance(finish["mode_hint_status"], dict) or
                 finish["mode_hint_status"].get("status") not in {"PLANNED", "MANAGED", "USER_CHANGED_PRESERVED",
                     "USER_EMPTY_PRESERVED", "USER_CUSTOM_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED"}):
@@ -200,6 +206,21 @@ def load(home, intent):
         if finish.get("mode_hint_phase") == "APPLIED" and (not isinstance(finish.get("mode_hint_result"), dict) or
                 type(finish["mode_hint_result"].get("changed")) is not bool):
             raise ValueError("invalid Host transition native mode hint result")
+        if "wait_guidance_status" in finish and (not isinstance(finish["wait_guidance_status"], dict) or
+                finish["wait_guidance_status"].get("status") not in {"PLANNED", "MANAGED", "USER_CHANGED_PRESERVED",
+                    "USER_CONFIG_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED"}):
+            raise ValueError("invalid Host transition Controller wait guidance status")
+        if finish.get("wait_guidance_status", {}).get("status") == "PLANNED" and ownership.get(wait_guidance_config.RECORD_KEY) is not None:
+            raise ValueError("Host transition cannot reacquire Controller wait guidance")
+        if finish.get("wait_guidance_status", {}).get("status") in {"PLANNED", "MANAGED"} and finish.get("wait_guidance_record") is None:
+            raise ValueError("Host transition Controller wait guidance lacks ownership evidence")
+        if "wait_guidance_phase" in finish and (finish["wait_guidance_phase"] not in {"ATTEMPTING", "APPLIED"} or
+                finish.get("wait_guidance_status", {}).get("status") != "PLANNED"):
+            raise ValueError("invalid Host transition Controller wait guidance attempt")
+        if finish.get("wait_guidance_phase") == "APPLIED" and (not isinstance(finish.get("wait_guidance_result"), dict) or
+                type(finish["wait_guidance_result"].get("changed")) is not bool or
+                finish["wait_guidance_result"].get("status") not in {"MANAGED", "USER_CHANGED_PRESERVED", "STRUCTURE_UNSUPPORTED_PRESERVED"}):
+            raise ValueError("invalid Host transition Controller wait guidance result")
         migrations = maintenance.migrated_instructions(intent, home, before, executable, finish["sha"])
         if any(after.get(name) != value for name, value in migrations.items()):
             raise ValueError("Host transition instructions differ from original approval")
@@ -217,6 +238,8 @@ def load(home, intent):
         raise ValueError("uninstall transition retains an active runtime")
     elif "mode_hint_record" in finish and finish["mode_hint_record"] != ownership.get(mode_hint_config.RECORD_KEY):
         raise ValueError("uninstall transition native mode hint differs from prior receipt")
+    elif "wait_guidance_record" in finish and finish["wait_guidance_record"] != ownership.get(wait_guidance_config.RECORD_KEY):
+        raise ValueError("uninstall transition Controller wait guidance differs from prior receipt")
     allowed = {runtime_identity.MANIFEST_NAME, maintenance.RECEIPT_NAME, "AGENTS.md", "hooks.json",
                lifecycle.HOST_HOOK_SCRIPT_NAME, lifecycle.HOST_RUN_SCRIPT_NAME, host_preflight.NAME}
     allowed.update("agents/" + name for name in roles.agent_profiles())

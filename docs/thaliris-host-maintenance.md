@@ -131,6 +131,19 @@ The field writer rereads bytes immediately before atomic replacement, but this
 does not provide compare-and-swap protection against an external editor racing
 that final check.
 
+On Codex 0.162, the existing install/upgrade path can also add a concise
+root-level `developer_instructions` value when that user-config field is absent.
+It states that a general 60-second blocking-wait recommendation is not an
+intrinsic native `wait_agent` cap, and asks for event-aware waits informed by
+expected task duration, native completion events, and responsiveness to
+interruptions. The result reports `controller_wait_guidance_compatibility` and
+the ownership receipt stores a separate `controller_wait_guidance` field record.
+An existing user value, including an empty value, is preserved; later edits to
+the managed value are preserved on upgrade and uninstall. Uninstall removes only
+the exact recorded TOML fragment. The whole config file remains outside
+`owned_bytes` and generation rollback. A source or fixture pass does not prove a
+fresh Host session loaded the setting or that a model follows its wait guidance.
+
 For removal, use the existing `codex-maintenance-plan codex-uninstall` and
 `codex-uninstall --maintenance-contract FILE` path. Uninstall removes only a
 still-matching owned leaf and restores a migrated `enabled` boolean when the
@@ -319,6 +332,15 @@ executor 使用原 operation 和同一 contract 重放。安装中断时，journ
 包含字段记录、计划状态和写入阶段/结果。若中断后无法确定字段写入结果，会保留字段并
 报告 `APPLY_OUTCOME_UNKNOWN_PRESERVED`，不会再次插入。
 字段写入在原子替换前会重读 bytes；这不能防止外部编辑器在最终检查期间并发写入。
+
+Codex 0.162 的既有安装/升级流程还可在用户配置不存在该字段时写入根级
+`developer_instructions`，内容简述 60 秒通用阻塞等待建议不等于原生
+`wait_agent` 的内在上限，并指导按预期任务时长选择事件等待、优先原生完成事件、
+响应中断。结果报告 `controller_wait_guidance_compatibility`，ownership receipt
+另存 `controller_wait_guidance` 字段记录。若已有用户值（包括空值），则保留；之后
+对受管值的修改也会在升级和卸载时保留。卸载只移除精确记录的 TOML 片段。整个 config
+文件仍不属于 `owned_bytes` 或 generation rollback。源码或 fixture 测试通过不能证明
+新的 Host session 已加载该设置，也不能证明模型按等待提示行动。
 
 卸载仍使用既有 `codex-maintenance-plan codex-uninstall` 与
 `codex-uninstall --maintenance-contract FILE`。只有仍精确匹配的受管字段才会删除；原始

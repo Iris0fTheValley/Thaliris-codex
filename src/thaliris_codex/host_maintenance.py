@@ -147,8 +147,9 @@ def validate_ownership(contents: bytes | None, installed: bytes | None, intent: 
     if any(not isinstance(event, str) or not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
            for event, entries in record["hook_handlers"].items()):
         raise ValueError("invalid installed hook ownership structure")
-    from . import mode_hint_config
+    from . import mode_hint_config, wait_guidance_config
     mode_hint_config.validate(record.get(mode_hint_config.RECORD_KEY))
+    wait_guidance_config.validate(record.get(wait_guidance_config.RECORD_KEY))
     return record
 
 
@@ -362,7 +363,7 @@ def _failure(home: Path, error: Exception) -> dict:
 
 
 def install(home: Path, executable, executable_sha256, execution_constraint, filename) -> dict:
-    from . import codex_adapter as adapter, lifecycle, host_preflight, roles, host_transition, mode_hint_config
+    from . import codex_adapter as adapter, lifecycle, host_preflight, roles, host_transition, mode_hint_config, wait_guidance_config
     # No disk, audit, profile or trust mutation occurs before this complete plan.
     try:
         intent = contract(filename, "codex-install", home)
@@ -386,6 +387,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         safe(home / "config.toml")
         record = ownership(home, prior, intent)
         hint_record, hint_status = mode_hint_config.plan_install(home, record)
+        wait_guidance_record, wait_guidance_status = wait_guidance_config.plan_install(home, record)
         if record.get("execution_constraint") == "luna-only" and execution_constraint != "luna-only":
             raise ValueError("existing luna-only installation requires the same explicit constraint; omission cannot remove it")
         exe, sha, problem = adapter._host_install_executable(home, candidate, executable_sha256 or json.loads(approved)["executable_sha256"])
@@ -457,7 +459,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             if not hook_handlers[event]:
                 hook_handlers[event] = [entry for entry in merged.get("hooks", {}).get(event, [])
                     if entry in record.get("hook_handlers", {}).get(event, [])]
-        installation_changed = hint_status["status"] == "PLANNED" or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
+        installation_changed = hint_status["status"] == "PLANNED" or wait_guidance_status["status"] == "PLANNED" or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
             before.get(name) != contents for name, contents in writes.items()
         )
         receipt = {"format": RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
@@ -472,6 +474,8 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         receipt["owned_bytes"]["AGENTS.md#global"] = digest(_global_owned_bytes(writes["AGENTS.md"]))
         if hint_record is not None:
             receipt[mode_hint_config.RECORD_KEY] = hint_record
+        if wait_guidance_record is not None:
+            receipt[wait_guidance_config.RECORD_KEY] = wait_guidance_record
         writes[RECEIPT_NAME] = (json.dumps(receipt, sort_keys=True, ensure_ascii=False) + "\n").encode()
         observed = _files(home)
         observed.update(host_transition._observe(home, targets, targets=targets))
@@ -483,7 +487,9 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
     changed_files = sorted(set(deletes) | {name for name, contents in writes.items() if before.get(name) != contents})
     finish = {"candidate": str(candidate), "sha": sha, "runtime": runtime.decode(),
               "execution_constraint": execution_constraint, "changed_files": changed_files,
-              "mode_hint_record": hint_record, "mode_hint_status": hint_status}
+              "mode_hint_record": hint_record, "mode_hint_status": hint_status,
+              "wait_guidance_record": wait_guidance_record,
+              "wait_guidance_status": wait_guidance_status}
     try:
         with host_transition.locked(home):
             transition = host_transition.begin(home, intent, before, writes, deletes, finish)
@@ -503,7 +509,7 @@ def _transition_failure(home, error):
 
 
 def _finish_install(home, transition):
-    from . import codex_adapter as adapter, lifecycle, codex_app_server, roles, host_transition, mode_hint_config
+    from . import codex_adapter as adapter, lifecycle, codex_app_server, roles, host_transition, mode_hint_config, wait_guidance_config
     finish = transition["finish"]
     candidate, sha, runtime = Path(finish["candidate"]), finish["sha"], finish["runtime"].encode()
     execution_constraint, changed_files = finish["execution_constraint"], list(finish["changed_files"])
@@ -527,6 +533,11 @@ def _finish_install(home, transition):
         hint = mode_hint_config.finish_install(home, transition)
         if hint["changed"]:
             changed_files.append("config.toml")
+    wait_guidance = finish.get("wait_guidance_status", wait_guidance_config.status("LEGACY_UNMANAGED"))
+    if ready and wait_guidance["status"] in {"PLANNED", "MANAGED"}:
+        wait_guidance = wait_guidance_config.finish_install(home, transition)
+        if wait_guidance["changed"]:
+            changed_files.append("config.toml")
     if ready:
         manual = []
         host_transition.complete(home, transition)
@@ -538,6 +549,8 @@ def _finish_install(home, transition):
         manual = ["Host registration or trust incomplete"]
     if hint["status"] in {"USER_CHANGED_PRESERVED", "USER_CUSTOM_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED", "APPLY_OUTCOME_UNKNOWN_PRESERVED"}:
         manual.append("native_mode_hint_compatibility:" + hint["status"])
+    if wait_guidance["status"] in {"USER_CHANGED_PRESERVED", "USER_CONFIG_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED", "APPLY_OUTCOME_UNKNOWN_PRESERVED"}:
+        manual.append("controller_wait_guidance_compatibility:" + wait_guidance["status"])
     return {"ok": ready, "changed": bool(changed_files), "target": str(home),
         "files": sorted(set(changed_files)), "manual_action_required": manual,
         "host_actor_assurance": "UNKNOWN", "maintenance_authority": "EXPLICIT_HUMAN_INTENT",
@@ -546,6 +559,7 @@ def _finish_install(home, transition):
         "host_hook_trusted_count": trusted_count, "host_hook_enabled_count": enabled_count,
         "host_hook_expected_count": expected_count, "host_hook_trust_error": trust_error,
         "native_mode_hint_compatibility": hint,
+        "controller_wait_guidance_compatibility": wait_guidance,
         "host_integration_ready": "YES" if ready else "NO", "global_instruction_ready": "YES",
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,
@@ -559,7 +573,7 @@ def _finish_install(home, transition):
 
 
 def uninstall(home: Path, filename) -> dict:
-    from . import codex_adapter as adapter, lifecycle, codex_app_server, host_transition, mode_hint_config
+    from . import codex_adapter as adapter, lifecycle, codex_app_server, host_transition, mode_hint_config, wait_guidance_config
     import os
     try:
         intent = contract(filename, "codex-uninstall", home)
@@ -579,8 +593,12 @@ def uninstall(home: Path, filename) -> dict:
         record = ownership(home, prior, intent)
         hint_record = record.get(mode_hint_config.RECORD_KEY)
         mode_hint_config.validate(hint_record, home)
+        wait_guidance_record = record.get(wait_guidance_config.RECORD_KEY)
+        wait_guidance_config.validate(wait_guidance_record, home)
         if hint_record is not None:
             mode_hint_config.read(home)  # Reject malformed config before any disk transition.
+        if wait_guidance_record is not None:
+            wait_guidance_config.read(home)
         writes, deletes, preserved = {}, [], []
         current_global = before.get("AGENTS.md", b"")
         span = _global_owned_bytes(current_global)
@@ -647,6 +665,7 @@ def uninstall(home: Path, filename) -> dict:
     writes = {name: contents for name, contents in writes.items() if contents}
     finish = {"keys": keys, "inert": inert, "preserved": preserved,
               "mode_hint_record": hint_record,
+              "wait_guidance_record": wait_guidance_record,
               "changed_files": sorted(set(writes) | set(deletes))}
     try:
         with host_transition.locked(home):
@@ -657,12 +676,13 @@ def uninstall(home: Path, filename) -> dict:
 
 
 def _finish_uninstall(home, transition):
-    from . import codex_app_server, lifecycle, codex_adapter as adapter, host_transition, mode_hint_config
+    from . import codex_app_server, lifecycle, codex_adapter as adapter, host_transition, mode_hint_config, wait_guidance_config
     finish = transition["finish"]
     keys, inert, preserved = finish["keys"], finish["inert"], finish["preserved"]
     audits = [host_transition.archive_name(transition)]
     try:
         trust_removed = codex_app_server.remove_owned_hook_trust(home, keys) if keys else 0
+        wait_guidance = wait_guidance_config.apply(home, finish.get("wait_guidance_record"), remove=True)
         hint = mode_hint_config.apply(home, finish.get("mode_hint_record"), remove=True)
     except (OSError, ValueError, RuntimeError) as exc:
         result = _failure(home, exc)
@@ -671,11 +691,17 @@ def _finish_uninstall(home, transition):
                       host_hook_trust_cleanup_status="FAILED", host_hook_trust_cleanup_error=str(exc))
         return result
     host_transition.complete(home, transition)
-    return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed or hint["changed"]), "target": str(home),
+    manual = (["native_mode_hint_compatibility:USER_CHANGED_PRESERVED"] if hint["status"] == "USER_CHANGED_PRESERVED" else [])
+    if wait_guidance["status"] == "USER_CHANGED_PRESERVED":
+        manual.append("controller_wait_guidance_compatibility:USER_CHANGED_PRESERVED")
+    return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed or hint["changed"] or wait_guidance["changed"]), "target": str(home),
         "status": "UNINSTALLED_INERT_RUNNER_RETAINED" if inert else "UNINSTALLED",
-        "files": sorted(set(finish["changed_files"] + (["config.toml"] if hint["changed"] else []))), "preserved_files": preserved,
+        "files": sorted(set(finish["changed_files"] + (["config.toml"] if hint["changed"] or wait_guidance["changed"] else []))), "preserved_files": preserved,
         "native_mode_hint_compatibility": hint,
-        "manual_action_required": ["native_mode_hint_compatibility:USER_CHANGED_PRESERVED"] if hint["status"] == "USER_CHANGED_PRESERVED" else [], "retained_inert_runner": inert, "runtime_audit_records": audits,
+        "controller_wait_guidance_compatibility": wait_guidance,
+        "retained_inert_runner": inert,
+        "manual_action_required": manual,
+        "runtime_audit_records": audits,
         "host_hook_trust_cleanup_status": "CLEANED" if keys else "NOT_NEEDED",
         "host_hook_trusted_state_removed": trust_removed, "host_hook_trust_cleanup_error": None,
         "host_hook_registration_present": lifecycle.host_hooks_health(home)["hooks_configured"],

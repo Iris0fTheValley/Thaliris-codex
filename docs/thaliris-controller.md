@@ -320,13 +320,16 @@ Controller waits for the necessary child result without rechecking the same job.
 Do not poll a finished child or create repeated reasoning turns solely to observe
 unchanged deterministic state when the runtime can wait for a meaningful or terminal
 event. Do not repeatedly set `wait_agent` to its shortest supported interval, and do
-not substitute `sleep` for native waiting. Respect any higher-level duration limit;
-for example, when a blocking call is capped at 60 seconds, keep each call within that
-limit while choosing its duration by the expected event and next useful decision.
-Without such a limit, do not impose a universal fixed timeout. A timeout alone creates
-no new decision or evidence and does not justify a status-only reasoning turn. If the
-known necessary child remains unfinished after a timeout, continue with native waiting
-without a status snapshot for the unchanged state. When a meaningful wake occurs,
+not substitute `sleep` for native waiting. A general recommendation to limit blocking
+waits to 60 seconds is not an intrinsic cap on an event-capable native `wait_agent`;
+only an explicit applicable higher-level limit imposes that bound. Otherwise choose an
+event-aware wait duration informed by the expected task, which may take several minutes
+or longer. Prefer native completion events over short polling loops, and preserve
+responsiveness to interruptions and substantive events. Do not impose one fixed timeout
+across tasks. A timeout alone creates no new decision or evidence and does not justify
+a status-only reasoning turn. If the known necessary child remains unfinished after a
+timeout, continue with native waiting without a status snapshot for the unchanged state.
+When a meaningful wake occurs,
 use the available status capability once: a wake-only V2 `wait_agent` does not prove
 completion, so check `list_agents`; a V1 `wait_agent` status map is keyed by the exact
 spawned agent ID. V2 `list_agents` status entries use canonical task names. An exact

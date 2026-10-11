@@ -128,8 +128,10 @@ def test_waiting_guidance_uses_native_events_and_observation_ownership():
              ("do not repeatedly set wait_agent to its shortest supported interval", "do not substitute sleep for native waiting"),
              ("timeout alone creates no new decision or evidence", "without a status snapshot for the unchanged state"),
              ("wake-only v2 wait_agent does not prove completion", "check list_agents"),
-             ("higher-level duration limit", "60 seconds", "within that limit"),
-             ("without such a limit", "do not impose a universal fixed timeout"))
+             ("general recommendation", "60 seconds", "not an intrinsic cap"),
+             ("explicit applicable higher-level limit", "event-aware wait duration", "several minutes or longer"),
+             ("native completion events", "interruptions", "substantive events"),
+             ("do not impose one fixed timeout across tasks"))
 
 
 def test_shared_entry_keeps_safety_and_discovery_without_controller_execution_routine():

@@ -35,12 +35,15 @@ missing native terminal evidence fail closed. Controller-direct auxiliary childr
 use the same execution distinction. Controller acceptance remains independent. V1
 `wait_agent` returns a status map keyed by the exact spawned agent ID; V2 `list_agents`
 returns canonical-name status entries. A wake-only V2 `wait_agent` is not completion
-evidence; take one `list_agents` snapshot after a meaningful wake. Respect a higher-level
-duration bound for each blocking wait: if it is capped at 60 seconds, choose an
-event-based interval within that bound rather than repeatedly using the shortest
-accepted interval. Do not substitute `sleep`, poll unchanged state after a timeout, or
-impose one fixed timeout across tasks. Executors observe their own tests and CI; the
-Controller does not repeat that observation. Neither native status family requires
+evidence; take one `list_agents` snapshot after a meaningful wake. A general
+recommendation to limit blocking waits to 60 seconds is not an intrinsic cap on an
+event-capable native `wait_agent`; only an explicit applicable higher-level limit
+imposes that bound. Otherwise choose an event-aware duration informed by expected task
+length, which may be several minutes or longer. Prefer native completion events over
+short polling loops and preserve responsiveness to interruptions and substantive
+events. Do not substitute `sleep`, poll unchanged state after a timeout, or impose one
+fixed timeout across tasks. Executors observe their own tests and CI; the Controller
+does not repeat that observation. Neither native status family requires
 another completion check once exact completion is proved. The accepted Completed payload is exactly
 the one-key `{"completed": <string or null>}` variant. Null proves execution closure
 but supplies no semantic result. Other value types, extra fields and unsupported
