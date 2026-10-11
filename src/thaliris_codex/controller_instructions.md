@@ -326,16 +326,20 @@ change mode automatically. Controller integration never substitutes for acceptan
 Use only trusted direct runtime commands and native coordination allowed by the
 current execution mode. Native failure reconciliation needs exact trusted evidence;
 timeouts, not_found and prose are not death proof. Explicit dependency disposition
-may end management without proving termination. Wait only for
-a known unfinished necessary child. After FINAL, use its result; a decision-changing
+may end management without proving termination. First continue independent work that
+should take priority; decide whether waiting is necessary before choosing its duration.
+Wait only for a known unfinished necessary child, with no other higher-priority work.
+The same policy applies at every authorized parent layer, including an Implementer,
+Focused Implementer or Reviewer waiting for an Investigator Scanner; each observes
+only its direct dependencies. After FINAL, use its result; a decision-changing
 unknown returns the decision to Controller and does not trigger another wait or
 repeated recovery of the old task. Event-driven waiting takes precedence over timed
 polling. First confirm the current Host's actual wait tool maximum and whether it
 returns early for meaningful native events, accepts user interruption and delivers
 child notifications during waiting; do not infer these capabilities from source
 instructions or another Host version. If meaningful-event early return is confirmed
-and no dependency needs an interim decision, default to the supported 60-minute
-window (`timeout_ms=3600000`). This is a maximum waiting window, not a required child
+and user interruption is confirmed and no dependency needs an interim decision,
+default to the supported 60-minute window (`timeout_ms=3600000`). This is a maximum waiting window, not a required child
 execution duration: native completion wakes Controller early and its result is used
 directly. A shorter historical average must not force an earlier Controller wake.
 When a timed stage check is actually needed or event early return is unreliable,
@@ -348,7 +352,8 @@ honor a shorter actual maximum without changing or bypassing Host internals.
 Unsupported or unconfirmed wake capabilities remain UNKNOWN; use the applicable
 timed-check recommendation within the real tool limit rather than assuming early return.
 Give each necessary dependency one observation owner: executors run and wait on
-their own tests/processes/CI and report substantive changes or terminal evidence;
+their own tests/processes/CI using the corresponding tool's actual wait capability,
+not wait_agent parameters, and report substantive changes or terminal evidence;
 Controller waits for the necessary child result without rechecking the same job.
 Do not poll a finished child or create repeated reasoning turns solely to observe
 unchanged deterministic state when the runtime can wait for a meaningful or terminal
@@ -356,11 +361,17 @@ event. Do not repeatedly set `wait_agent` to its shortest supported interval, an
 not substitute `sleep` for native waiting, add a progress poller or give each parallel
 child its own timed polling loop. Wait for native events that can change the current
 decision across necessary parallel children. Do not impose one fixed timeout across
-tasks. Distinguish native terminal events, ordinary child messages and wait timeouts:
+tasks; neither fixed 60 seconds nor fixed 60 minutes applies universally. While
+executing, children continue work and report only completion, key blockers, major
+discoveries or necessary upper-level decisions, never elapsed-time heartbeats.
+Distinguish native terminal events, ordinary child messages, wait timeouts, exceptions
+and UNKNOWN: exceptions do not fabricate terminal evidence;
 an ordinary message or timeout does not prove that a child ended. A timeout alone
 creates no new decision or evidence and does not justify
-a status-only reasoning turn. If the known necessary child remains unfinished after a
-timeout, continue with native waiting without a status snapshot for the unchanged state.
+a status-only reasoning turn. After timeout, reassess the necessary direct dependency
+and available independent work before any further wait; avoid infinite useless waits.
+Only if the known necessary child remains unfinished and no other work takes priority,
+continue with native waiting without a status snapshot for the unchanged state.
 When a meaningful wake occurs,
 use the available status capability once: a wake-only V2 `wait_agent` does not prove
 completion, so check `list_agents`; a V1 `wait_agent` status map is keyed by the exact

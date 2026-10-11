@@ -124,6 +124,33 @@ class RoleDefinition:
         )
 
 
+_WAITING_INSTRUCTIONS = (
+    "First continue independent work that should take priority before waiting. Only call wait_agent "
+    "for an unfinished direct child whose result is necessary, with no other higher-priority work. "
+    "This policy applies at every authorized delegation layer, including Implementer or Reviewer "
+    "waiting for an Investigator Scanner; observe only your direct dependencies. First confirm the "
+    "current Host's meaningful-event early return, user interruption and actual tool maximum; "
+    "unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early return and "
+    "user interruption and no interim decision, default to the supported 60-minute window "
+    "(timeout_ms=3600000); completion can wake the parent early. Windows are not execution "
+    "deadlines. If stage checks are necessary or early return is unreliable, recommend 60 seconds "
+    "for very short tasks, 10–60 minutes for ordinary tasks, and about 30 minutes for longer-task "
+    "stage checks. Actual tool limits, explicit applicable higher-level limits and exceptions take "
+    "precedence; neither fixed 60 seconds nor fixed 60 minutes fits every task. Historical averages "
+    "must not force early wakes. Wait for decision-changing native events across parallel direct "
+    "dependencies, without per-child polling loops. Distinguish native completion, ordinary messages, "
+    "timeout, exceptions and UNKNOWN: messages and timeouts do not prove completion; exceptions "
+    "do not fabricate terminal evidence. A wake-only result needs one available exact native status "
+    "check; use valid completion once without repeated confirmation. After timeout, reassess the "
+    "necessary direct dependency and available independent work before any further wait; do not "
+    "repeat useless waits indefinitely. Do not substitute sleep, high-frequency queries, heartbeat "
+    "services or status-only model wakeups. While executing, continue work without elapsed-time "
+    "progress messages; report only completion, key blockers, major discoveries or necessary "
+    "upper-level decisions. Tests, builds, CI and external processes belong to their direct "
+    "executor: use the corresponding tool's actual waiting capability, not wait_agent parameters. "
+)
+
+
 _SHARED_INSTRUCTIONS = (
     "Your authorized parent's selected native spawn handoff is your task-specific input; "
     "use selected facts and source pointers, keeping unselected material outside this Workstream. "
@@ -159,10 +186,9 @@ _EXECUTOR_INSTRUCTIONS = (
     "Project/package smoke does not authorize live Host maintenance. Keep durable admission "
     "and INDEX maintenance with Controller/selected Curator. Own observation of your tests, "
     "processes and CI: run/wait on them and report substantive changes or terminal evidence, "
-    "so Controller waits for your result without duplicating the same observations. Prefer "
-    "native notifications or an event/dependency-appropriate wait; tool maximum is capacity, "
-    "not a recommended duration, and higher-level duration limits take precedence. Do not "
-    "start status-only reasoning rounds for unchanged state or send routine wait updates. "
+    "so Controller waits for your result without duplicating the same observations. Apply the "
+    "shared event-driven waiting policy to necessary direct children; external processes use "
+    "their corresponding tool capabilities. "
     "Reuse original failures and minimal local reproductions; distinguish failed boundaries "
     "from inferred root causes and preserve refusal/identity/ownership guarantees. "
     "You may delegate an independent, "
@@ -265,9 +291,8 @@ def _instructions(role: str) -> str:
             'fork_turns="none" (V2) or fork_context=false (V1), under selected task model constraints; retain independent semantic judgment '
             'and wait only while its needed result is unfinished. Only one Scanner may be '
             'active/pending at once; after proved terminal completion the slot can serve '
-            'another necessary uncovered gap in the same boundary. Choose waiting by '
-            'capability, meaningful event and necessary dependency; tool maximum is capacity '
-            'and higher-level duration limits take precedence. Review READY covers only '
+            'another necessary uncovered gap in the same boundary. Apply the shared event-driven '
+            'waiting policy to your necessary direct Scanner dependency. Review READY covers only '
             'selected criteria and never replaces final product acceptance.'
         ),
         'verifier': (
@@ -281,8 +306,8 @@ def _instructions(role: str) -> str:
         ),
     }
     if role == "controller":
-        return role_instructions[role]
-    shared = _SHARED_INSTRUCTIONS
+        return (_WAITING_INSTRUCTIONS + role_instructions[role]).strip()
+    shared = _SHARED_INSTRUCTIONS + _WAITING_INSTRUCTIONS
     if role in {"implementer", "focused-implementer"}:
         shared += _EXECUTOR_INSTRUCTIONS
     return (shared + role_instructions[role]).strip()

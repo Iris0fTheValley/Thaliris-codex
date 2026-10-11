@@ -270,16 +270,21 @@ rules remain retrievable on demand within authority. Each
 invariant has one normal runtime authority; rationale and mechanical design live in
 [Codex protocol](adapter/codex/README.md) and [Core prompt design](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md).
 
-Each necessary dependency has one observation owner: executors run/wait on their tests,
-processes and CI; Controller waits only for a known unfinished child result that remains
-necessary, without checking the same job again. A child FINAL or a decision-changing
+First continue independent work that should take priority; decide whether to wait before
+choosing duration. The policy applies at every authorized parent layer, including
+Implementer, Focused Implementer or Reviewer waiting for an Investigator Scanner. Each
+observes only direct dependencies. Each necessary dependency has one observation owner:
+executors run/wait on their tests, builds, processes and CI using corresponding tool
+capabilities, not wait_agent parameters; a parent waits only for a known unfinished child result that remains
+necessary, with no other higher-priority work, without checking the same job again. A child FINAL or a decision-changing
 unknown ends that slice; do not keep waiting for it. Event-driven waiting takes precedence
 over timed polling. First confirm the current Host's actual maximum, meaningful-event
 early return, user interruption and child notifications during waiting; unconfirmed
-capabilities remain UNKNOWN. With confirmed meaningful-event early return and no interim
+capabilities remain UNKNOWN. With confirmed meaningful-event early return and user
+interruption and no interim
 dependency decision, default to the supported 60-minute window (`timeout_ms=3600000`).
 This is a maximum waiting window, not a required execution duration: native completion
-wakes Controller early and its result is used directly. A short historical average must
+wakes the parent early and its result is used directly. A short historical average must
 not force an earlier wake. When timed stage checks are necessary or early return is
 unreliable, recommend 60 seconds for very short tasks, 10–60 minutes for ordinary tasks by
 work scale, and about 30 minutes for longer-task stage checks. Reliable events without
@@ -290,8 +295,13 @@ never bypass or change Host internals to extend a shorter maximum.
 Native terminal events, ordinary child messages and timeouts are distinct evidence:
 messages and timeouts do not prove completion. Do not substitute `sleep`, add progress
 pollers or create per-child timed polling loops; wait for native events that can change
-the current decision. Continue waiting only for a necessary unfinished dependency,
-without snapshots or reasoning for unchanged state. A wake-only V2 result needs one
+the current decision. After timeout, reassess necessary direct dependencies and available
+independent work before further waiting; avoid infinite useless waits and snapshots for
+unchanged state. Exceptions do not fabricate terminal evidence; unproved status stays
+UNKNOWN. Neither fixed 60 seconds nor fixed 60 minutes applies universally; windows are
+not execution deadlines. Executing children continue work and report only completion,
+key blockers, major discoveries or necessary upper-level decisions, never elapsed-time
+progress or heartbeat messages. A wake-only V2 result needs one
 available exact native status check (such as `list_agents`); proved completion needs no
 second confirmation. The Hook preserves caller wait arguments and does not extend them
 automatically. Independent Task IDs may proceed in parallel. Within one

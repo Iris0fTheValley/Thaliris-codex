@@ -150,9 +150,9 @@ def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
         assert "never a default" not in text, name
         assert "tool maximum is capacity, not a default duration" not in normalized(text), name
     waiting = normalized(controller_instructions.render(section="completion"))
-    assert "if meaningful-event early return is confirmed and no dependency needs an interim decision, default" in waiting
+    assert "if meaningful-event early return is confirmed and user interruption is confirmed and no dependency needs an interim decision, default" in waiting
     assert "actual tool limits" in waiting and "take precedence over these defaults" in waiting
-    assert "native terminal events, ordinary child messages and wait timeouts" in waiting
+    assert "native terminal events, ordinary child messages, wait timeouts" in waiting
     assert "an ordinary message or timeout does not prove that a child ended" in waiting
 
 
@@ -471,11 +471,13 @@ def test_resident_waiting_observation_and_causal_contract_rejects_negation_rever
     concepts(value, ("actual tool limits", "higher-level duration limits", "precedence"),
              ("meaningful-event early return", "confirmed", "60-minute", "default"))
     for text in (prompt("implementer"), prompt("focused-implementer")):
-        concepts(text, ("tool maximum", "capacity", "higher-level duration limits", "precedence"))
-        require_local_prohibition(text, action="recommend", target="duration")
-        mutant = re.sub(r"\bnot a recommended duration\b", "a recommended duration", text)
+        concepts(text, ("actual tool limits", "higher-level limits", "precedence"),
+                 ("independent work", "before waiting", "necessary", "direct child"),
+                 ("confirmed", "meaningful-event early return", "user interruption", "60-minute", "default"))
+        require_local_prohibition(text, action="repeat", target="waits")
+        mutant = text.replace("do not repeat useless waits indefinitely", "do repeat useless waits indefinitely")
         with pytest.raises(AssertionError, match="local prohibition"):
-            require_local_prohibition(mutant, action="recommend", target="duration")
+            require_local_prohibition(mutant, action="repeat", target="waits")
     require_local_prohibition(value, action="bypass", target="hooks")
     require_local_prohibition(value, action="poll", target="child")
     with pytest.raises(AssertionError, match="local prohibition"):

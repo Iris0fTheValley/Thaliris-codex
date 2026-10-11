@@ -510,6 +510,36 @@ _KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'0fc5f465d6543b0ab4a20
 _KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'e6b28d06d39de22f9a7fc5d80e07eaf044caf45a328551834dbcb2336123360b'})
 _KNOWN_GENERATED_ROLE_REGISTRY_DOC_HASHES |= frozenset({'ffecc599a0e593d7634d837a9b32150c1782602f4bdd0ec3941673de3efe5dc6'})
 
+# Exact filename-bound outputs from immutable 41157f59ca26657e4b8ef99a09d55cbf6229fded;
+# tests/fixtures/all-layer-wait-predecessor retains renderer and Git-blob witnesses.
+_ALL_LAYER_WAIT_PREDECESSOR_PROFILE_HASHES = {'default': {'thaliris-investigator.toml': '54f34cf19fc31e9fd7d71c8b72853c1e222125f23f66c9e5caa3f2b5bf73a325',
+             'thaliris-curator.toml': '918d995f999c740c5df7878ac2d2f1dd7109f860834d567bdf3300eb7c29d769',
+             'thaliris-reasoning-specialist.toml': '68b52f3cf672b2706854a29337c00ae6d37873add1931294b5f5cfd087e3a934',
+             'thaliris-implementer.toml': 'b6f2dc5d679a4e40e09888fdafd658f59502c8bccd5c9b6bf71f78f0524b235b',
+             'thaliris-focused-implementer.toml': '580470c3e98de8e0967d6492e90d52b671f174ec354bc9d4e61a28ca3c30d20f',
+             'thaliris-verifier.toml': '838ddb9b867a108abc0f09773dec73ebcb796e7a40479a14d7debdd831f21acb',
+             'thaliris-reviewer.toml': 'fede9888e91be61417dc9f03662cfeff70c0e156486300071314cf4aac11ce5e',
+             'thaliris-reasoning-specialist-astra-medium.toml': '0cb2407978fa5ead51910f0be2bc1040d4c41d1c95edcc2b598cd149545944e7',
+             'thaliris-reasoning-specialist-xhigh.toml': 'cef6f5ff5f83bff32886bd8330c1fe453a593aa9f5463b31ee68e59e24d19ce2',
+             'thaliris-focused-implementer-astra-medium.toml': '2c9c9dbecdb69c590ddd48e574c6e06d65c93f581a379c04fd7f529edf1b7a5e',
+             'thaliris-focused-implementer-xhigh.toml': 'd8ebab7c88e5dba8e4fe7ac893360ceb732aafadba40857028a13efc6bc34a6f'},
+ 'luna-only': {'thaliris-investigator.toml': '2097e14170126ac4a875a0871c341514ec04ccdaceb342d1c62b6c3049271aba',
+               'thaliris-curator.toml': '29b5160bd0d7b14f98b2ff2a3d38eadc4531fba6626ce50f991aeccf94b2531e',
+               'thaliris-reasoning-specialist.toml': '04b52b097d727a81fa79d79d337e8560560490cb419abee61f2c294b6e70e036',
+               'thaliris-implementer.toml': '8d731714b1e9e4cbc40156f69716444131d6d509e6605970de5624d8d2acd713',
+               'thaliris-focused-implementer.toml': '0289ee18a671da351634a309ca3ed6d32865b38d6fc65853c3e0c5ad1297ad59',
+               'thaliris-verifier.toml': '02b61aea580a02b975b7836376153c8eb58f42d44fa71c2e04bb750e9a74f5f9',
+               'thaliris-reviewer.toml': '3f7ec5db8bb22ba29f88b53bc0443e254f6c2e7446e6a8650d8be50de2c9eabe',
+               'thaliris-reasoning-specialist-astra-medium.toml': '0cb2407978fa5ead51910f0be2bc1040d4c41d1c95edcc2b598cd149545944e7',
+               'thaliris-reasoning-specialist-xhigh.toml': 'cef6f5ff5f83bff32886bd8330c1fe453a593aa9f5463b31ee68e59e24d19ce2',
+               'thaliris-focused-implementer-astra-medium.toml': '2c9c9dbecdb69c590ddd48e574c6e06d65c93f581a379c04fd7f529edf1b7a5e',
+               'thaliris-focused-implementer-xhigh.toml': 'd8ebab7c88e5dba8e4fe7ac893360ceb732aafadba40857028a13efc6bc34a6f'}}
+for _profile_set in _ALL_LAYER_WAIT_PREDECESSOR_PROFILE_HASHES.values():
+    for _profile_name, _profile_hash in _profile_set.items():
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash})
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'77b0f582764de7a713f008e51194e21b85a49539d51151e432415f2596551657'})
+
+
 def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
     # isolation instructions contain quotes that must not terminate the value.

@@ -74,14 +74,18 @@ not unrelated ordinary reads or independent work.
 An unbound spawn can be recovered only from exact
 trusted name-bound native failure or spawn-failure callback, not timeout/not_found.
 
-Event-driven waiting takes precedence over timed polling. Controller waits only for a known unfinished child result
-that remains necessary; after child FINAL or a decision-changing unknown, that slice ends
+First continue independent work that should take priority, then decide whether waiting is
+necessary before choosing duration. This policy applies at every authorized parent layer,
+including Implementer/Focused Implementer/Reviewer waiting for an Investigator Scanner;
+each observes only its direct dependencies. Event-driven waiting takes precedence over
+timed polling. A parent waits only for a known unfinished child result
+that remains necessary, with no other higher-priority work; after child FINAL or a decision-changing unknown, that slice ends
 and the Controller does not keep waiting for it. First confirm the actual current Host
 maximum, meaningful-event early return, user interruption and child notifications during
 waiting; unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early
-return and no interim dependency decision, default to the supported 60-minute window
+return and user interruption and no interim dependency decision, default to the supported 60-minute window
 (`timeout_ms=3600000`). This is a maximum window, not a required execution duration;
-native completion wakes Controller early. Historical averages must not force earlier
+native completion wakes the parent early. Historical averages must not force earlier
 wakes. When timed stage checks are necessary or early return is unreliable, recommend
 60 seconds for very short tasks, 10–60 minutes for ordinary tasks by scale, and about
 30 minutes for longer-task stage checks; reliable events without interim decisions still
@@ -91,11 +95,17 @@ Do not substitute `sleep`, add progress pollers or create per-child timed pollin
 Wait for native events that can change the current decision across parallel children.
 The Hook preserves caller wait arguments rather than promoting them to a capacity limit.
 Ordinary child messages and timeouts do not prove completion. A timeout creates
-no new evidence: continue native waiting only while the known child remains necessary and
-unfinished, without status snapshots or reasoning rounds for unchanged state. A wake-only
+no new evidence: reassess necessary direct dependencies and available independent work
+before further waiting, avoiding infinite useless waits and status snapshots for unchanged
+state. Exceptions do not fabricate terminal evidence; unproved status stays UNKNOWN.
+Neither fixed 60 seconds nor fixed 60 minutes applies universally. Executing children
+continue work; report only completion, key blockers, major discoveries or necessary
+upper-level decisions, never elapsed-time progress or heartbeat messages. A wake-only
 V2 `wait_agent` result is not completion evidence; use one `list_agents` snapshot after a
 meaningful wake. Executors observe/wait on their own tests, processes and CI, reporting
 substantive changes or terminal evidence; Controller does not duplicate those observations.
+Tests, builds, CI and external processes use their corresponding tools' actual wait
+capabilities, not wait_agent parameters. Waiting windows are not execution deadlines.
 
 Production Hook/maintenance diagnostics emit only allowlisted failed boundary labels
 on stderr: receive, decode, JSON syntax/shape, dispatch, maintenance-contract and

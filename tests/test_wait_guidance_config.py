@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import subprocess
 import tomllib
 
@@ -111,12 +112,12 @@ def test_user_edit_to_managed_guidance_survives_upgrade_and_uninstall(tmp_path, 
     assert (home / "config.toml").read_bytes() == edited
 
 
+@pytest.mark.parametrize("old_guidance", [PRE_EVENT_FIRST_GUIDANCE, (Path(__file__).parent / "fixtures/all-layer-wait-predecessor/guidance.txt").read_text(encoding="utf-8")], ids=["pre-event", "41157f5-event-first"])
 @pytest.mark.parametrize("upgrade", [False, True], ids=["direct-old-uninstall", "upgrade-then-uninstall"])
-def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(tmp_path, target, monkeypatch, upgrade):
+def test_historical_template_record_remains_owned_across_upgrade_and_uninstall(tmp_path, target, monkeypatch, upgrade, old_guidance):
     home, _ = target
     original = b'# user config\r\n[features.multi_agent_v2]\nmulti_agent_mode_hint_text = "user"\r\n'
     (home / "config.toml").write_bytes(original)
-    old_guidance = PRE_EVENT_FIRST_GUIDANCE
     current_guidance = guidance.GUIDANCE
     monkeypatch.setattr(guidance, "GUIDANCE", old_guidance)
 
@@ -215,9 +216,9 @@ def test_guidance_matches_the_accepted_waiting_priorities():
     for clause in (
         "Prefer event-driven native wait_agent waiting over timed polling",
         "First confirm", "unconfirmed capabilities remain UNKNOWN",
-        "When meaningful-event early return is confirmed and no dependency needs an interim decision",
+        "When meaningful-event early return and user interruption are confirmed and no dependency needs an interim decision",
         "default to the supported 60-minute window (timeout_ms=3600000)",
-        "not a required execution duration", "native completion wakes Controller early",
+        "not a required execution duration", "native completion wakes the parent early",
         "Short historical averages must not force an earlier wake",
         "60 seconds for very short tasks", "10–60 minutes for ordinary tasks",
         "about 30 minutes for longer-task stage checks",
@@ -225,7 +226,7 @@ def test_guidance_matches_the_accepted_waiting_priorities():
         "higher-level duration limits", "take precedence", "never bypass Host limits",
         "messages and timeouts do not prove completion", "one available exact native status check",
         "without confirming the same completion again", "Do not substitute sleep",
-        "per-child timed polling loops", "Executors own local tests and CI",
+        "per-child timed polling loops", "Executors own local tests,",
         "independent closing owns final acceptance",
     ):
         assert clause in text
