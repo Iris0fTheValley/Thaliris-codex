@@ -368,6 +368,13 @@ _KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES = frozenset({
     # 3094c0a69a620780558b535cf6aaf0f91ea66b62.
     "febde2dd8181652986a05d27ff9763a57e9cbc21b7916d84616802cdc9c40e9f",
 })
+_CODEX_0162_STABLE_WAIT_CAPABILITY = {
+    "min": 10_000,
+    "default": 30_000,
+    "max": 3_600_000,
+    "explicit_timeout_supported": True,
+    "native_completion_reenters_root": "UNKNOWN",
+}
 _KNOWN_HOST_WAIT_CAPABILITIES = {
     # These are release-pinned observations, not a cross-version assumption.
     "0.153.4": {"min": 10_000, "default": 30_000, "max": 3_600_000, "explicit_timeout_supported": True, "native_completion_reenters_root": "UNSUPPORTED"},
@@ -376,6 +383,11 @@ _KNOWN_HOST_WAIT_CAPABILITIES = {
     # Exact source verification confirms explicit wait_agent timeout support
     # on this prerelease.  Its live child-completion behavior remains unknown.
     "0.155.0-alpha.9.2": {"min": 10_000, "default": 30_000, "max": 3_600_000, "explicit_timeout_supported": True, "native_completion_reenters_root": "UNKNOWN"},
+    # Stable 0.162 releases share the same explicit timeout contract. Keep
+    # completion reentry unknown because the CLI source contract alone does
+    # not establish the live session's notification behavior.
+    "0.162.0": _CODEX_0162_STABLE_WAIT_CAPABILITY,
+    "0.162.1": _CODEX_0162_STABLE_WAIT_CAPABILITY,
 }
 
 

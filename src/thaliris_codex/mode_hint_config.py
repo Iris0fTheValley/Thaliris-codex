@@ -8,15 +8,17 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 import re
-import shutil
-import subprocess
 import tomllib
+
+from .config_capability import capability as config_capability
 
 KEY = "features.multi_agent_v2.multi_agent_mode_hint_text"
 RECORD_KEY = "native_mode_hint"
 SUPPORTED_VERSIONS = frozenset({
     "codex-cli 0.162.0-alpha.17.2",
     "codex-cli 0.162.0-alpha.2",
+    "codex-cli 0.162.0",
+    "codex-cli 0.162.1",
 })
 MARKER = '# thaliris:multi-agent-mode-hint\nmulti_agent_mode_hint_text = ""\n'
 BOOL_MARKER = '# thaliris:multi-agent-v2-bool '
@@ -24,16 +26,8 @@ BOOL_LINE = r'[ \t]*(?:features\.)?multi_agent_v2[ \t]*=[ \t]*(true|false)[ \t]*
 
 
 def capability() -> str:
-    """Admit only exact source-verified CLI versions; nearby versions stay unknown."""
-    executable = shutil.which("codex")
-    if executable is None:
-        return "UNKNOWN"
-    try:
-        result = subprocess.run([executable, "--version"], capture_output=True,
-                                text=True, timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return "UNKNOWN"
-    return "SUPPORTED" if result.returncode == 0 and result.stdout.strip() in SUPPORTED_VERSIONS else "UNKNOWN"
+    """Use source evidence or an isolated check of the actual config effect."""
+    return config_capability("multi_agent_mode_hint_text", SUPPORTED_VERSIONS)
 
 
 def read(home: Path) -> tuple[bytes, dict]:
@@ -139,8 +133,9 @@ def plan_install(home: Path, ownership: dict) -> tuple[dict | None, dict]:
     present, value = leaf(config)
     if present:
         return None, status("USER_EMPTY_PRESERVED" if value == "" else "USER_CUSTOM_PRESERVED")
-    if capability() != "SUPPORTED":
-        return None, status("VERSION_SUPPORT_UNKNOWN")
+    support = capability()
+    if support != "SUPPORTED":
+        return None, status("CAPABILITY_INCOMPATIBLE" if support == "INCOMPATIBLE" else "VERSION_SUPPORT_UNKNOWN")
     newline = "\r\n" if b"\r\n" in raw else "\n"
     owned_leaf = MARKER.replace("\n", newline)
     text = raw.decode("utf-8")

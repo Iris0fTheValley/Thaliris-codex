@@ -25,9 +25,9 @@ one.
     so the daemon/app-server version stays `UNKNOWN` and `daemon_control_authority`
     and `live_role_catalog` stay `UNKNOWN`.
 
-## Previous certified boundary
+## Boundary recorded on 2026-10-08
 
-The text-pinned wait boundary recorded in
+The text-pinned wait boundary recorded at the time in
 [codex-host-capability-20260920.md](codex-host-capability-20260920.md) is `codex-cli 0.155.1`
 (upstream `rust-v0.155.1`). The adapter's pinned capability set is
 `0.153.4`, `0.154.0`, `0.155.1`, plus the source-verified prerelease
@@ -81,18 +81,15 @@ scope for adoption and change nothing in the current execution path.
 
 ## Behaviour deliberately not changed
 
-`0.162.0-alpha.2` is **not** added to the pinned wait capability set. Adding it
-would flip `host_explicit_blocking_wait` from `UNSUPPORTED`/`UNKNOWN` to `PASS`
-and `selected_continuation_mode` from `UNAVAILABLE` to `BLOCKING_WAIT`, which is
-a product-behaviour change and not part of compatibility maintenance. The
-observed host therefore continues to fail closed:
+`0.162.0-alpha.2` remains outside the pinned wait capability set. Stable
+0.162.0/0.162.1 source compatibility added later does not promote this observed
+prerelease. It therefore continues to fail closed:
 
 - `host_explicit_blocking_wait` → non-`PASS`
 - `selected_continuation_mode` → `UNAVAILABLE`
 - `NATIVE_CHILD_COMPLETION_REENTERS_ROOT` → `UNKNOWN`
 
-Because the pinned set is unchanged, no adapter output string changes either:
-the reason reported for this host remains the existing
+The reason reported for this host remains the existing
 `no version-pinned wait capability is recorded for this Codex host`.
 
 ## Remaining unknown
@@ -118,3 +115,60 @@ are explicitly deferred to a separate product decision:
 - additional hook events (`permissionRequest`, `preCompact`, `postCompact`,
   `sessionEnd`, `interrupt`)
 - app-server `daemon` / `remote-control` management surfaces
+
+## Stable 0.162 source compatibility — 2026-10-12
+
+The official `rust-v0.162.0` and `rust-v0.162.1` sources were compared for the
+catalog, exact managed instruction sentence, role inheritance, native V2 wait,
+`model_catalog_json`, debug-model export, and mode-hint rendering paths. The
+compatibility implementation shares those content checks across releases. It
+does not treat every `0.162.x` version string as sufficient evidence:
+
+- Catalog refresh accepts a parseable CLI release only when the selected
+  online or bundled catalog has the expected source shape, unique model
+  identities, exact target sentence, and known adjacent target context. Unknown
+  releases still pass through those checks; changed or incomplete content is
+  preserved without installation.
+- The model-cache `client_version` is the CLI's whole `major.minor.patch`
+  version, with prerelease text removed. The stable tags implement this in
+  [`models-manager/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/models-manager/src/lib.rs)
+  and
+  [`models-manager/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/models-manager/src/lib.rs).
+  Thus `0.162.0-alpha.17.2` uses cache version `0.162.0`, while stable `0.162.1`
+  must use `0.162.1`.
+- The multi-agent mode hint and Controller wait-guidance config use the two
+  stable releases and their previously source-verified alpha builds as a fast
+  path. Other CLI versions use a shared isolated capability check rather than
+  a version-family allowlist. A disposable `CODEX_HOME` and workspace route
+  finite CLI tasks to a loopback Responses sink. The probe does not copy the
+  current user's configuration or credentials. It resolves Windows ProgramData
+  with `SHGetKnownFolderPath(FOLDERID_ProgramData)` and checks
+  `OpenAI/Codex/config.toml` plus `requirements.toml`; on Linux it checks
+  `/etc/codex/config.toml`, `requirements.toml`, and `managed_config.toml`.
+  Existing paths or failed checks prevent `exec` and leave support `UNKNOWN`.
+  macOS managed preferences cannot be proven absent here and also remain
+  `UNKNOWN`. Once local system layers are proven absent, the CLI receives
+  `--disable hooks --disable plugins`; these session overrides alone do not
+  disable managed hooks, so the preflight is required. The official source paths
+  are recorded in the
+  [config loader](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/config/src/loader/mod.rs),
+  [CLI feature-toggle parser](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/cli/src/main.rs),
+  and [hooks engine](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/hooks/src/engine/mod.rs).
+  The sink emits only synthetic text completion and denies
+  other HTTP/proxy traffic. Each field must accept a string, demonstrate its
+  actual developer-prompt effect (including suppression of the mode fragment
+  for an empty mode hint), and reject an integer with the field's string-type
+  diagnostic. A captured contradictory effect is `CAPABILITY_INCOMPATIBLE`;
+  missing or ambiguous evidence remains `VERSION_SUPPORT_UNKNOWN`. Both preserve
+  user bytes. Simulated CLI subprocess tests cover a compatible unknown
+  `0.162.2`, ignored fields, ignored empty hints, wrong-type acceptance, and
+  unavailable transport. This is evidence for the probe's process/config/HTTP
+  contract; no unverified real CLI release is claimed supported by these tests.
+- The explicit bounded-wait contract is recorded for stable `0.162.0` and
+  `0.162.1`: 10,000 ms minimum, 30,000 ms default, and 3,600,000 ms release
+  hard maximum. The effective per-session maximum and whether completion
+  notifications reenter the current root remain `UNAVAILABLE`/`UNKNOWN`.
+
+These are source and simulated-runtime compatibility claims. No real stable
+Desktop host or native role-catalog activation was tested; the live Codex CLI
+available in this environment reported `codex-cli 0.162.0-alpha.17.2`.

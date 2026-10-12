@@ -180,10 +180,36 @@ def recover(home: Path, identity: str):
                 "assurance": "UNKNOWN", "diagnostic": str(exc)}
 
 
+def _session_start_recovery(home, identity, payload):
+    """Deny uncertain restoration without blocking the native receiver.
+
+    These checks select recovery only. Their failure must not skip ordinary
+    project discovery or replace the original SessionStart result.
+    """
+    from . import lifecycle, task_authority
+    from thaliris import core
+    try:
+        denied = (lifecycle._controller_actor_assurance(payload) == "CHILD" or
+                  payload.get("readonly") is True or payload.get("fenced") is True)
+        actor_root = lifecycle._hook_repository_root(Path.cwd(), payload)
+        core.select_task(actor_root, lifecycle._associated_task(actor_root, payload))
+        anchor = task_authority.read(actor_root)
+        session_hash = lifecycle._session_id_hash(payload)
+        if (anchor is not None and session_hash in anchor["fenced_sessions"] or
+                lifecycle._session_fenced(actor_root, session_hash) or
+                lifecycle._abandoned_child_fenced(actor_root, payload)):
+            denied = True
+        return ({"ok": True, "changed": False, "status": "ACTOR_RECOVERY_DENIED"}
+                if denied else recover(home, identity))
+    except (OSError, ValueError, RuntimeError, TypeError, KeyError) as exc:
+        return {"ok": False, "changed": False, "status": "CATALOG_RECOVERY_FAILED",
+                "assurance": "UNKNOWN", "diagnostic": str(exc)}
+
+
 def main():
     import argparse
     import sys
-    from . import host_maintenance as maintenance, runtime_identity
+    from . import runtime_identity
     parser = argparse.ArgumentParser()
     parser.add_argument("--home", required=True, type=Path)
     parser.add_argument("--runtime-sha256", required=True)
@@ -192,6 +218,7 @@ def main():
     args = parser.parse_args()
     raw = sys.stdin.buffer.read()
     native_exit = 0
+    startup_exit = 0
     try:
         installed = (args.home / runtime_identity.MANIFEST_NAME).read_bytes()
         manifest = runtime_identity.validate_manifest_record(installed)
@@ -200,8 +227,7 @@ def main():
         if (Path(manifest["package_dir"]).resolve() != Path(__file__).resolve().parent or
                 Path(sys.executable).resolve() != (executable.parent / "python.exe").resolve()):
             raise ValueError("independent recovery must run the pinned installed package/interpreter")
-        from . import lifecycle, task_authority
-        from thaliris import core
+        from . import lifecycle
         payload = json.loads(raw.decode("utf-8-sig"))
         if args.managed_hook_abi != lifecycle.MANAGED_HOOK_ABI:
             raise ValueError("native SessionStart hook ABI differs from pinned installation")
@@ -216,19 +242,9 @@ def main():
             # dispatch is available.
             result = {"ok": False, "status": "CATALOG_RECOVERY_FAILED",
                       "assurance": "UNKNOWN", "diagnostic": str(payload_error)}
+            startup_exit = 1
         else:
-            denied = (lifecycle._controller_actor_assurance(payload) == "CHILD" or
-                      payload.get("readonly") is True or payload.get("fenced") is True)
-            actor_root = lifecycle._hook_repository_root(Path.cwd(), payload)
-            core.select_task(actor_root, lifecycle._associated_task(actor_root, payload))
-            anchor = task_authority.read(actor_root)
-            session_hash = lifecycle._session_id_hash(payload)
-            if (anchor is not None and session_hash in anchor["fenced_sessions"] or
-                    lifecycle._session_fenced(actor_root, session_hash) or
-                    lifecycle._abandoned_child_fenced(actor_root, payload)):
-                denied = True
-            result = ({"ok": True, "changed": False, "status": "ACTOR_RECOVERY_DENIED"}
-                      if denied else recover(args.home, args.runtime_sha256))
+            result = _session_start_recovery(args.home, args.runtime_sha256, payload)
         # Keep the original receiver and native bytes, including actor fields,
         # BOM and transport whitespace. Project discovery controls dispatch
         # only; it never establishes the persistent restoration authority.
@@ -243,8 +259,9 @@ def main():
             native_exit = callback.returncode
     except (OSError, ValueError, RuntimeError, TypeError, KeyError) as exc:
         result = {"ok": False, "status": "CATALOG_RECOVERY_FAILED", "assurance": "UNKNOWN", "diagnostic": str(exc)}
+        startup_exit = 1
     print(json.dumps(result, sort_keys=True), file=sys.stderr)
-    return native_exit if native_exit else 0 if result["ok"] else 1
+    return native_exit if native_exit else startup_exit
 
 
 if __name__ == "__main__":

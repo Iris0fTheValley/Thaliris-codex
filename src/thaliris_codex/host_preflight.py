@@ -267,7 +267,9 @@ try {
     # to the original audit-hook pipeline after the actor-preserving check.
     $python=Join-Path ([IO.Path]::GetDirectoryName($exe)) 'python.exe'
     & $python -I -B -m thaliris_codex.catalog_recovery --home $hostHome --runtime-sha256 $identity --session-start --managed-hook-abi $env:THALIRIS_SESSION_START_ABI
-    if ($LASTEXITCODE -ne 0) { throw 'independent catalog recovery or native SessionStart dispatch failed' }
+    # The receiver distinguishes auxiliary recovery diagnostics from startup
+    # rejection and preserves the native Hook result. Do not normalize it.
+    exit $LASTEXITCODE
   }
   exit 0
 } catch {

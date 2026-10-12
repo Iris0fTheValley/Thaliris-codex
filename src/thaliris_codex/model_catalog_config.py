@@ -23,8 +23,12 @@ RECORD_KEY = "native_model_catalog"
 NAME = "thaliris-model-catalog.json"
 MARKER = "# thaliris:model-catalog\n"
 TARGET = "- Avoid performing blocking sleep or wait calls longer than 60 seconds, as they may prevent you from communicating with the user for their duration."
-_PINNED_VERSION = "codex-cli 0.162.0-alpha.17.2"
-SUPPORTED_VERSIONS = frozenset({_PINNED_VERSION})
+_CLI_VERSION_PATTERN = re.compile(
+    r"^codex-cli (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 _MULTILINE_PREVIOUS = (
     "- For multiline PR descriptions, issue bodies, and comments, prefer a structured tool argument. "
     "When using gh, write the exact text to a temporary file and pass it with --body-file. "
@@ -41,7 +45,7 @@ _NEXT = (
     "Instead, use a task-specific variable name."
 )
 _MODEL_PROFILES = {
-    (_PINNED_VERSION, "online"): {
+    "online": {
         "matched": frozenset({
             "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
             "gpt-reserve", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
@@ -49,7 +53,7 @@ _MODEL_PROFILES = {
         }),
         "absent": frozenset({"gpt-5.5"}),
     },
-    (_PINNED_VERSION, "bundled"): {
+    "bundled": {
         "matched": frozenset({
             "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
             "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
@@ -78,6 +82,12 @@ def digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def cache_client_version(cli_version: str) -> str | None:
+    """Return the cache's whole CLI version, which omits prerelease labels."""
+    match = _CLI_VERSION_PATTERN.fullmatch(cli_version.strip())
+    return ".".join(match.group(index) for index in (1, 2, 3)) if match else None
+
+
 def status(name: str, *, changed: bool = False, **facts) -> dict:
     return {"status": name, "changed": changed, "key_path": KEY,
             "scope": "Host-global model catalog", "effective_session_status": "UNKNOWN",
@@ -88,10 +98,11 @@ def patch_catalog(raw: bytes, *, cli_version: str | None = None,
                   source: str | None = None) -> tuple[bytes | None, dict]:
     """Remove the target only from compatible model templates.
 
-    Managed callers provide the exact CLI version and export source. The
-    observed source-specific model roster and adjacent target lines then form
-    the compatibility contract. New models are accepted only with one exact
-    full-line target; present known models must retain their observed target context.
+    The source-specific model roster and adjacent target lines form the
+    compatibility contract. CLI version strings are recorded as provenance,
+    but the catalog itself determines whether the capability is present. New
+    models are accepted only with one exact full-line target; present known
+    models must retain their observed target context.
     """
     try:
         catalog = json.loads(raw)
@@ -102,10 +113,12 @@ def patch_catalog(raw: bytes, *, cli_version: str | None = None,
     patched = deepcopy(catalog)
     count = 0
     profile = None
-    if cli_version is not None or source is not None:
-        profile = _MODEL_PROFILES.get((cli_version, source))
+    if source is not None:
+        profile = _MODEL_PROFILES.get(source)
         if profile is None:
             return None, status("CATALOG_PROFILE_UNKNOWN", cli_version=cli_version, source=source)
+    elif cli_version is not None:
+        return None, status("CATALOG_PROFILE_UNKNOWN", cli_version=cli_version, source=source)
     known_absent = profile["absent"] if profile else frozenset()
     known_matched = profile["matched"] if profile else frozenset()
     seen_slugs: set[str] = set()
@@ -210,10 +223,11 @@ def read(home: Path) -> tuple[bytes, dict]:
 
 
 def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]:
-    """Export from the admitted CLI, never this installation's patched catalog.
+    """Export from the CLI, never this installation's patched catalog.
 
-    0.162.0-alpha.17.2 normal exports swallow refresh errors. A newly created
-    isolated cache, consistent with stdout, is required as network evidence.
+    Some CLI releases swallow refresh errors. A newly created isolated cache,
+    consistent with stdout and the CLI's whole-version cache key, is required
+    as network evidence.
     No cache and no original managed catalog enters the disposable CODEX_HOME.
     Provider/auth config is preserved; unsupported credential stores stay unknown.
     """
@@ -225,8 +239,9 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
         version = subprocess.run([executable, "--version"], capture_output=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError("VERSION_SUPPORT_UNKNOWN") from exc
-    cli_version = version.stdout.decode("utf-8").strip()
-    if version.returncode != 0 or cli_version not in SUPPORTED_VERSIONS:
+    cli_version = version.stdout.decode("utf-8", "replace").strip()
+    cache_version = cache_client_version(cli_version)
+    if version.returncode != 0 or cache_version is None:
         raise ValueError("VERSION_SUPPORT_UNKNOWN")
     if source not in {"online", "bundled"}:
         raise ValueError("unsupported model catalog source")
@@ -285,7 +300,7 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
                 raise ValueError("ONLINE_FRESHNESS_UNVERIFIED")
             fetched = datetime.fromisoformat(cache.get("fetched_at", "").replace("Z", "+00:00"))
             if (fetched.tzinfo is None or fetched < started or fetched > datetime.now(timezone.utc)
-                    or cache.get("client_version") != "0.162.0" or not isinstance(cache.get("identity"), str)
+                    or cache.get("client_version") != cache_version or not isinstance(cache.get("identity"), str)
                     or not cache["identity"] or not isinstance(cache.get("models"), list) or not cache["models"]):
                 raise ValueError("ONLINE_FRESHNESS_UNVERIFIED")
             # Models manager fills omitted instruction fields from the binary;
@@ -363,8 +378,6 @@ def plan_install(home: Path, ownership: dict, *, source: str = "online") -> tupl
         if evidence.get("kind") != source:
             raise ValueError("model catalog export source differs from selected maintenance source")
         cli_version = evidence.get("cli_version")
-        if cli_version not in SUPPORTED_VERSIONS:
-            raise ValueError("VERSION_SUPPORT_UNKNOWN")
         patched, compatibility = patch_catalog(upstream, cli_version=cli_version, source=source)
     except (OSError, ValueError, RuntimeError) as exc:
         result_status = "VERSION_SUPPORT_UNKNOWN" if str(exc) == "VERSION_SUPPORT_UNKNOWN" else "UPSTREAM_REFRESH_FAILED_PRESERVED"

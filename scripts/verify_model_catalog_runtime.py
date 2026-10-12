@@ -32,7 +32,6 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from thaliris_codex import codex_adapter, controller_instructions, model_catalog_config, roles  # noqa: E402
 
 
-SUPPORTED_VERSION = "codex-cli 0.162.0-alpha.17.2"
 ROOT_PROMPT = "THALIRIS_RUNTIME_ROOT_HISTORY_SENTINEL: dispatch selected child roles"
 IMPLEMENTER_PROMPT = "THALIRIS_RUNTIME_IMPLEMENTER_TASK_SENTINEL: inspect the selected implementation slice"
 REVIEWER_PROMPT = "THALIRIS_RUNTIME_REVIEWER_TASK_SENTINEL: challenge the selected contract"
@@ -550,16 +549,16 @@ class AppServer:
         self._stderr_reader.join(timeout=1)
 
 
-def _find_codex() -> Path:
+def _find_codex() -> tuple[Path, str]:
     selected = os.environ.get("THALIRIS_CODEX_EXECUTABLE") or shutil.which("codex")
     if not selected:
         raise RuntimeUnknownError("codex CLI is not available on PATH; installed runtime request capture is UNKNOWN")
     executable = Path(selected).resolve()
     version = subprocess.run([str(executable), "--version"], capture_output=True, timeout=15, check=False)
     actual = version.stdout.decode("utf-8", "replace").strip()
-    if version.returncode != 0 or actual != SUPPORTED_VERSION:
-        raise RuntimeUnknownError(f"runtime check requires {SUPPORTED_VERSION!r}; installed CLI was {actual!r}")
-    return executable
+    if version.returncode != 0 or model_catalog_config.cache_client_version(actual) is None:
+        raise RuntimeUnknownError(f"installed CLI version could not be parsed; runtime acceptance is unknown: {actual!r}")
+    return executable, actual
 
 
 def _isolated_env(home: Path, scratch: Path) -> dict[str, str]:
@@ -670,7 +669,7 @@ def _turn_params(start_result: dict[str, Any], *, name: str) -> dict[str, Any]:
 
 
 def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
-    executable = _find_codex()
+    executable, cli_version = _find_codex()
     with tempfile.TemporaryDirectory(prefix="thaliris-model-catalog-runtime-") as scratch_text:
         scratch = Path(scratch_text).resolve()
         home = scratch / "home"
@@ -687,7 +686,7 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
         if export.returncode != 0:
             raise VerificationError("installed CLI bundled catalog export failed: " + export.stderr.decode("utf-8", "replace")[-1200:])
         patched, patch_status = model_catalog_config.patch_catalog(
-            export.stdout, cli_version=SUPPORTED_VERSION, source="bundled"
+            export.stdout, cli_version=cli_version, source="bundled"
         )
         _expect(patched is not None and patch_status.get("status") == "COMPATIBLE", "strict patch did not accept the installed CLI bundle")
         original_catalog, patched_catalog = _verify_catalog_patch(export.stdout, patched)
@@ -910,7 +909,7 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
             return {
                 "status": "PASS",
                 "acceptance_scope": "catalog instruction regression; native delivery limitations are reported separately",
-                "cli_version": SUPPORTED_VERSION,
+                "cli_version": cli_version,
                 "cli_path_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
                 "catalog_source": "installed CLI debug models --bundled",
                 "catalog_variant": "managed" if patched_catalog_enabled else "unpatched baseline",

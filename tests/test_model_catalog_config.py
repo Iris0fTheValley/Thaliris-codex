@@ -62,6 +62,39 @@ def test_observed_bundled_11_models_allow_only_known_absent_slug():
     assert json.loads(patched) == expected
 
 
+@pytest.mark.parametrize("cli_version", [
+    "codex-cli 0.162.0",
+    "codex-cli 0.162.1",
+    "codex-cli 0.162.2",
+    "codex-cli 0.163.0",
+])
+def test_catalog_capability_uses_content_not_release_allowlist(cli_version):
+    patched, result = catalog.patch_catalog(
+        observed_catalog("online"), cli_version=cli_version, source="online"
+    )
+    assert patched is not None and result["status"] == "COMPATIBLE"
+    assert result["patched_templates"] == 9
+
+
+@pytest.mark.parametrize("cli_version,expected", [
+    ("codex-cli 0.162.0-alpha.17.2", "0.162.0"),
+    ("codex-cli 0.162.0", "0.162.0"),
+    ("codex-cli 0.162.1", "0.162.1"),
+    ("codex-cli 0.163.4-beta.2", "0.163.4"),
+    ("codex-cli 0.163.4+build.2", "0.163.4"),
+])
+def test_model_cache_version_uses_cli_whole_release(cli_version, expected):
+    assert catalog.cache_client_version(cli_version) == expected
+
+
+@pytest.mark.parametrize("cli_version", [
+    "codex-cli unknown", "0.162.1", "codex-cli 0.162", "codex-cli 0.162.0-",
+    "codex-cli 0.162.0-01", "codex-cli 00.162.0",
+])
+def test_model_cache_version_requires_parseable_cli_identity(cli_version):
+    assert catalog.cache_client_version(cli_version) is None
+
+
 def test_observed_online_10_models_have_source_specific_roster():
     patched, result = catalog.patch_catalog(
         observed_catalog("online"), cli_version="codex-cli 0.162.0-alpha.17.2", source="online"
@@ -315,7 +348,15 @@ def test_field_crash_does_not_reacquire_after_user_delete(tmp_path, monkeypatch,
 
 
 @pytest.mark.parametrize("source,fresh", [("online", True), ("online", False), ("bundled", False)])
-def test_export_preserves_provider_excludes_self_and_requires_new_cache(tmp_path, monkeypatch, source, fresh):
+@pytest.mark.parametrize("cli_version,cache_version", [
+    ("codex-cli 0.162.0-alpha.17.2", "0.162.0"),
+    ("codex-cli 0.162.0", "0.162.0"),
+    ("codex-cli 0.162.1", "0.162.1"),
+    ("codex-cli 0.163.0", "0.163.0"),
+])
+def test_export_preserves_provider_excludes_self_and_checks_whole_version_cache(
+    tmp_path, monkeypatch, source, fresh, cli_version, cache_version,
+):
     home = tmp_path / "home"
     home.mkdir()
     exe = tmp_path / "codex.exe"
@@ -329,7 +370,7 @@ def test_export_preserves_provider_excludes_self_and_requires_new_cache(tmp_path
     seen = []
     def run(args, **kwargs):
         if args[-1] == "--version":
-            return subprocess.CompletedProcess(args, 0, b"codex-cli 0.162.0-alpha.17.2\n", b"")
+            return subprocess.CompletedProcess(args, 0, (cli_version + "\n").encode(), b"")
         isolated = catalog.Path(kwargs["env"]["CODEX_HOME"])
         seen.append(isolated)
         assert isolated != home and kwargs["cwd"] == isolated
@@ -339,7 +380,12 @@ def test_export_preserves_provider_excludes_self_and_requires_new_cache(tmp_path
             assert (isolated / "config.toml").read_bytes() == original
             assert (isolated / "auth.json").read_bytes() == b"private authentication fixture"
             if fresh:
-                cache = {"fetched_at": datetime.now(timezone.utc).isoformat(), "identity": "provider-auth-opaque", "client_version": "0.162.0", "models": json.loads(upstream())["models"]}
+                cache = {
+                    "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    "identity": "provider-auth-opaque",
+                    "client_version": cache_version,
+                    "models": json.loads(upstream())["models"],
+                }
                 (isolated / "models_cache.json").write_text(json.dumps(cache))
         else:
             assert args[-1] == "--bundled"
@@ -353,39 +399,70 @@ def test_export_preserves_provider_excludes_self_and_requires_new_cache(tmp_path
         raw, evidence = catalog.export_upstream(home, source=source)
         assert raw == upstream()
         assert evidence["kind"] == source
+        assert evidence["cli_version"] == cli_version
         assert evidence["online_freshness"] == ("VERIFIED" if fresh else "UNKNOWN")
     assert seen and not seen[0].exists()
     assert (home / "config.toml").read_bytes() == original
     assert (home / "auth.json").read_bytes() == b"private authentication fixture"
 
 
-def test_source_selection_and_version_boundary(tmp_path, monkeypatch):
+def test_export_rejects_cache_from_a_different_whole_cli_version(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
     exe = tmp_path / "codex.exe"
-    exe.write_bytes(b"CLI")
-    monkeypatch.setattr(catalog.shutil, "which", lambda _: str(exe))
-    monkeypatch.setattr(catalog.subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, b"codex-cli 0.162.0-alpha.17.3", b""))
-    with pytest.raises(ValueError, match="VERSION_SUPPORT_UNKNOWN"):
-        catalog.export_upstream(tmp_path)
-    monkeypatch.setattr(catalog, "export_upstream", lambda _home, **kwargs: (bundled_compatible_catalog(), {"kind": "bundled", "cli_version": "codex-cli 0.162.0-alpha.17.2"}))
+    exe.write_bytes(b"verified CLI")
+    monkeypatch.setattr(catalog.shutil, "which", lambda _name: str(exe))
+
+    def run(args, **kwargs):
+        if args[-1] == "--version":
+            return subprocess.CompletedProcess(args, 0, b"codex-cli 0.162.1\n", b"")
+        isolated = catalog.Path(kwargs["env"]["CODEX_HOME"])
+        cache = {
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "identity": "provider-auth-opaque",
+            "client_version": "0.162.0",
+            "models": json.loads(upstream())["models"],
+        }
+        (isolated / "models_cache.json").write_text(json.dumps(cache))
+        return subprocess.CompletedProcess(args, 0, upstream(), b"")
+
+    monkeypatch.setattr(catalog.subprocess, "run", run)
+    with pytest.raises(ValueError, match="ONLINE_FRESHNESS_UNVERIFIED"):
+        catalog.export_upstream(home, source="online")
+
+
+def test_source_selection_and_content_based_version_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog, "export_upstream", lambda _home, **kwargs: (
+        bundled_compatible_catalog(), {"kind": "bundled", "cli_version": "codex-cli 0.162.2"}
+    ))
     record, result, raw = catalog.plan_install(tmp_path, {}, source="bundled")
     assert record and result["status"] == "PLANNED" and raw
+    assert record["source"]["cli_version"] == "codex-cli 0.162.2"
     record["source"]["kind"] = "online"
     old = deepcopy(record)
     new, result, raw = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: record}, source="bundled")
     assert new == old and raw is None and result["status"] == "SOURCE_DOWNGRADE_PRESERVED"
 
 
-def test_plan_rejects_unlisted_cli_version_even_if_exporter_returns_catalog(tmp_path, monkeypatch):
+def test_plan_accepts_unknown_cli_version_only_when_catalog_content_matches(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(catalog, "export_upstream", lambda _home, **_kwargs: (
         upstream(), {"kind": "online", "cli_version": "codex-cli 0.162.0-alpha.17.3"}
     ))
     record, result, changed = catalog.plan_install(home, {})
-    assert record is None and changed is None
-    assert result["status"] == "VERSION_SUPPORT_UNKNOWN"
-    assert not (home / catalog.NAME).exists()
-    assert not (home / "config.toml").exists()
+    assert record and changed is not None
+    assert result["status"] == "PLANNED"
+    assert record["source"]["cli_version"] == "codex-cli 0.162.0-alpha.17.3"
+
+    monkeypatch.setattr(catalog, "export_upstream", lambda _home, **_kwargs: (
+        b'{"models":[{"slug":"test","model_messages":{"instructions_template":"changed wording"}}]}',
+        {"kind": "online", "cli_version": "codex-cli 0.162.0-alpha.17.3"},
+    ))
+    rejected, result, changed = catalog.plan_install(home, {})
+    assert rejected is None and changed is None
+    assert result["status"] == "TEMPLATE_INCOMPATIBILITY_PRESERVED"
+    assert result["template_compatibility"]["status"] == "TARGET_ABSENT_UNEXPECTED"
 
 
 def test_user_change_during_export_never_overwrites(tmp_path, monkeypatch, pinned_test_thaliris):

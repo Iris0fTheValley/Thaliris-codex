@@ -14,7 +14,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "verify_model_catalog_runtime.py"
-EXPECTED_VERSION = "codex-cli 0.162.0-alpha.17.2"
 
 
 @pytest.fixture
@@ -52,15 +51,19 @@ def test_parent_spawn_arguments_do_not_establish_child_request_capture(runtime_m
         mock.close()
 
 
-def test_installed_codex_emits_patched_catalog_and_role_instructions_to_mock_responses():
+def test_installed_codex_emits_patched_catalog_and_role_instructions_to_mock_responses(runtime_module):
     if os.environ.get("THALIRIS_RUN_CODEX_RUNTIME_TESTS") != "1":
         pytest.skip("installed runtime acceptance is opt-in; set THALIRIS_RUN_CODEX_RUNTIME_TESTS=1; unexecuted runtime remains UNKNOWN")
     executable = os.environ.get("THALIRIS_CODEX_EXECUTABLE") or shutil.which("codex")
     if executable is None:
         pytest.fail("requested runtime acceptance is UNKNOWN: installed Codex CLI is unavailable")
     version = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=15, check=False)
-    if version.returncode != 0 or version.stdout.strip() != EXPECTED_VERSION:
-        pytest.fail(f"requested runtime acceptance is UNKNOWN: runtime integration is pinned to {EXPECTED_VERSION}")
+    cache_version = runtime_module.model_catalog_config.cache_client_version(version.stdout.strip())
+    if version.returncode != 0 or cache_version is None:
+        pytest.fail(
+            "requested runtime acceptance is UNKNOWN: CLI version could not be parsed: "
+            f"{version.stdout.strip()!r}"
+        )
 
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--json"],

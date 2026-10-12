@@ -93,23 +93,46 @@ writes; uninstall preserves edited profiles. Unrelated profiles are preserved.
 
 ### Native multi-agent mode hint compatibility
 
-This narrow compatibility edit targets only the source-verified Codex CLI
-`0.162.0-alpha.17.2` and `0.162.0-alpha.2`, as an exact allowlist rather than a version
-family. For `0.162.0-alpha.17.2`, the pinned upstream schema declares the field as a string,
+This narrow compatibility edit uses the source-verified Codex CLI builds
+`0.162.0-alpha.17.2`, `0.162.0-alpha.2`, `0.162.0`, and `0.162.1` as an exact
+fast path, rather than treating a version family as sufficient evidence. Other
+CLI builds with a successful version response undergo an isolated capability
+check: a disposable `CODEX_HOME` and workspace configure the candidate field,
+execute finite synthetic tasks against a loopback Responses sink, verify its developer
+prompt effect, and confirm that the field rejects an integer. It does not copy
+current-user configuration or authentication. On Windows it resolves ProgramData
+with `SHGetKnownFolderPath(FOLDERID_ProgramData)` and checks
+`OpenAI/Codex/config.toml` and `requirements.toml`; on Linux it checks
+`/etc/codex/config.toml`, `requirements.toml`, and `managed_config.toml`. Existing
+paths or any lookup/stat failure return `VERSION_SUPPORT_UNKNOWN` without running
+`exec`. macOS managed preferences cannot be proven absent here and therefore also
+remain `VERSION_SUPPORT_UNKNOWN`. When the local system layers are proven absent,
+the probe passes `--disable hooks --disable plugins`; those flags do not disable
+managed hooks on their own, which is why the system-layer preflight runs first. A contradictory captured
+effect reports `CAPABILITY_INCOMPATIBLE`; incomplete or ambiguous evidence reports
+`VERSION_SUPPORT_UNKNOWN`, and neither status authorizes a write. The alpha
+`0.162.0-alpha.17.2` and stable `0.162.0`/`0.162.1` sources agree that the schema declares the field as a string,
 the native mode resolver recognizes `Some("")`, and the instruction renderer
-returns no text for an empty custom value; the upstream mode-hint regression
-covers this behavior at the same immutable revision:
+returns no text for an empty custom value. The alpha revision's native regression
+covers this behavior:
 [schema](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/config.schema.json#L2927),
 [mode resolver](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/session/multi_agents.rs#L77),
 [instruction renderer](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/context/multi_agent_mode_instructions.rs#L14), and
-[native regression](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/multi_agent_mode.rs#L387).
+[native regression](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/multi_agent_mode.rs#L387). The stable source paths are also recorded at
+[0.162.0 schema](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/config.schema.json),
+[mode resolver](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/src/session/multi_agents.rs),
+[instruction renderer](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/src/context/multi_agent_mode_instructions.rs),
+[0.162.1 schema](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/config.schema.json),
+[mode resolver](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/session/multi_agents.rs), and
+[instruction renderer](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/context/multi_agent_mode_instructions.rs).
 For `0.162.0-alpha.2`, the source witness is upstream tag
 `rust-v0.162.0-alpha.2`, peeled commit
 `74e804deeb1241d5fe699b31fb319f7d46454c42`. It writes the empty string to
 `features.multi_agent_v2.multi_agent_mode_hint_text` only when that user-level
 leaf is absent. At this CLI revision, the empty value suppresses the native
-default explicit-request-only mode hint. An unknown CLI version, an existing
-empty or custom value, or unsupported TOML structure is preserved. An existing
+default explicit-request-only mode hint. A contradictory or indeterminate
+capability check, an existing empty or custom value, or unsupported TOML
+structure is preserved. An existing
 `features.multi_agent_v2.enabled` value is retained.
 
 Safe insertion supports ordinary `[features.multi_agent_v2]` and
@@ -141,7 +164,8 @@ The field writer rereads bytes immediately before atomic replacement, but this
 does not provide compare-and-swap protection against an external editor racing
 that final check.
 
-On Codex 0.162, the existing install/upgrade path can add a concise,
+For these four source-verified 0.162 CLI builds, or another build that passes the
+isolated capability check, the existing install/upgrade path can add a concise,
 role-neutral root-level `developer_instructions` value when that user-config
 field is absent. It asks agents to continue necessary independent work, prefer
 meaningful notifications over repeated polling, preserve UNKNOWN when completion
@@ -389,19 +413,38 @@ contract 保留证据并停止。trust 未完成会明确报告，用户配置�
 
 ### 原生 multi-agent mode hint 兼容
 
-此字段级兼容修改只针对已通过源码核实的 Codex CLI
-`0.162.0-alpha.17.2` 与 `0.162.0-alpha.2` 两个精确版本，而非整个版本系列。`0.162.0-alpha.17.2` 的固定上游源码
-schema 将字段定义为字符串，原生 mode resolver 识别 `Some("")`，指令 renderer 对空 custom
-值返回无提示；同一不可变 revision 的原生回归覆盖该行为：
+此字段级兼容修改将已通过源码核实的 Codex CLI 四个精确版本
+`0.162.0-alpha.17.2`、`0.162.0-alpha.2`、`0.162.0` 和 `0.162.1` 作为快速路径，
+而非仅凭整个版本系列判定兼容。其他成功报告版本的 CLI 会经过隔离能力检查：在临时
+`CODEX_HOME` 和工作区中配置目标字段，向本机 loopback Responses sink 执行一次有限任务，
+验证 developer prompt 效果，并确认字段拒绝整数。它不复制当前用户配置或认证信息；
+Windows 通过 `SHGetKnownFolderPath(FOLDERID_ProgramData)` 检查系统级
+`OpenAI/Codex/config.toml` 与 `requirements.toml`，Linux 检查
+`/etc/codex/config.toml`、`requirements.toml` 和 `managed_config.toml`。
+路径存在或检查失败时不执行 `exec` 并返回 `VERSION_SUPPORT_UNKNOWN`；macOS managed
+preferences 无法证明缺席，因此也保持该状态。确认系统层缺失后，探测传入
+`--disable hooks --disable plugins`；这两个 flag 本身不能禁用 managed hooks，所以必须先检查系统层。
+捕获到矛盾效果时报告 `CAPABILITY_INCOMPATIBLE`；证据不完整或含糊时报告
+`VERSION_SUPPORT_UNKNOWN`；两种状态都不授权写入。检查会向本机 loopback sink 发送有限的合成任务。
+alpha `0.162.0-alpha.17.2` 与 stable
+`0.162.0`/`0.162.1` 源码均显示 schema 将字段定义为字符串，
+原生 mode resolver 识别 `Some("")`，指令 renderer 对空 custom 值返回无提示。alpha revision
+的原生回归覆盖该行为：
 [schema](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/config.schema.json#L2927)、
 [mode resolver](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/session/multi_agents.rs#L77)、
 [instruction renderer](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/core/src/context/multi_agent_mode_instructions.rs#L14) 和
-[原生回归测试](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/multi_agent_mode.rs#L387)。
+[原生回归测试](https://github.com/openai/codex/blob/740e5af33c71225640e0c1c1555c514c2c93ab74/codex-rs/app-server/tests/suite/multi_agent_mode.rs#L387)。stable 源码路径也已记录：
+[0.162.0 schema](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/config.schema.json)、
+[mode resolver](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/src/session/multi_agents.rs)、
+[指令 renderer](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/src/context/multi_agent_mode_instructions.rs)、
+[0.162.1 schema](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/config.schema.json)、
+[mode resolver](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/session/multi_agents.rs) 和
+[指令 renderer](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/context/multi_agent_mode_instructions.rs)。
 `0.162.0-alpha.2` 对应上游 tag `rust-v0.162.0-alpha.2`，peeled commit
 `74e804deeb1241d5fe699b31fb319f7d46454c42`。仅当用户级
 `features.multi_agent_v2.multi_agent_mode_hint_text` 不存在时写入空字符串；
 在此 CLI 版本中，该空值会取消原生默认的 explicit-request-only mode hint。
-未知 CLI 版本、已有空值或自定义值、以及不支持安全编辑的 TOML 结构均原样保留。
+能力检查矛盾或证据不确定、已有空值或自定义值、以及不支持安全编辑的 TOML 结构均原样保留。
 若已有 `features.multi_agent_v2.enabled`，其值继续保留。
 
 安全插入支持普通 `[features.multi_agent_v2]`、`[features]` 表和根 dotted
@@ -426,7 +469,7 @@ executor 使用原 operation 和同一 contract 重放。安装中断时，journ
 报告 `APPLY_OUTCOME_UNKNOWN_PRESERVED`，不会再次插入。
 字段写入在原子替换前会重读 bytes；这不能防止外部编辑器在最终检查期间并发写入。
 
-Codex 0.162 的既有安装/升级流程可在用户配置缺少该字段时写入简短、角色中立的根级
+上述四个源码核实过的 0.162 CLI 版本，或通过隔离能力检查的其他版本，其既有安装/升级流程可在用户配置缺少该字段时写入简短、角色中立的根级
 `developer_instructions`。它要求先继续必要的独立工作、优先使用有意义的通知而非重复轮询、
 在完成证据不足时保留 UNKNOWN，并遵循角色和选定 handoff。已有空值或自定义用户值会保留。
 

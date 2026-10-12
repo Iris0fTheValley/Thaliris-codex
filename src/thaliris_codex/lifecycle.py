@@ -325,8 +325,7 @@ def host_hook_script_bytes() -> bytes:
         f'set "THALIRIS_PREFLIGHT=%~dp0{HOST_PREFLIGHT_SCRIPT_NAME}"\r\n'
         'set "THALIRIS_SESSION_START_ABI=%~5"\r\n'
         f'powershell.exe -NoProfile -NonInteractive -Command "{host_preflight.command_entry()}"\r\n'
-        'if errorlevel 1 goto thaliris_identity_rejected\r\n'
-        'exit /b 0\r\n'
+        'exit /b %ERRORLEVEL%\r\n'
     )
     prefix = ('if /i not "%~4"=="SessionStart" goto thaliris_find_project\r\n' + preparation +
               ':thaliris_find_project\r\n')

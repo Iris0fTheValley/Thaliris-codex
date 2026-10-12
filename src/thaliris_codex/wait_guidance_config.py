@@ -9,9 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import re
-import shutil
-import subprocess
 import tomllib
+
+from .config_capability import capability as config_capability
 
 RECORD_KEY = "controller_wait_guidance"
 KEY = "developer_instructions"
@@ -26,20 +26,17 @@ GUIDANCE = (
 )
 
 MARKER = "# thaliris:controller-wait-guidance\n"
-_SUPPORTED_VERSION = re.compile(r"^codex-cli 0\.162\.\d+(?:-[A-Za-z0-9.-]+)?$")
+_SUPPORTED_VERSIONS = frozenset({
+    "codex-cli 0.162.0-alpha.2",
+    "codex-cli 0.162.0-alpha.17.2",
+    "codex-cli 0.162.0",
+    "codex-cli 0.162.1",
+})
 
 
 def capability() -> str:
-    """Use only the explicitly supported Codex 0.162 version family."""
-    executable = shutil.which("codex")
-    if executable is None:
-        return "UNKNOWN"
-    try:
-        result = subprocess.run([executable, "--version"], capture_output=True,
-                                text=True, timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return "UNKNOWN"
-    return "SUPPORTED" if result.returncode == 0 and _SUPPORTED_VERSION.fullmatch(result.stdout.strip()) else "UNKNOWN"
+    """Use source evidence or an isolated check of the actual config effect."""
+    return config_capability("developer_instructions", _SUPPORTED_VERSIONS)
 
 
 def read(home: Path) -> tuple[bytes, dict]:
@@ -163,8 +160,9 @@ def plan_install(home: Path, ownership: dict) -> tuple[dict | None, dict, dict |
             if history:
                 promoted["history"] = list(dict.fromkeys(history))
             return promoted, status("MANAGED"), None
-        if capability() != "SUPPORTED":
-            return record, status("VERSION_SUPPORT_UNKNOWN"), None
+        support = capability()
+        if support != "SUPPORTED":
+            return record, status("CAPABILITY_INCOMPATIBLE" if support == "INCOMPATIBLE" else "VERSION_SUPPORT_UNKNOWN"), None
         newline = "\r\n" if "\r\n" in old_fragment else "\n"
         current_fragment = _fragment(newline)
         history = [item for item in _fragments(record) if item != current_fragment]
@@ -178,8 +176,9 @@ def plan_install(home: Path, ownership: dict) -> tuple[dict | None, dict, dict |
         if config[KEY] == "":
             return None, status("USER_EMPTY_PRESERVED"), None
         return None, status("USER_CONFIG_PRESERVED"), None
-    if capability() != "SUPPORTED":
-        return None, status("VERSION_SUPPORT_UNKNOWN"), None
+    support = capability()
+    if support != "SUPPORTED":
+        return None, status("CAPABILITY_INCOMPATIBLE" if support == "INCOMPATIBLE" else "VERSION_SUPPORT_UNKNOWN"), None
     newline = "\r\n" if b"\r\n" in raw else "\n"
     fragment = _fragment(newline)
     record = {"path": str((home / "config.toml").absolute()),

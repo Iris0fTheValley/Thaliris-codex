@@ -10,6 +10,18 @@ The `codex-install` maintenance contract handles installation, upgrades and inte
 
 ### Project-loss recovery and retained backing data
 
+Auxiliary restoration and its actor/Authority checks are isolated from ordinary
+SessionStart dispatch. A failed receipt or unavailable restoration evidence reports
+`CATALOG_RECOVERY_FAILED` with `ok: false` on stderr, preserves unproven bytes, and
+does not stop project discovery. A discovered project receives the original native
+input once, including a leading UTF-8 BOM and transport whitespace; its stdout,
+stderr and exit result pass through unchanged, with the recovery diagnostic added
+to stderr. An unrelated directory returns success after startup validation even
+when auxiliary restoration failed. Invalid runtime identity, Hook ABI, malformed
+native actor input and the existing pending Host transition preflight still reject
+startup. This isolation grants no restoration or task authority: uncertain actor
+checks skip restoration, and the original Hook retains its managed-control refusal.
+
 `codex-maintenance-plan codex-install` proposes `catalog_recovery_project_root` from `--root` by default; `--catalog-recovery-project-root` selects another absolute project path and `--catalog-recovery-source-root` optionally selects an additional source path. These are proposed contract fields, not authorization by themselves. Only a contract carrying the human-authorized selection stores `model_catalog_project_loss_recovery` in the receipt. Legacy receipts without a policy report `RECOVERY_POLICY_UNKNOWN`; SessionStart does not infer a recovery target from the current directory, project history, or a missing receipt.
 
 On an actual Host `SessionStart`, the installed Host entry validates and invokes the pinned runtime before project dispatch. It checks the exact selected project activation marker and any selected source directory. If the selected project or source has disappeared, moved, or no longer has the expected marker, recovery removes only the exact receipt-owned `model_catalog_json` field when the field and backing catalog still match their recorded bytes. It restores the previous absent-field state; it never deletes `thaliris-model-catalog.json`, and a successful removal reports `backing_artifact_status: RETAINED_REFERENCE_SAFE`. A detected field edit (`USER_CHANGED_PRESERVED`), changed catalog (`CATALOG_CHANGED_PRESERVED`), missing policy (`RECOVERY_POLICY_UNKNOWN`), unknown ownership, malformed payload, unfinished transition, or failed runtime validation preserves the evidence and does not claim recovery. Repeated SessionStart is idempotent after a proven restoration. The one-shot `restored` proof is recorded only when recovery removes the exact owned field. If the field is already absent without earlier proof, recovery reports `RECOVERY_PROVENANCE_UNKNOWN`; that user deletion or ambiguous crash state cannot authorize a later reclaim. An existing completed restoration proof remains valid. This is a check at native session entry, not a filesystem watcher or project reconstruction service.
@@ -40,7 +52,7 @@ No replacement suggestion is inserted. Every other instruction, metadata field, 
 
 ## Local source observation
 
-Admission is pinned to the exact output `codex-cli 0.162.0-alpha.17.2`; other versions return `VERSION_SUPPORT_UNKNOWN`. The observed local provider export contained 10 models, 9 with the exact removable line. The bundled export contained 11 models, 10 with the exact line and one where it was already absent. These counts establish compatibility of those exported inputs only. They are not evidence that the online source was freshly fetched.
+Catalog admission is based on the selected source's contents and integrity checks, not a CLI-version allowlist: parseable versions are retained as provenance, while model identities, the exact target sentence and its known context, target count, and export/cache freshness are validated before installation. Changed or incomplete catalog content is preserved. The observed local provider export contained 10 models, 9 with the exact removable line. The bundled export contained 11 models, 10 with the exact line and one where it was already absent. These counts establish compatibility of those exported inputs only. They are not evidence that the online source was freshly fetched.
 
 For an online export, the adapter preserves the selected provider configuration and file-backed auth in a disposable `CODEX_HOME`, removes only an already receipt-owned root catalog override, and starts without the original model cache. Unsupported external credential stores and remaining profile catalog overrides are refused. A successful CLI exit and stdout are insufficient: acceptance also requires a newly written cache timestamp within the export interval, the expected client version, a nonempty cache identity and model list, matching cache/export model identities and any supplied templates, and an unchanged executable hash. The source evidence is `VERIFIED` only after those checks. An explicitly selected bundled source does not claim online freshness and keeps it `UNKNOWN`.
 

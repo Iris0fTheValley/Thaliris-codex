@@ -470,15 +470,22 @@ def test_guidance_keeps_only_generic_work_and_evidence_principles():
     ("codex-cli 0.162.0", True),
     ("codex-cli 0.162.1", True),
     ("codex-cli 0.162.0-alpha.2", True),
+    ("codex-cli 0.162.0-alpha.17.2", True),
+    ("codex-cli 0.162.2", False),
+    ("codex-cli 0.162.1-alpha.1", False),
     ("codex-cli 0.161.9", False),
     ("codex-cli 0.163.0", False),
     ("garbage", False),
 ])
-def test_version_capability_is_limited_to_0162(monkeypatch, reported, supported):
-    monkeypatch.setattr(guidance.shutil, "which", lambda name: "controlled-fake-codex")
-    monkeypatch.setattr(guidance.subprocess, "run", lambda *args, **kwargs:
+def test_version_capability_is_limited_to_source_verified_builds(monkeypatch, reported, supported):
+    from thaliris_codex import config_capability
+    monkeypatch.setattr(config_capability.shutil, "which", lambda name: "controlled-fake-codex")
+    monkeypatch.setattr(config_capability.subprocess, "run", lambda *args, **kwargs:
                         subprocess.CompletedProcess(args, 0, reported, ""))
+    probed = []
+    monkeypatch.setattr(config_capability, "probe", lambda *args: probed.append(args) or "UNKNOWN")
     assert guidance.capability() == ("SUPPORTED" if supported else "UNKNOWN")
+    assert probed == ([] if supported else [("controlled-fake-codex", "developer_instructions")])
 
 
 @pytest.mark.parametrize("when,expected", [

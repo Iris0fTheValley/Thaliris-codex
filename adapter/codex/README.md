@@ -237,18 +237,49 @@ only after it removes the exact owned field. If the field is already absent with
 prior proof, it reports `RECOVERY_PROVENANCE_UNKNOWN` and does not authorize reclaim.
 A successful restoration-backed upgrade clears that receipt marker. See the
 [model-catalog maintenance report](../../docs/model-catalog-maintenance-report.md).
+Auxiliary restoration failures retain explicit stderr diagnostics and preserve
+unproven bytes. After startup validation, project discovery still runs and the
+original SessionStart receiver gets the exact input once, with its stdout,
+stderr and exit result preserved. Runtime identity, Hook ABI, malformed native
+actor input and pending Host transitions retain their startup rejection.
 The accepted transaction boundary preserves user changes observed by the final
 byte comparison and keeps the backing catalog file. A non-cooperating writer can
 still race between that comparison and atomic replacement; this limit is disclosed
 and is not a pending decision.
 
-Catalog provenance, version admission, receipt/recovery details, and the distinction
+Catalog provenance, content admission, receipt/recovery details, and the distinction
 between disk writes, the running process, and sessions already in progress are recorded
 in the [model-catalog maintenance report](../../docs/model-catalog-maintenance-report.md).
-The current source gate accepts only `codex-cli 0.162.0-alpha.17.2`; its opt-in runtime
-capture reached a local mock with the installed CLI and observed catalog/request behavior.
-That capture does not prove a fresh online fetch or activation in a user's live process,
-and it records two separate native fork/resume delivery limitations.
+Catalog compatibility is based on the selected source's model roster and content, not a
+CLI-version allowlist. Online freshness checks also match the isolated cache's whole
+`major.minor.patch` client version to the CLI version (the cache omits prerelease labels)
+and verify model identities. The opt-in runtime capture on
+`codex-cli 0.162.0-alpha.17.2` reached a local mock with the installed CLI and observed
+catalog/request behavior; it does not prove a fresh online fetch or activation in a
+user's live process, and it records two separate native fork/resume delivery limitations.
+
+The separate `multi_agent_mode_hint_text` and optional Controller wait-guidance
+compatibility paths use the exact source-verified builds `0.162.0-alpha.17.2`,
+`0.162.0-alpha.2`, `0.162.0` and `0.162.1` as a fast path. Other CLI builds that
+report a version undergo an isolated prompt/type capability check in a disposable
+`CODEX_HOME` and workspace, using a loopback Responses sink. It does not copy the
+current user's configuration or authentication. On Windows it resolves the
+ProgramData known folder and checks `OpenAI/Codex/config.toml` and
+`requirements.toml`; on Linux it checks
+`/etc/codex/{config,requirements,managed_config}.toml`. Existing paths, lookup
+errors or a platform whose managed configuration cannot be proven absent block
+`exec` and leave support `UNKNOWN`; macOS managed preferences therefore remain
+UNKNOWN. When clear, it passes `--disable hooks --disable plugins`; those flags
+do not disable managed hooks on their own, which is why this preflight is
+required. The check verifies string acceptance, actual
+prompt effect and wrong-type rejection; complete consistent evidence is required
+before planning a write. Contradictory evidence reports `CAPABILITY_INCOMPATIBLE`,
+while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`. Stable
+`0.162.0` and `0.162.1` have the explicit bounded-wait contract (10,000 ms minimum,
+30,000 ms default, 3,600,000 ms release hard maximum); the effective per-session
+maximum and native child completion re-entry remain `UNAVAILABLE` and `UNKNOWN`.
+The [Codex host compatibility record](../../docs/codex-host-compatibility-20261008.md)
+preserves the source comparison and runtime-evidence limits.
 `HostIntegration=ready` and matching disk bytes do not prove catalog compatibility or
 effective session activation; those observations remain independent and may be
 `UNKNOWN`. This source change does not perform live Host maintenance.

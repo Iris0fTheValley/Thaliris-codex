@@ -1,10 +1,9 @@
 """Deterministic compatibility boundary for the locally observed Codex host.
 
-Compatibility maintenance only: these tests certify that the currently
-installed host build keeps the existing Thaliris behaviour, and that no newly
-available upstream capability was adopted. They deliberately assert the
-fail-closed outcome, so that a future promotion of this build into the pinned
-wait capability set has to change a test on purpose.
+Compatibility maintenance only: the historical alpha observation below stays
+outside the explicit-wait pins. Stable 0.162.0 and 0.162.1 are tested separately
+against their source-equivalent timeout contract; live completion re-entry
+remains unknown and is not enabled by these tests.
 
 Observed local host, 2026-10-08:
 
@@ -81,9 +80,10 @@ def _observe(monkeypatch, version: str) -> None:
 
 
 def test_pinned_wait_capability_set_is_exactly_the_certified_boundary() -> None:
-    """The observed build must not have been promoted into the pinned set."""
+    """Only source-certified stable .162 releases join the explicit-wait set."""
     assert set(codex_adapter._KNOWN_HOST_WAIT_CAPABILITIES) == {
         "0.153.4", "0.154.0", "0.155.1", "0.155.0-alpha.9.2",
+        "0.162.0", "0.162.1",
     }
     assert OBSERVED_VERSION not in codex_adapter._KNOWN_HOST_WAIT_CAPABILITIES
 
@@ -128,6 +128,37 @@ def test_source_verified_prerelease_pin_is_unchanged(monkeypatch) -> None:
     try:
         assert codex_adapter.native_child_completion_reenters_root("codex-alpha-pin-test") == "UNKNOWN"
         assert codex_adapter.selected_continuation_mode(Path("."), "codex-alpha-pin-test") == "BLOCKING_WAIT"
+    finally:
+        codex_adapter._host_wait_mode_cached.cache_clear()
+
+
+@pytest.mark.parametrize("version", ["0.162.0", "0.162.1"])
+def test_stable_0162_hosts_share_source_verified_explicit_wait_contract(
+    monkeypatch, version: str,
+) -> None:
+    _observe(monkeypatch, version)
+    try:
+        host = codex_adapter.host_wait_mode("codex-stable-test")
+        capability = codex_adapter.host_explicit_blocking_wait("codex-stable-test")
+        assert host["status"] == "PASS"
+        assert capability["status"] == "PASS"
+        assert capability["version"] == version
+        assert capability["min_wait_timeout_ms"] == 10_000
+        assert capability["default_wait_timeout_ms"] == 30_000
+        assert capability["release_hard_max_wait_timeout_ms"] == 3_600_000
+        assert capability["effective_max_wait_timeout_ms"] == "UNAVAILABLE"
+        assert codex_adapter.native_child_completion_reenters_root("codex-stable-test") == "UNKNOWN"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-stable-test") == "BLOCKING_WAIT"
+    finally:
+        codex_adapter._host_wait_mode_cached.cache_clear()
+
+
+@pytest.mark.parametrize("version", ["0.162.2", "0.162.1-alpha.1"])
+def test_neighboring_0162_builds_are_not_promoted_by_numeric_prefix(monkeypatch, version: str) -> None:
+    _observe(monkeypatch, version)
+    try:
+        assert codex_adapter.host_explicit_blocking_wait("codex-neighbor-test")["status"] != "PASS"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-neighbor-test") == "UNAVAILABLE"
     finally:
         codex_adapter._host_wait_mode_cached.cache_clear()
 

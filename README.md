@@ -113,7 +113,7 @@ Codex 提供原生 Controller 会话、角色会话、工具和协作能力；ad
 
 普通生成的角色 profile 故意省略 model 和 effort，因为 Codex 会在 spawn 参数之后应用 role model 配置。Controller 默认让 Investigator、Implementer、Curator 使用 gpt-6-luna/max，让 Reviewer、Focused Implementer、Reasoning Specialist 使用 gpt-6.1-sol/high；原生派遣必须显式传入 model 与 reasoning_effort，managed Hook 会在 reservation 前拒绝缺项。明确的 execution constraint 或经验证的必要例外可以指定其他受支持组合；这只改变执行选择，不改变角色职责或权限。Verifier 保持现有配置，Controller 自身模型不变。Astra 仍需当前任务的人类 opt-in；静态 Astra 兼容 profile 保持固定绑定，luna-only 继续冻结并禁止 per-spawn 覆盖。历史安装的 profile 可能仍固定模型；源码变化不证明当前 Host 已加载更新。见[原生选择优先级](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning)。
 
-Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目内角色 profile 分离。维护是显式、低频的同步：只有通过受支持版本和模型名单兼容检查的模板才会移除目标句；已知模板要求精确完整行及预期相邻行，新模型要求目标句恰好作为完整行出现。缺失、移动、改写、拆分、嵌入或重复均保留旧目录并报告不兼容。受管 receipt 显式声明目录能力，新 reader 兼容旧 receipt，并在成功的授权升级中迁移；旧 reader 遇到新格式会在写入前拒绝。降级时先用当前 reader 卸载，精确归档使之后的升级可在字段缺失且字节匹配时重新认领。用户修改可在继续其他已授权 Host 操作时保留，但目录目标会保持未达成。安装 contract 可明确指定项目丢失恢复位置；真实 Host `SessionStart` 仅在 marker、receipt 和目录摘要仍满足精确校验时移除受管配置字段，物理目录文件继续保留。已完成恢复 receipt 只支持一次重新认领，只有恢复过程实际移除了精确受管字段，receipt 才会记录一次重新认领所需的恢复证据。字段在恢复前已缺失且没有既有证据时，报告 `RECOVERY_PROVENANCE_UNKNOWN`，不会让用户删除或不确定的崩溃状态授权重新认领。成功重装后会清除该证据。磁盘配置、当前进程加载状态和此前启动的会话是不同状态；编辑或安装不证明当前 Host 已激活更新。详见[模型目录维护报告](docs/model-catalog-maintenance-report.md)。本次接受的事务边界是保留最终字节比较已观察到的用户修改并保留 catalog backing file；非协作 writer 仍可能在比较与 atomic replacement 之间并发修改。该剩余时间窗已公开说明，不是待决议事项。
+Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目内角色 profile 分离。维护是显式、低频的同步：目录兼容依据所选来源的模型名单和内容校验，而非 CLI 版本白名单；Online 导出还会验证隔离 cache 的新鲜度、CLI 使用的完整 major.minor.patch 版本和模型身份；CLI 版本作为来源证据保留，预发布标签不属于 cache 版本。已知模板要求精确完整行及预期相邻行，新模型要求目标句恰好作为完整行出现。缺失、移动、改写、拆分、嵌入或重复均保留旧目录并报告不兼容。受管 receipt 显式声明目录能力，新 reader 兼容旧 receipt，并在成功的授权升级中迁移；旧 reader 遇到新格式会在写入前拒绝。降级时先用当前 reader 卸载，精确归档使之后的升级可在字段缺失且字节匹配时重新认领。用户修改可在继续其他已授权 Host 操作时保留，但目录目标会保持未达成。安装 contract 可明确指定项目丢失恢复位置；真实 Host `SessionStart` 仅在 marker、receipt 和目录摘要仍满足精确校验时移除受管配置字段，物理目录文件继续保留。已完成恢复 receipt 只支持一次重新认领，只有恢复过程实际移除了精确受管字段，receipt 才会记录一次重新认领所需的恢复证据。字段在恢复前已缺失且没有既有证据时，报告 `RECOVERY_PROVENANCE_UNKNOWN`，不会让用户删除或不确定的崩溃状态授权重新认领。成功重装后会清除该证据。磁盘配置、当前进程加载状态和此前启动的会话是不同状态；编辑或安装不证明当前 Host 已激活更新。详见[模型目录维护报告](docs/model-catalog-maintenance-report.md)。本次接受的事务边界是保留最终字节比较已观察到的用户修改并保留 catalog backing file；非协作 writer 仍可能在比较与 atomic replacement 之间并发修改。该剩余时间窗已公开说明，不是待决议事项。
 
 ## 安装与本地开发
 
@@ -141,14 +141,24 @@ $exe = $runtime.executable
 
 请将 adapter commit 占位符替换为独立审阅的已发布不可变版本。Host 维护使用 `codex-maintenance-plan` 和明确的 `--maintenance-contract FILE`，不依赖项目 init/task admission。原始授权安装记录证明 bytes ownership；候选内容相同不证明 ownership。未知项目 role 文档保留且不单独阻止 admission，真正控制指令冲突仍阻止。受支持的卸载和正常重装保留用户配置及恢复证据。公共流程和 legacy 批准边界见 [Host 维护](docs/thaliris-host-maintenance.md)。
 
-`multi_agent_mode_hint_text` 兼容项仅支持源码已核实的 Codex CLI
-`0.162.0-alpha.17.2` 与 `0.162.0-alpha.2` 两个精确版本，且只在用户级字段缺失时写入空字符串；
-`0.162.0-alpha.17.2` 的 schema 和原生空值处理按不可变 Codex 源码核验，`0.162.0-alpha.2` 对应 tag
+`multi_agent_mode_hint_text` 兼容项把源码已核实的 Codex CLI 四个精确版本
+`0.162.0-alpha.17.2`、`0.162.0-alpha.2`、`0.162.0` 和 `0.162.1` 作为快速路径。
+其他成功报告版本的 CLI 会在隔离的临时 CODEX_HOME 和工作区中执行 prompt/type 能力检查：
+确认字符串可用、空字符串会抑制提示，并且整数配置被拒绝。检查向本机 loopback
+Responses sink 发送有限的合成文本任务。探测不复制当前用户配置或认证信息；Windows 通过
+`SHGetKnownFolderPath(FOLDERID_ProgramData)` 检查系统级 `OpenAI/Codex/config.toml` 与
+`requirements.toml`，Linux 检查 `/etc/codex/{config,requirements,managed_config}.toml`。
+路径存在、检查失败或平台配置层无法证明不存在时不会启动 exec；macOS managed preferences
+当前保持 UNKNOWN。确认这些路径缺失后，exec 明确传入 `--disable hooks --disable plugins`；
+这两个选项本身不屏蔽 managed hooks，因此必须先证明系统级层缺失。只有证据完整一致才会
+计划写入；明确矛盾报告 `CAPABILITY_INCOMPATIBLE`，证据缺失或含糊报告
+`VERSION_SUPPORT_UNKNOWN`。兼容时仍只在用户级字段缺失时写入空字符串；
+stable `0.162.0`/`0.162.1` 与 alpha `0.162.0-alpha.17.2` 的 schema 和原生空值处理已按 Codex 源码核验；`0.162.0-alpha.2` 对应 tag
 `rust-v0.162.0-alpha.2`、commit `74e804deeb1241d5fe699b31fb319f7d46454c42`；
 未知版本和用户已有值均保留。高优先级 project 配置或 CLI `-c` 仍可能覆盖它。字段
 ownership、正常升级/卸载入口和 fresh-session/Fresh Child 验收见 [Host 维护](docs/thaliris-host-maintenance.md)。
 
-可选等待指导只在字段缺失且 Codex 版本受支持时写入；已有空值或自定义值保持原样。升级时，只有字段完整匹配可信旧回执中的精确片段才会自动迁移到当前文案；回执保留这些历史片段供恢复与卸载。用户编辑或无法验证的历史记录不会被覆盖。读写失败不阻断 Host 安装，写前先持久化 ownership journal；无法确认的结果保持 UNKNOWN。
+可选等待指导把源码已核实的四个 Codex CLI 版本作为快速路径；其他成功报告版本的 CLI 使用同一隔离检查，确认 `developer_instructions` 字符串类型、实际 prompt 效果和错误类型拒绝。只有证据完整一致才会计划写入；明确矛盾报告 `CAPABILITY_INCOMPATIBLE`，证据缺失或含糊报告 `VERSION_SUPPORT_UNKNOWN`。指导只在字段缺失时加入；已有空值或自定义值保持原样。stable `0.162.0` 和 `0.162.1` 的原生 bounded-wait 契约为最短 10,000 ms、默认 30,000 ms、release hard maximum 3,600,000 ms；有效 per-session 上限以及 completion 是否重新进入当前 root 仍为 `UNAVAILABLE`/`UNKNOWN`。升级时，只有字段完整匹配可信旧回执中的精确片段才会自动迁移到当前文案；回执保留这些历史片段供恢复与卸载。用户编辑或无法验证的历史记录不会被覆盖。读写失败不阻断 Host 安装，写前先持久化 ownership journal；无法确认的结果保持 UNKNOWN。
 
 
 setup 在创建候选目录前，通过 OS handle 解析自动发现的 Host LocalCache 物理 base，
