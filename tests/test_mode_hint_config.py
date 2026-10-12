@@ -97,9 +97,10 @@ def test_user_later_changes_preserved_on_upgrade_and_uninstall(tmp_path, target,
     assert result["native_mode_hint_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
     assert hint.RECORD_KEY in receipt(home)
     assert (home / "config.toml").read_bytes() == edited
+    catalog_record = receipt(home).get(catalog.RECORD_KEY)
     result = uninstall(tmp_path, target)
     assert result["ok"], result
-    assert (home / "config.toml").read_bytes() == edited
+    assert (home / "config.toml").read_bytes() == without_managed_fragment(edited, catalog_record)
 
 
 def test_restore_preserves_new_sibling_and_other_comments(tmp_path, target):
