@@ -424,15 +424,17 @@ def test_latest_scanner_failure_does_not_replace_successful_parent(active):
     assert lifecycle.qualifying_child_completed(active)
 
 
-def test_successful_scanner_does_not_hide_parent_failure(active):
+def test_terminal_scanner_and_failed_parent_resolve_execution_only(active):
     parent = start(active)
     scanner = start(active, "investigator", "scanner", parent)
     finish(active, scanner, parent)
     finish(active, parent, status="errored")
-    assert not lifecycle.qualifying_child_completed(active)
+    children = state(active)["children"]
+    assert {child["native_terminal_status"] for child in children} == {"completed", "errored"}
+    assert lifecycle.native_execution_closed(active)
 
 
-def test_nested_pending_recovery_is_exact_and_controller_owned(active):
+def test_nested_native_terminal_retires_pending_without_managed_permissions(active):
     parent = start(active)
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
     handoff = state(active)["pending_authorized_spawn"]["handoff_id"]
@@ -445,7 +447,12 @@ def test_nested_pending_recovery_is_exact_and_controller_owned(active):
     native_name = "/root/scanner-failed"
     lifecycle.handle_hook(active, "PostToolUse", {**spawn(parent), "tool_response": {"task_name": native_name}})
     lifecycle.handle_hook(active, "PostToolUse", {**parent, "tool_name": "list_agents", "tool_response": {"agents": [{"agent_name": native_name, "agent_status": "shutdown"}]}})
-    assert lifecycle.recover_pending_spawn(active, handoff)["recovered"]
+    retired = state(active)
+    assert retired["pending_authorized_spawn"] is None
+    terminal = next(child for child in retired["children"] if child.get("task_name_hash") == lifecycle._identity_hash(native_name))
+    assert terminal["managed"] is False and terminal["handoff_bound"] is False
+    assert terminal["native_terminal_status"] == "shutdown"
+    assert not lifecycle.native_execution_closed(active)  # the parent Implementer is still running
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
 
 

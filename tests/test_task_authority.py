@@ -155,8 +155,74 @@ def test_default_delegation_guidance_does_not_gate_ordinary_execution(workspace)
     for command in ("pytest tests/test_example.py", "git status", "git diff", "git commit -m repair",
                     "Get-Content src/example.py", "Set-Content src/example.py fixed"):
         assert lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, command), lifecycle.MANAGED_HOOK_ABI) == ""
-    with pytest.raises(ValueError, match="task-close requires"):
-        codex_adapter.task_close(workspace, 1)
+    assert codex_adapter.task_close(workspace, 1)["ok"]
+    assert task_authority.read(workspace)["status"] == "DONE"
+
+
+@pytest.mark.parametrize("new_task", [False, True])
+def test_completed_executor_cannot_write_after_task_close_or_new_task(workspace, new_task):
+    started = start(workspace)
+    _spawn(workspace)
+    actor = {"session_id": "first", "turn_id": "implementer-turn",
+        "agent_id": "old-implementer", "agent_type": "thaliris-implementer"}
+    assert lifecycle._record_subagent_start(workspace, actor)
+    lifecycle.handle_hook(workspace, "PostToolUse", {"session_id": "first", "tool_name": "list_agents",
+        "tool_response": {"agents": [{"agent_name": "old-implementer", "agent_status": {"completed": None}}]}})
+    assert codex_adapter.task_close(workspace, started["revision"])["status"] == "DONE"
+    if new_task:
+        start(workspace)
+    write = {**actor, "cwd": str(workspace), "tool_name": "Bash", "tool_input": {"command": "Set-Content example.py stale"}}
+    assert "CLOSED_ROLE_SESSION" in lifecycle.handle_hook(workspace, "PreToolUse", write, lifecycle.MANAGED_HOOK_ABI)
+    read = {**write, "tool_input": {"command": "Get-Content example.py"}}
+    assert lifecycle.handle_hook(workspace, "PreToolUse", read, lifecycle.MANAGED_HOOK_ABI) == ""
+
+
+def test_completed_executor_identity_cannot_write_during_active_task_without_role_fields(workspace):
+    started = start(workspace)
+    _spawn(workspace)
+    actor = {"session_id": "first", "turn_id": "implementer-turn",
+        "agent_id": "old-implementer", "agent_type": "thaliris-implementer"}
+    assert lifecycle._record_subagent_start(workspace, actor)
+    lifecycle.handle_hook(workspace, "PostToolUse", {"session_id": "first", "tool_name": "list_agents",
+        "tool_response": {"agents": [{"agent_name": "old-implementer", "agent_status": {"completed": None}}]}})
+    assert core.task_show(workspace)["state"]["status"] == "ACTIVE"
+    exact_identity = {"cwd": str(workspace), "agent_id": "old-implementer"}
+    for tool_name, tool_input in (
+        ("Bash", {"command": "Set-Content example.py stale"}),
+        ("apply_patch", {"patch": "*** Begin Patch\n*** Update File: example.py\n*** End Patch"}),
+    ):
+        result = lifecycle.handle_hook(workspace, "PreToolUse", {
+            **exact_identity, "tool_name": tool_name, "tool_input": tool_input,
+        }, lifecycle.MANAGED_HOOK_ABI)
+        assert "TERMINAL_ROLE_SESSION" in result
+    read = lifecycle.handle_hook(workspace, "PreToolUse", {
+        **exact_identity, "tool_name": "Bash", "tool_input": {"command": "Get-Content example.py"},
+    }, lifecycle.MANAGED_HOOK_ABI)
+    assert read == ""
+
+
+def test_missing_legacy_lifecycle_is_unknown_and_deleted_anchored_lifecycle_is_rejected(workspace):
+    started = start(workspace)
+    path = lifecycle._lifecycle_path(workspace, started["task_id"])
+    path.unlink()
+    assert not lifecycle.native_execution_closed(workspace)
+    with pytest.raises(ValueError, match="LIFECYCLE_CHANGED"):
+        codex_adapter.task_close(workspace, started["revision"])
+
+
+def test_disposition_without_native_identity_fence_cannot_clear_execution_risk(workspace):
+    started = start(workspace)
+    _spawn(workspace)
+    actor = {"session_id": "first", "turn_id": "implementer-turn",
+        "agent_id": "executor", "agent_type": "thaliris-implementer"}
+    assert lifecycle._record_subagent_start(workspace, actor)
+    path = lifecycle._lifecycle_path(workspace, started["task_id"])
+    state = lifecycle._load_lifecycle(path, started["task_id"])
+    original = dict(state["children"][0])
+    state["children"][0]["management_disposition"] = "ABANDONED_DEPENDENCY"
+    state["dependency_dispositions"] = [{"kind": "child", "record": original}]
+    lifecycle._write_capture(path, state)
+    assert not lifecycle.native_execution_closed(workspace)
 
 
 def test_healthy_hook_blocks_reviewer_git_commit_and_host_profile_patches(workspace):
@@ -222,7 +288,7 @@ def test_controller_direct_auxiliary_close_requires_native_completed_independent
     assert lifecycle.handle_hook(workspace, "SubagentStart", child) == ""
     if with_stop:
         assert lifecycle.handle_hook(workspace, "SubagentStop", child) == ""
-    with pytest.raises(ValueError, match="exact identity-bound native Completed"):
+    with pytest.raises(ValueError, match="resolved native execution risk"):
         codex_adapter.task_close(workspace, 1)
     observed = {**identity, "tool_name": "list_agents", "tool_response": {
         "agents": [{"agent_name": "reviewer-id", "agent_status": {"completed": "review result"}}],
@@ -423,6 +489,8 @@ def test_disposed_child_stays_fenced_after_mode_change_and_late_result(workspace
     closed = codex_adapter.task_close(workspace, disposed["revision"] + 1)
     assert closed["task_disposition"] == "CLOSED_BY_CONTROLLER"
     assert closed["native_execution"] == "UNKNOWN"
+    assert closed["death_proof"] == "UNKNOWN" and closed["writing_risk"] == "UNKNOWN"
+    assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", child_call, lifecycle.MANAGED_HOOK_ABI)
 
 
 @pytest.mark.parametrize("actor", [{"readonly": True}, {"agent_id": "reviewer", "agent_type": "thaliris-reviewer"}])

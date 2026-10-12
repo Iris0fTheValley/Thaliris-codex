@@ -2066,12 +2066,11 @@ def bootstrap_check(root: Path) -> dict[str, object]:
 
 def task_close(root: Path, base_revision: int) -> dict[str, object]:
     from . import task_authority
-    anchor = task_authority.check(core._repo_root(root))
+    task_authority.check(core._repo_root(root))
     state = core.task_show(root)["state"]
     task_id = str(state["task_id"])
-    override = anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}
-    if not lifecycle.qualifying_child_completed(core._repo_root(root), allow_no_children=override):
-        raise ValueError("task-close requires authorized handoff/identity bindings, exact identity-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents (V2) or wait_agent status map (V1) to observe completion. SubagentStop is optional; these lifecycle checks do not establish product acceptance, which the Controller decides from the original objective, criteria and available evidence")
+    if not lifecycle.native_execution_closed(core._repo_root(root)):
+        raise ValueError("task-close requires resolved native execution risk: no pending, active, unknown or conflicting child identities/statuses; observe exact native terminal status with list_agents (V2) or wait_agent status map (V1). Historical handoff/Start/Stop completeness does not decide closure; the Controller decides product acceptance from the original objective, criteria and available evidence")
     result = core.task_close(root, base_revision, expected_task_id=task_id)
     task_authority.checkpoint(core._repo_root(root))
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(core._repo_root(root), task_id), task_id)

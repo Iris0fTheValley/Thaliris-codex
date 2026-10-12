@@ -359,9 +359,12 @@ An optional Reviewer provides an independent read-only challenge when useful, an
 
 Core `task-close` is a mechanical record operation: it checks the selected active
 task, expected revision and optional Task ID before recording `DONE`; it does not
-inspect whether the product meets its goal. The Codex adapter may also require exact
-identity-bound native `Completed` evidence and no unresolved managed work when its
-lifecycle rules require it. Those checks establish execution/lifecycle facts only.
+inspect whether the product meets its goal. The Codex adapter protects residual
+execution and authorization risk: pending, running, unknown or conflicting child
+identities/statuses block closure. Exact native terminal evidence resolves execution
+even when nonessential handoff or Start/Stop history is missing. No issued child
+requires no child proof, including in delegated mode; the latest handoff need not
+have succeeded. These checks establish execution facts only.
 Test `PASS`, Reviewer `READY`, native `Completed` and mechanical `DONE` are distinct
 evidence or status values; none alone determines product completion. Executors report
 criterion-linked evidence and `UNKNOWN`; Controller makes the product decision and
@@ -390,13 +393,22 @@ use the available status capability once: a wake-only V2 `wait_agent` does not p
 completion, so check `list_agents`; a V1 `wait_agent` status map is keyed by the exact
 spawned agent ID. V2 `list_agents` status entries use canonical task names. An exact
 native Completed observation proves execution closure without a second confirmation.
+An exact V1 `close_agent` snapshot or V2 `interrupt_agent` previous Completed status
+also supplies a native execution fact; a running previous status proves no completion.
+These observations prove turn closure, not permanent identity destruction. A closed
+task grants no managed writes when the native identity is later reused.
 The one-key `{"completed": <string or null>}` variant proves execution completion;
 null supplies no result text and cannot establish semantic acceptance. A V2 wake-only
 wait, Stop, nickname, missing target or unsupported payload remains UNKNOWN.
 Conflicting native statuses block new
 managed handoffs and closure. SubagentStop is an optional observation; missing or delayed Stop cannot veto proved
-native completion. Stop/wake/prose alone is not completion; missing evidence keeps closure UNKNOWN. The last Controller-direct
-handoff must complete under the same native evidence rule with no pending/active descendants. Host instruction/catalog
+native completion. Stop/wake/prose alone is not completion; missing evidence keeps closure UNKNOWN.
+Exact terminal evidence for a spawn whose Start was not observed retires its reservation
+without granting managed permissions. Retain its dispatch provenance: a delayed Start
+cannot consume a later reservation. A canonical V2 task name does not identify the
+Start's native agent ID; ambiguous association remains unprivileged. Terminal failure
+can resolve execution risk while product acceptance still requires Controller judgment.
+All descendants must have resolved execution risk. Host instruction/catalog
 activation remains UNKNOWN without native evidence; changed disk files alone do not
 prove activation. Keep security/control-state mutations and live Host installation
 outside child source work. See [Codex protocol](../adapter/codex/README.md),

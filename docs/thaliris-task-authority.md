@@ -63,8 +63,7 @@ child-written prompts, state or config. There is no automatic expansion API.
 
 Execution modes are explicit task intent:
 
-- `delegated` retains the default Controller/Implementer routing and native
-  Completed closure requirement.
+- `delegated` retains the default Controller/Implementer routing.
 - `controller-direct` permits Controller reads, edits, fixes, tests,
   verification, documentation, Git and closure without an implementation
   spawn. Supported fresh auxiliary roles remain available when useful.
@@ -72,16 +71,19 @@ Execution modes are explicit task intent:
 
 No explicit human override means `delegated`. Every mode retains fresh role
 isolation, reviewer/verifier readonly and explicit Astra authorization.
-When no child handoff was issued, override closure needs no child execution proof.
-When auxiliary handoffs exist, the latest authorized top-level handoff must have
-exact identity-bound native Completed evidence from a V1 wait status map or V2 list, with no pending/active
-descendants, unbound children or conflicting identities/statuses. This is the same
-execution distinction used in delegated mode: SubagentStop is optional observation,
+When no child handoff was issued, closure needs no child execution proof in any mode.
+When auxiliary handoffs exist, exact native terminal evidence must resolve every child's
+execution risk, with no pending, active, unknown or conflicting identities/statuses.
+Historical handoff or Start/Stop completeness and success of the latest handoff do not
+decide mechanical closure. SubagentStop is optional observation,
 and missing/delayed Stop cannot veto proved native completion. Stop, wake signals
 or result prose alone cannot prove completion. Core `task-close` records `DONE` after
 its selected-task, active-state and revision checks; it does not inspect product behavior.
-The Codex adapter may additionally require identity-bound native `Completed` and resolved
-managed work under its lifecycle rules. Those observations establish execution state only.
+The Codex adapter additionally protects residual execution and authorization risk.
+Exact native terminal evidence for a pending spawn retires the reservation without
+granting managed permissions; retained dispatch provenance prevents a delayed Start
+from consuming a later reservation. V2 canonical task names cannot substitute for
+native Start IDs. Those observations establish execution state only.
 Controller integrates the original objective, acceptance criteria and available evidence
 to decide product completion, route repair or useful extra verification, and record
 mechanical closure. Reviewer is an optional independent read-only challenge; no separate

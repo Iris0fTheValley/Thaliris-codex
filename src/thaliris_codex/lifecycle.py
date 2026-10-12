@@ -1357,7 +1357,11 @@ def _dispatch_identity_required(root: Path, state: dict[str, Any], session_hash:
     association = json.loads(path.read_text(encoding="utf-8")) if path is not None and path.is_file() else {}
     return association.get("requires_dispatch_id") is True or any(isinstance(item, dict)
         and item.get("kind") == "pending" and item.get("record", {}).get("session_id_hash") == session_hash
-        for item in state.get("dependency_dispositions", []))
+        for item in state.get("dependency_dispositions", [])) or any(
+        isinstance(child, dict) and child.get("managed") is False
+        and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED"
+        and "authorized_sequence" in child and child.get("agent_id_hash") is None
+        and child.get("session_id_hash") == session_hash for child in state.get("children", []))
 
 
 def associate_task(root: Path, task_id: str, session_hash: str, expected_authority: str) -> dict[str, object]:
@@ -1433,6 +1437,10 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
             if agent_hash is not None:
                 if agent_hash in _read_abandoned_agent_hashes(root):
                     return _permission_deny("THALIRIS_ABANDONED_ROLE_SESSION: this exact native role session remains fenced")
+                if (mutating and core._load_state(root).get("status") != "ACTIVE"
+                        and (_association_path(root, agent_hash, "agent").is_file()
+                             or _managed_spawn_requested({"tool_input": payload}))):
+                    return _permission_deny("THALIRIS_CLOSED_ROLE_SESSION: a closed task grants no managed writes; native identity reuse does not reactivate its authority")
                 # Deny-only role/fence evidence must survive damaged authority;
                 # this diagnostic read never enables a managed operation.
                 try:
@@ -1451,6 +1459,8 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
                     if mutating and binding is not None and not binding.repo_write_allowed:
                         return _permission_deny("THALIRIS_READONLY_ACTOR: the known handoff role remains readonly despite missing fields or damaged authority")
                     expected = known[0]
+                    if mutating and expected.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+                        return _permission_deny("THALIRIS_TERMINAL_ROLE_SESSION: exact native terminal evidence closes this managed turn; the identity cannot regain repository writes")
                     profile = _native_spawn_agent_type({"tool_input": payload})
                     conflict = (any(payload.get(key) is not None for key in ("agent_type", "agentType"))
                         and profile != expected["agent_type"])
@@ -2723,6 +2733,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
         )
         prior = next((item for item in children if item.get("agent_id_hash") == child_hash), None)
         bound = authorized and (prior is None or (prior.get("managed") is False
+            and prior.get("terminal_state", "RUNNING") == "RUNNING"
             and prior.get("agent_type") == native_agent_type and prior.get("session_id_hash") == session_id_hash
             and prior.get("turn_id_hash") == turn_id_hash))
         bound = bound and _claim_agent_association(root, task_id, child_hash)
@@ -2858,7 +2869,6 @@ def _child_for_native_name(children: list[object], name: str) -> dict[str, Any] 
     matches = [
         child for child in children
         if isinstance(child, dict)
-        and child.get("managed") is True
         and (child.get("task_name_hash") == name_hash
              or child.get("task_name_hash") is None and child.get("agent_id_hash") == name_hash)
     ]
@@ -2898,23 +2908,34 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
 
 
 def _record_pending_terminal(state: dict[str, Any], name: str, status: str, source: str) -> bool:
-    """Retain only exact name-bound native failure for an unbound reservation."""
+    """Retire an exact native dispatch without granting missing Start authority."""
     pending = state.get("pending_authorized_spawn")
     identity_hash = _identity_hash(name)
     matches_task_name = isinstance(pending, dict) and pending.get("task_name_hash") == identity_hash
     matches_native_id = isinstance(pending, dict) and pending.get("native_agent_id_hash") == identity_hash
-    if (status not in {"interrupted", "errored", "shutdown"}
+    if (status not in {"completed", "interrupted", "errored", "shutdown"}
             or not isinstance(pending, dict)
-            or not (matches_task_name or matches_native_id)
-            or not _pending_parent_live(state, pending)):
+            or not (matches_task_name if source in {"list_agents", "interrupt_agent"} else matches_native_id)
+            or source not in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}):
         return False
-    state["pending_spawn_terminal_evidence"] = {
-        "handoff_id": pending["handoff_id"], "status": status,
-        "source": source,
-        "task_name_hash": pending.get("task_name_hash") if matches_task_name else None,
-        "native_agent_id_hash": pending.get("native_agent_id_hash") if matches_native_id else None,
-        "observed_at_ns": time.time_ns(),
-    }
+    matches = [child for child in state["children"] if isinstance(child, dict)
+        and identity_hash in (child.get("task_name_hash"), child.get("agent_id_hash"))]
+    if len(matches) > 1 or matches and matches[0].get("managed") is True:
+        return False
+    child = matches[0] if matches else {"agent_id_hash": pending.get("native_agent_id_hash"),
+        "started": None, "stopped": None}
+    if matches:
+        child["unbound_start_identity"] = {key: child.get(key)
+            for key in ("agent_id_hash", "agent_type", "session_id_hash", "turn_id_hash", "role", "started")}
+    child.update({**pending, "agent_type": pending["expected_agent_type"],
+        "managed": False, "handoff_bound": False})
+    # Preserve the original reservation as provenance and an identity tombstone.
+    # A delayed Start may be observed, but cannot consume a later reservation.
+    if not matches:
+        state["children"].append(child)
+    _record_native_terminal(state, child, status, source)
+    state["pending_authorized_spawn"] = None
+    state["pending_spawn_terminal_evidence"] = None
     return True
 
 
@@ -2976,6 +2997,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         pending["native_agent_id_hash"] = agent_hash
                         prior = next((child for child in state["children"] if isinstance(child, dict)
                             and child.get("agent_id_hash") == agent_hash and child.get("managed") is False
+                            and child.get("terminal_state", "RUNNING") == "RUNNING"
                             and child.get("agent_type") == pending["expected_agent_type"]
                             and child.get("session_id_hash") == pending["session_id_hash"]), None)
                         if prior is not None:
@@ -3024,6 +3046,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     metrics = state.setdefault("metrics", {})
                     metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
                     changed = _record_native_terminal(state, child, status, tool)
+                    changed = _record_pending_terminal(state, target, status, tool) or changed
                     if changed and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
                         metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
                 else:
@@ -3041,7 +3064,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                 for agent_id, value in statuses.items():
                     status = _native_terminal_status(value)
                     matches = [child for child in state["children"]
-                               if isinstance(child, dict) and child.get("managed") is True
+                               if isinstance(child, dict)
                                and child.get("task_name_hash") is None
                                and child.get("agent_id_hash") == _identity_hash(agent_id)]
                     if status is None or len(matches) != 1:
@@ -3050,6 +3073,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         continue
                     observed = True
                     changed = _record_native_terminal(state, matches[0], status, "wait_agent") or changed
+                    changed = _record_pending_terminal(state, agent_id, status, "wait_agent") or changed
         elif tool == "list_agents":
             entries = response.get("agents")
             if isinstance(entries, list):
@@ -3067,6 +3091,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     metrics = state.setdefault("metrics", {})
                     metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
                     did_reconcile = _record_native_terminal(state, child, status, "list_agents")
+                    changed = _record_pending_terminal(state, name, status, "list_agents") or changed
                     changed = changed or did_reconcile
                     if did_reconcile and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
                         metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
@@ -3119,8 +3144,8 @@ def _bash_command(payload: dict[str, Any]) -> str | None:
     return command if isinstance(command, str) and command.strip() else None
 
 
-def qualifying_child_completed(root: Path, *, allow_no_children: bool = False) -> bool:
-    """Bound native execution closure, independent of model acceptance and Stop."""
+def native_execution_closed(root: Path) -> bool:
+    """Check remaining execution risk, without judging handoffs or the product."""
     task_id = _active_task_id(root)
     if task_id is None:
         return False
@@ -3128,7 +3153,9 @@ def qualifying_child_completed(root: Path, *, allow_no_children: bool = False) -
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return allow_no_children
+        anchor = task_authority.read(root)
+        return (isinstance(anchor, dict) and anchor.get("lifecycle_sha256") == "ABSENT"
+                and not anchor.get("lifecycle_snapshot"))
     except (OSError, ValueError, json.JSONDecodeError):
         return False
     if (not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION
@@ -3137,33 +3164,48 @@ def qualifying_child_completed(root: Path, *, allow_no_children: bool = False) -
             or value.get("pending_authorized_spawn") is not None
             or value.get("identity_collisions")):
         return False
+    abandoned = [child for child in value["children"] if isinstance(child, dict)
+        and child.get("management_disposition") == "ABANDONED_DEPENDENCY"]
+    if abandoned:
+        try:
+            fenced = _read_abandoned_agent_hashes(root)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return False
+        for child in abandoned:
+            if child.get("agent_id_hash") not in fenced or not any(
+                isinstance(disposition, dict) and disposition.get("kind") == "child"
+                and isinstance(disposition.get("record"), dict)
+                and disposition["record"].get("agent_id_hash") == child.get("agent_id_hash")
+                and disposition["record"].get("handoff_id") == child.get("handoff_id")
+                for disposition in value.get("dependency_dispositions", [])):
+                return False
     children = [child for child in value["children"] if not isinstance(child, dict) or child.get("management_disposition") != "ABANDONED_DEPENDENCY"]
-    if not children and value.get("dependency_dispositions"):
-        return True
-    if allow_no_children and not children:
-        # No issued handoff needs child proof; close checks external authority.
+    if not children:
         return True
     if (value.get("managed_hook_spec_hash") != managed_hook_spec_hash()
-            or value.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION
-            or not children):
+            or value.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION):
         return False
+    identities = set()
     for child in children:
-        if (not isinstance(child, dict) or child.get("managed") is not True
-                or child.get("handoff_bound") is not True
-                or not isinstance(child.get("handoff_id"), str)
-                or not isinstance(child.get("payload_hash"), str)
-                or type(child.get("started")) is not int
-                or type(child.get("stopped")) is not int
-                or not _parent_binding_matches(value, child, require_live=False)
+        if (not isinstance(child, dict)
                 or child.get("terminal_state") != "NATIVE_TERMINAL_RECONCILED"
                 or child.get("native_terminal_status") not in {"completed", "interrupted", "errored", "shutdown"}
                 or child.get("native_status_conflict")):
             return False
-    latest = max((child for child in children if child.get("depth") == 1
-                  and child.get("parent_role") == "controller"),
-                 key=lambda child: child["started"], default=None)
-    return (latest is not None and latest.get("native_terminal_status") == "completed"
-            and latest.get("native_terminal_source") in {"list_agents", "wait_agent"})
+        child_identities = [child.get(key) for key in ("task_name_hash", "agent_id_hash") if child.get(key) is not None]
+        if (not child_identities or any(not isinstance(identity, str)
+                or re.fullmatch(r"[0-9a-f]{64}", identity) is None for identity in child_identities)
+                or child.get("native_terminal_source") not in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}):
+            return False
+        if set(child_identities) & identities:
+            return False
+        identities.update(child_identities)
+    return True
+
+
+def qualifying_child_completed(root: Path, *, allow_no_children: bool = False) -> bool:
+    """Compatibility name for the residual native execution check."""
+    return native_execution_closed(root)
 
 
 def _managed_child_active(root: Path) -> bool:

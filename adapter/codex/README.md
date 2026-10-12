@@ -63,9 +63,11 @@ conflicts and fence late results.
 
 Core `task-close` checks that the selected task is active and that its expected revision
 and optional Task ID match, then records `DONE`; it does not inspect the candidate's product
-behavior. The Codex adapter can also enforce identity-bound native `Completed` and the absence
-of unresolved managed work when its lifecycle rules require those facts. That is execution
-qualification, not product acceptance. The Controller integrates the original objective,
+behavior. The Codex adapter protects residual execution and authorization risk: pending,
+running, unknown or conflicting identities/statuses block closure. Exact native terminal
+evidence resolves execution without requiring complete historical handoff/Start/Stop
+records or success of the latest handoff. No issued child requires no child proof,
+including in delegated mode. The Controller integrates the original objective,
 acceptance criteria and available evidence to decide whether product work is complete, and
 whether to route repair, request useful extra verification or record mechanical closure. A
 Reviewer is an optional independent read-only challenge. No closing handoff or new Agent is
@@ -85,11 +87,18 @@ V1 wait_agent status maps use the exact spawned agent ID; V2 list_agents status
 entries use canonical task names. Both establish execution evidence without
 requiring V2 or another completion check. The accepted Completed payload is exactly
 the one-key `{"completed": <string or null>}` variant. Null supplies no result text.
+An exact V1 `close_agent` snapshot or V2 `interrupt_agent` previous Completed status
+is also native execution evidence; a running previous status proves no completion.
+Completed describes a turn, not permanent identity destruction. Closed task authority
+does not reactivate when the same native identity is reused.
 Other value types, extra-field and otherwise unsupported payload shapes remain
 UNKNOWN. Contradictory native statuses block operations that depend on that child evidence,
 not unrelated ordinary reads or independent work.
-An unbound spawn can be recovered only from exact
-trusted name-bound native failure or spawn-failure callback, not timeout/not_found.
+Exact native terminal evidence retires an unbound reservation without granting managed
+permissions and retains dispatch provenance against delayed Start callbacks. A canonical
+V2 task name does not identify the Start's native agent ID; ambiguous association remains
+unprivileged. A trusted spawn-failure callback also permits explicit pending recovery.
+Timeout and not_found prove neither completion nor execution closure.
 
 First continue independent work that should take priority, then decide whether a necessary
 dependency needs waiting. This applies at every authorized parent layer, including an
