@@ -116,14 +116,14 @@ _CONTEXT_OPERATIONS = frozenset({
     "init", "codex-bootstrap", "codex-install", "codex-uninstall", "codex-maintenance-plan", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
     "task-status", "task-get", "artifact-get", "catalog", "document-get",
-    "task-artifact", "task-close", "task-promote", "recover-pending-spawn", "rollback", "version",
+    "task-artifact", "task-close", "task-promote", "rollback", "version",
 })
 _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "controller-instructions",
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
-    "recover-pending-spawn", "task-abandon", "version",
+    "task-abandon", "version",
 })
 _CHILD_CONTEXT_READS = frozenset({
     "controller-instructions",
@@ -134,7 +134,7 @@ _CHILD_CONTEXT_READS = frozenset({
 _CHILD_CONTEXT_MUTATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
-    "recover-pending-spawn", "rollback", "init", "uninstall", "codex-uninstall",
+    "rollback", "init", "uninstall", "codex-uninstall",
 })
 _CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
@@ -2517,16 +2517,6 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
             if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
                 return _permission_deny("THALIRIS_SCANNER_SLOT_ACTIVE: this exact parent already has a live Scanner; coordinate its result before another same-parent Scanner")
             if state["pending_authorized_spawn"] is not None:
-                fingerprint = _lifecycle_block_fingerprint(state)
-                stall = state.get("stall")
-                repeated = isinstance(stall, dict) and stall.get("fingerprint") == fingerprint
-                state["stall"] = {"fingerprint": fingerprint, "blocked_spawn_calls": int(stall.get("blocked_spawn_calls", 0)) + 1 if repeated else 1}
-                metrics = state.setdefault("metrics", {})
-                metrics["blocked_spawn_calls"] = int(metrics.get("blocked_spawn_calls", 0)) + 1
-                _runtime_metadata(state, payload)
-                _write_capture(path, state)
-                if repeated:
-                    return _permission_deny("ORCHESTRATION_STALLED: the managed native Codex session lifecycle has no new terminal information; stop recovery attempts until a native lifecycle event arrives.")
                 return _permission_deny("THALIRIS_UNBOUND_DISPATCH_PENDING: associate or cancel this one unbound native dispatch before another same-task dispatch; missing Host identity fields cannot choose between reservations.")
             state["sequence"] = int(state.get("sequence", 0)) + 1
             task_state = core._load_state(root, active=True)
@@ -2557,55 +2547,11 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
                 "spawn_tool_use_id_hash": _identity_hash(payload.get("tool_use_id")) if isinstance(payload.get("tool_use_id"), str) else None,
                 "spawn_turn_id_hash": _turn_id_hash(payload),
             }
-            state["pending_spawn_terminal_evidence"] = None
-            state["stall"] = None
             _runtime_metadata(state, payload)
             _write_capture(path, state)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return _permission_deny("THALIRIS_MANAGED_SPAWN_UNAVAILABLE: managed authorization could not be reserved.")
     return ""
-
-
-def recover_pending_spawn(root: Path, handoff_id: str) -> dict[str, object]:
-    """Legacy exact-reservation recovery requires native terminal evidence."""
-    task_id = _active_task_id(root)
-    if task_id is None:
-        raise ValueError("pending spawn recovery requires an ACTIVE task")
-    if not isinstance(handoff_id, str) or not re.fullmatch(r"handoff-[0-9a-f]{32}", handoff_id):
-        raise ValueError("invalid pending spawn handoff id")
-    with core._lock(root):
-        if _active_task_id(root) != task_id:
-            raise ValueError("pending spawn recovery task is no longer ACTIVE")
-        path = _lifecycle_path(root, task_id)
-        if not path.is_file():
-            raise ValueError("pending spawn recovery state is unavailable")
-        state = _load_lifecycle(path, task_id)
-        pending = state.get("pending_authorized_spawn")
-        bound_child = any(
-            isinstance(child, dict)
-            and child.get("managed") is True
-            and child.get("handoff_id") == handoff_id
-            for child in state.get("children", [])
-        )
-        if bound_child:
-            raise ValueError("pending spawn is already bound to an authorized native Codex role session")
-        if not isinstance(pending, dict) or pending.get("handoff_id") != handoff_id:
-            raise ValueError("pending spawn handoff id does not match")
-        evidence = state.get("pending_spawn_terminal_evidence")
-        if not isinstance(evidence, dict) or evidence.get("handoff_id") != handoff_id or evidence.get("status") not in {"interrupted", "errored", "shutdown"}:
-            raise ValueError("pending spawn recovery requires trusted terminal Host evidence")
-        recoveries = state.setdefault("spawn_recoveries", [])
-        if not isinstance(recoveries, list):
-            raise ValueError("invalid pending spawn recovery state")
-        if len(recoveries) < 16:
-            recoveries.append({"handoff_id": handoff_id, "observed_at_ns": time.time_ns()})
-        state["pending_authorized_spawn"] = None
-        state["pending_spawn_terminal_evidence"] = None
-        state["stall"] = None
-        metrics = state.setdefault("metrics", {})
-        metrics["spawn_recoveries"] = int(metrics.get("spawn_recoveries", 0)) + 1
-        _write_capture(path, state)
-    return {"ok": True, "task_id": task_id, "handoff_id": handoff_id, "recovered": True}
 
 
 def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, expected_lifecycle: str, reason: str) -> dict[str, object]:
@@ -2646,7 +2592,6 @@ def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, exp
             if isinstance(pending.get("native_agent_id_hash"), str):
                 agents.add(pending["native_agent_id_hash"])
             ledger["pending_authorized_spawn"] = None
-            ledger["pending_spawn_terminal_evidence"] = None
         prior_fence = _abandoned_child_fence_path(root)
         value = json.loads(prior_fence.read_text(encoding="utf-8")) if prior_fence.is_file() else {"version": 1}
         _write_capture(prior_fence, {**value, "version": 1, "children": fence, "agent_id_hashes": sorted(agents)})
@@ -2783,7 +2728,6 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                     "pending_handoff_id": pending.get("handoff_id") if authorized else None,
                     "observed_at_ns": time.time_ns(),
                 })
-        state["stall"] = None
         _runtime_metadata(state, payload)
         _write_capture(path, state)
     # Keep only the old bounded identity-corroboration sample for diagnostics;
@@ -2826,30 +2770,10 @@ def _record_subagent_stop(root: Path, payload: dict[str, Any]) -> bool:
                 child["stop_observed"] = state["sequence"]
                 # An optional hook observation is not native terminal proof.
                 # Preserve naturally returned execution evidence in either order.
-                state["stall"] = None
                 _runtime_metadata(state, payload)
                 _write_capture(path, state)
                 return True
     return False
-
-
-def _lifecycle_block_fingerprint(state: dict[str, Any]) -> str:
-    """Hash only mechanical in-flight state for repeated-block detection."""
-    active = [
-        {
-            "agent_id_hash": child.get("agent_id_hash"),
-            "native_terminal_status": child.get("native_terminal_status"),
-            "native_status_conflict": child.get("native_status_conflict", False),
-            "task_name_hash": child.get("task_name_hash"),
-        }
-        for child in state.get("children", [])
-        if isinstance(child, dict)
-        and child.get("managed") is True
-        and (not _native_execution_terminal(child)
-             or child.get("native_status_conflict") is True)
-    ]
-    pending = state.get("pending_authorized_spawn")
-    return hashlib.sha256(json.dumps({"active": active, "pending": pending}, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _native_terminal_status(value: object) -> str | None:
@@ -2904,7 +2828,6 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
     state["sequence"] = int(state.get("sequence", 0)) + 1
     child["native_terminal_status"] = status
     child["native_terminal_source"] = source
-    state["stall"] = None
     return True
 
 
@@ -2936,7 +2859,6 @@ def _record_pending_terminal(state: dict[str, Any], name: str, status: str, sour
         state["children"].append(child)
     _record_native_terminal(state, child, status, source)
     state["pending_authorized_spawn"] = None
-    state["pending_spawn_terminal_evidence"] = None
     return True
 
 
@@ -3040,12 +2962,8 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                 child = _child_for_native_name(state["children"], target)
                 if child is not None:
                     observed = True
-                    metrics = state.setdefault("metrics", {})
-                    metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
                     changed = _record_native_terminal(state, child, status, tool)
                     changed = _record_pending_terminal(state, target, status, tool) or changed
-                    if changed and _native_execution_terminal(child):
-                        metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
                 else:
                     changed = _record_pending_terminal(state, target, status, tool) or changed
         elif tool == "wait_agent":
@@ -3085,13 +3003,9 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         changed = _record_pending_terminal(state, name, status, "list_agents") or changed
                         continue
                     observed = True
-                    metrics = state.setdefault("metrics", {})
-                    metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
                     did_reconcile = _record_native_terminal(state, child, status, "list_agents")
                     changed = _record_pending_terminal(state, name, status, "list_agents") or changed
                     changed = changed or did_reconcile
-                    if did_reconcile and _native_execution_terminal(child):
-                        metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
         if changed or observed:
             _runtime_metadata(state, payload)
             _write_capture(path, state)
@@ -3197,22 +3111,6 @@ def native_execution_closed(root: Path) -> bool:
             return False
         identities.update(child_identities)
     return True
-
-
-def qualifying_child_completed(root: Path, *, allow_no_children: bool = False) -> bool:
-    """Compatibility name for the residual native execution check."""
-    return native_execution_closed(root)
-
-
-def _managed_child_active(root: Path) -> bool:
-    task_id = _active_task_id(root)
-    if task_id is None:
-        return False
-    try:
-        value = json.loads(_lifecycle_path(root, task_id).read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError):
-        return False
-    return isinstance(value, dict) and value.get("version") == LIFECYCLE_STATE_VERSION and value.get("managed_hook_spec_hash") == managed_hook_spec_hash() and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("managed") is True and not _native_execution_terminal(child) for child in value.get("children", []))
 
 
 def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None = None) -> bool:
@@ -3380,7 +3278,7 @@ def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: boo
         operands = [value.strip("\"'")[:256] for value in tokens[index + 1:] if value and not value.startswith("--")]
         if token == "document-get":
             return token, operands[:8]
-        if token in {"task-get", "artifact-get", "catalog", "recover-pending-spawn"}:
+        if token in {"task-get", "artifact-get", "catalog"}:
             return token, operands[:1]
         return token, []
     return None, []

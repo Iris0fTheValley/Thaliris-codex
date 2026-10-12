@@ -242,7 +242,7 @@ def test_nested_scanner_artifact_links_render_as_relative_markdown() -> None:
     assert codex_adapter.render_role_packs() == role_packs
 
 
-def test_lifecycle_policy_denials_name_role_sessions_or_native_codex_sessions() -> None:
+def test_lifecycle_policy_denials_avoid_child_routing_prose() -> None:
     source = Path(lifecycle_module.__file__).read_text(encoding="utf-8")
     denials = re.findall(r'_permission_deny\("([^"]+)', source)
     assert denials
@@ -255,11 +255,9 @@ def test_lifecycle_policy_denials_name_role_sessions_or_native_codex_sessions() 
         else:
             assert "child" not in prose.lower(), denial
     assert '"""Protect explicit control boundaries without gating ordinary work."""' in source
-    assert "managed native Codex session lifecycle" in source
     assert "managed child slot" not in source
     assert "managed Child" not in source
     assert "THALIRIS_UNBOUND_DISPATCH_PENDING" in source
-    assert "authorized native Codex role session" in source
     assert "child_id" in source  # Raw native schema fields remain unchanged.
 
 

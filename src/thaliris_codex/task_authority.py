@@ -133,8 +133,7 @@ def recover(root: Path, expected: str, reason: str) -> dict:
         if ledger:
             # Core archived the exact old provenance. A fresh handoff is
             # required; no old child is called Completed.
-            ledger = {**ledger, "children": [], "pending_authorized_spawn": None,
-                      "pending_spawn_terminal_evidence": None, "stall": None}
+            ledger = {**ledger, "children": [], "pending_authorized_spawn": None}
             core._atomic_write(ledger_path, (json.dumps(ledger, sort_keys=True, indent=2) + "\n").encode())
             record["lifecycle_snapshot"] = ledger
             record["lifecycle_sha256"] = digest(ledger_path)

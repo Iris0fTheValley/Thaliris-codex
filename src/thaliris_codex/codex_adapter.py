@@ -2155,9 +2155,6 @@ def doctor(root: Path) -> dict[str, object]:
         "wait_calls": 0,
         "wait_timeouts": 0,
         "list_agents_calls": 0,
-        "blocked_spawn_calls": 0,
-        "reconciliation_attempts": 0,
-        "reconciliation_successes": 0,
         **{
             binding.orchestration_metric: 0
             for binding in roles.iter_codex_bindings()
@@ -2190,7 +2187,6 @@ def doctor(root: Path) -> dict[str, object]:
     latest_item = latest[2] if latest is not None else None
     health = lifecycle.hooks_health(root)
     lifecycle_start = lifecycle_stop = lifecycle_reconciled = False
-    reconciliation_attempts = reconciliation_successes = 0
     for path in (root / ".context" / "audit" / "lifecycle").glob("*.json"):
         try:
             lifecycle_state = json.loads(path.read_text(encoding="utf-8"))
@@ -2210,11 +2206,6 @@ def doctor(root: Path) -> dict[str, object]:
                 metric = binding.orchestration_metric if binding is not None else None
                 if metric is not None:
                     orchestration[metric] += 1
-        metrics = lifecycle_state.get("metrics")
-        if isinstance(metrics, dict):
-            reconciliation_attempts += int(metrics.get("reconciliation_attempts", 0))
-            reconciliation_successes += int(metrics.get("reconciliation_successes", 0))
-            orchestration["blocked_spawn_calls"] += int(metrics.get("blocked_spawn_calls", 0))
     result["verification_attestation"] = {
         "host_hook_registration_present": health["hooks_configured"],
         # Stored observations are intentionally useful diagnostics, but they
@@ -2281,11 +2272,7 @@ def doctor(root: Path) -> dict[str, object]:
         "native_terminal_reconciliation": "PASS" if lifecycle_reconciled else ("LIVE_NOT_OBSERVED" if posttool_schema == "PASS" else "UNKNOWN"),
         "PostToolUse_source_schema_support": posttool_schema,
         "PostToolUse_live_host_hook": "PASS" if events else "LIVE_NOT_OBSERVED",
-        "reconciliation_attempts": reconciliation_attempts,
-        "reconciliation_successes": reconciliation_successes,
     }
-    orchestration["reconciliation_attempts"] = reconciliation_attempts
-    orchestration["reconciliation_successes"] = reconciliation_successes
     result["cost_regression"] = {
         # This Hook surface has no model-turn/token/context counter.  Leaving
         # these unavailable is safer than deriving model cost from wait calls.

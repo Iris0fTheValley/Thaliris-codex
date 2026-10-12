@@ -104,9 +104,9 @@ def test_executor_scanner_parent_binding_and_completion(active, role):
     assert "DELEGATION" in lifecycle.handle_hook(active, "PreToolUse", spawn(scanner))
     assert "SCANNER_SLOT_ACTIVE" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
     finish(active, scanner, parent)
-    assert not lifecycle.qualifying_child_completed(active)
+    assert not lifecycle.native_execution_closed(active)
     finish(active, parent)
-    assert lifecycle.qualifying_child_completed(active)
+    assert lifecycle.native_execution_closed(active)
     assert codex_adapter.task_close(active, core.task_show(active)["state"]["revision"])["status"] == "DONE"
 
 
@@ -348,7 +348,7 @@ def test_parent_stop_before_scanner_start_is_not_terminal_evidence(active):
     assert lifecycle._record_subagent_start(active, identity("investigator", "scanner"))
     assert state(active)["pending_authorized_spawn"] is None
     finish(active, parent)
-    assert not lifecycle.qualifying_child_completed(active)
+    assert not lifecycle.native_execution_closed(active)
 
 
 def test_spawn_return_is_correlated_to_authorized_parent(active):
@@ -402,18 +402,18 @@ def test_scanner_slot_reuse_preserves_exact_parent_and_allows_bound_root_sibling
     finish(active, second, parent)
     finish(active, parent)
     finish(active, curator)
-    assert lifecycle.qualifying_child_completed(active)
+    assert lifecycle.native_execution_closed(active)
 
 
 def test_active_or_pending_descendant_prevents_close(active):
     parent = start(active)
     scanner = start(active, "investigator", "scanner", parent)
     finish(active, parent)
-    assert not lifecycle.qualifying_child_completed(active)
+    assert not lifecycle.native_execution_closed(active)
     # A bound Scanner keeps its own identity after the parent terminates.
     assert lifecycle.handle_hook(active, "PreToolUse", {**scanner, "tool_name": "read_file", "tool_input": {}}) == ""
     finish(active, scanner)
-    assert lifecycle.qualifying_child_completed(active)
+    assert lifecycle.native_execution_closed(active)
 
 
 def test_latest_scanner_failure_does_not_replace_successful_parent(active):
@@ -421,7 +421,7 @@ def test_latest_scanner_failure_does_not_replace_successful_parent(active):
     scanner = start(active, "investigator", "scanner", parent)
     finish(active, scanner, parent, "errored")
     finish(active, parent)
-    assert lifecycle.qualifying_child_completed(active)
+    assert lifecycle.native_execution_closed(active)
 
 
 def test_terminal_scanner_and_failed_parent_resolve_execution_only(active):
@@ -434,16 +434,9 @@ def test_terminal_scanner_and_failed_parent_resolve_execution_only(active):
     assert lifecycle.native_execution_closed(active)
 
 
-def test_nested_native_terminal_retires_pending_without_managed_permissions(active):
+def test_nested_native_terminal_retires_pending_without_granting_managed_child(active):
     parent = start(active)
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
-    handoff = state(active)["pending_authorized_spawn"]["handoff_id"]
-    with pytest.raises(ValueError, match="does not match"):
-        lifecycle.recover_pending_spawn(active, "handoff-" + "0" * 32)
-    denied = lifecycle.handle_hook(active, "PreToolUse", {**parent, "tool_name": "Bash", "tool_input": {"command": f"thaliris recover-pending-spawn {handoff}"}})
-    assert "CONTROL_STATE_MUTATION" in denied
-    with pytest.raises(ValueError, match="trusted terminal Host evidence"):
-        lifecycle.recover_pending_spawn(active, handoff)
     native_name = "/root/scanner-failed"
     lifecycle.handle_hook(active, "PostToolUse", {**spawn(parent), "tool_response": {"task_name": native_name}})
     lifecycle.handle_hook(active, "PostToolUse", {**parent, "tool_name": "list_agents", "tool_response": {"agents": [{"agent_name": native_name, "agent_status": "shutdown"}]}})
@@ -573,7 +566,7 @@ def test_previous_flat_lifecycle_state_is_not_nested_authority(active):
     previous = state(active)
     previous["version"] = 11
     path.write_text(json.dumps(previous), encoding="utf-8")
-    assert not lifecycle.qualifying_child_completed(active)
+    assert not lifecycle.native_execution_closed(active)
     assert "deny" in lifecycle.handle_hook(active, "PreToolUse", spawn(identity()))
 
 

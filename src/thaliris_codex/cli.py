@@ -160,8 +160,6 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--supersedes", action="append", default=[])
     q = sub.add_parser("task-close")
     q.add_argument("--base-revision", required=True, type=int)
-    q = sub.add_parser("recover-pending-spawn", help="recover an exact pending spawn with trusted native terminal evidence")
-    q.add_argument("handoff_id")
     q = sub.add_parser(
         "task-promote",
         help="persist Controller-selected durable records",
@@ -245,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         if selected is None and args.session_id:
             selected = lifecycle._associated_task(root, {"session_id": args.session_id})
         core.select_task(root, selected)
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "recover-pending-spawn", "task-recover-authority", "task-recover-state"} and selected is None:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state"} and selected is None:
             raise ValueError("explicit --task-id or associated --session-id required for managed control")
         if args.command == "controller-instructions":
             from . import controller_instructions
@@ -266,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
             raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "recover-pending-spawn"}:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency"}:
             task_authority.check(root)
         if args.command == "audit-hook":
             stage = "receive"
@@ -383,7 +381,6 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "artifact-get": out = artifact_get(root, args.id)
         elif args.command == "task-artifact": out = task_artifact(root, args.base_revision, args.id, args.path, args.summary, producer=(codex_adapter.semantic_role(args.producer_role) if getattr(args, "producer_role", None) else None), registered_by=codex_adapter.controller_actor(args.role), evidence_refs=args.source_ref or None, supersedes=args.supersedes or None)
         elif args.command == "task-close": out = codex_adapter.task_close(root, args.base_revision)
-        elif args.command == "recover-pending-spawn": out = lifecycle.recover_pending_spawn(root, args.handoff_id)
         elif args.command == "task-promote": out = task_promote(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
         elif args.command == "rollback": out = rollback(root, args.backup)
         elif args.command == "uninstall": out = codex_adapter.uninstall(root)

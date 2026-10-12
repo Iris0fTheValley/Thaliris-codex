@@ -110,7 +110,7 @@ function Degraded($detail) {
     $normalizedInput=$inputJson -replace '\\+','/'
     if ($normalizedInput -match ('(?i)'+[regex]::Escape($homeRoot)+'/(?:agents|thaliris-host-generations)/')) { $control=$true }
   }
-  if ($command -match '(?i)^\s*&?\s*["'']?(thaliris(\.exe|\.cmd)?)["'']?\s' -and $command -match '(?i)\b(task-start|task-abandon|task-recover-state|task-recover-external|task-update|task-close|task-promote|task-artifact|recover-pending-spawn)\b') { $control=$true }
+  if ($command -match '(?i)^\s*&?\s*["'']?(thaliris(\.exe|\.cmd)?)["'']?\s' -and $command -match '(?i)\b(task-start|task-abandon|task-recover-state|task-recover-external|task-update|task-close|task-promote|task-artifact)\b') { $control=$true }
   if ($command -and $env:THALIRIS_EXECUTABLE -and $command -match ('^\s*&?\s*["'']?'+[regex]::Escape($env:THALIRIS_EXECUTABLE)+'["'']?\s')) { $control=$true }
   # A pending generation never exempts maintenance through another executor.
   if ($command -match '(?i)(?:^|[;&|])\s*&?\s*["'']?[^\r\n;|&]*?\s+codex-(install|uninstall)\b') { $control=$true }

@@ -64,9 +64,9 @@ asynchronous and best-effort. The version-pinned sources are
 [`spawn_guard.rs`](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/agent/control/spawn_guard.rs),
 and [the error mapper](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/tools/handlers/multi_agents_common.rs).
 Exact call correlation cannot distinguish those errors
-from rejection before creation. Keep the authorization reservation pending; do not
-generate terminal evidence or permit explicit recovery from generic `spawn_failed`
-records. Exact identity-bound native terminal observations still retire pending
+from rejection before creation. Keep the authorization reservation pending; generic
+`spawn_failed` records establish neither that no child exists nor that it has
+terminated. Only exact identity-bound native terminal observations retire pending
 reservations automatically. Without those observations, the existing Controller
 dependency disposition/fence path remains available. This is a minimum authorization
 association retained at the native schema boundary, not another execution state.
