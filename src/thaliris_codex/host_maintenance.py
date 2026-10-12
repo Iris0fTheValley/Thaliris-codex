@@ -147,9 +147,10 @@ def validate_ownership(contents: bytes | None, installed: bytes | None, intent: 
     if any(not isinstance(event, str) or not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
            for event, entries in record["hook_handlers"].items()):
         raise ValueError("invalid installed hook ownership structure")
-    from . import mode_hint_config, wait_guidance_config
+    from . import mode_hint_config, wait_guidance_config, model_catalog_config
     mode_hint_config.validate(record.get(mode_hint_config.RECORD_KEY))
     wait_guidance_config.validate(record.get(wait_guidance_config.RECORD_KEY))
+    model_catalog_config.validate(record.get(model_catalog_config.RECORD_KEY))
     return record
 
 
@@ -363,6 +364,7 @@ def _failure(home: Path, error: Exception) -> dict:
 
 
 def install(home: Path, executable, executable_sha256, execution_constraint, filename) -> dict:
+    from . import model_catalog_config as catalog
     from . import codex_adapter as adapter, lifecycle, host_preflight, roles, host_transition, mode_hint_config, wait_guidance_config
     # No disk, audit, profile or trust mutation occurs before this complete plan.
     try:
@@ -388,6 +390,15 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         record = ownership(home, prior, intent)
         hint_record, hint_status = mode_hint_config.plan_install(home, record)
         wait_guidance_record, wait_guidance_status, wait_guidance_previous_record = wait_guidance_config.plan_install(home, record)
+        catalog_record, catalog_status, catalog_bytes = catalog.plan_install(home, record, source=intent.get("model_catalog_source", "online"))
+        catalog_before = catalog.read_catalog(home)
+        if catalog_bytes is not None:
+            old_catalog = record.get(catalog.RECORD_KEY)
+            if ((old_catalog is None and catalog_before is not None) or
+                    (old_catalog is not None and (catalog_before is None or digest(catalog_before) != old_catalog["catalog_sha256"]))):
+                raise ValueError("model catalog changed during upstream export; preserve user bytes")
+        if catalog_before is not None:
+            before[catalog.NAME] = catalog_before
         if record.get("execution_constraint") == "luna-only" and execution_constraint != "luna-only":
             raise ValueError("existing luna-only installation requires the same explicit constraint; omission cannot remove it")
         exe, sha, problem = adapter._host_install_executable(home, candidate, executable_sha256 or json.loads(approved)["executable_sha256"])
@@ -415,6 +426,8 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
                 executable_sha256=sha, codex_home=home),
         }
         writes.update(migrated_instructions(intent, home, before, candidate, sha))
+        if catalog_bytes is not None:
+            writes[catalog.NAME] = catalog_bytes
         for name, (model, effort, role) in roles.agent_profiles(execution_constraint).items():
             writes["agents/" + name] = adapter._agent_profile(name.removesuffix(".toml"), role, model, effort)
         deletes = []
@@ -424,6 +437,8 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
                     raise ValueError(f"edited retired Host profile: {name}; preserve and review exact bytes")
                 deletes.append(name)
         for name in writes:
+            if name == catalog.NAME:
+                continue  # Exact leaf/catalog receipt is validated independently.
             if name in {runtime_identity.MANIFEST_NAME, "AGENTS.md"} or name.startswith("instruction_migrations/"):
                 continue
             if name in before and not owned(record, name, before[name]):
@@ -459,7 +474,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             if not hook_handlers[event]:
                 hook_handlers[event] = [entry for entry in merged.get("hooks", {}).get(event, [])
                     if entry in record.get("hook_handlers", {}).get(event, [])]
-        installation_changed = hint_status["status"] == "PLANNED" or wait_guidance_status["status"] in {"PLANNED", "MIGRATION_PLANNED"} or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
+        installation_changed = catalog_record != record.get(catalog.RECORD_KEY) or hint_status["status"] == "PLANNED" or wait_guidance_status["status"] in {"PLANNED", "MIGRATION_PLANNED"} or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
             before.get(name) != contents for name, contents in writes.items()
         )
         receipt = {"format": RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
@@ -468,7 +483,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
                    "source_pin": intent["candidate"]["source_pin"] if installation_changed else record.get("source_pin", intent["candidate"]["source_pin"]),
                    "human_instruction": intent["human_instruction"] if installation_changed else record["human_instruction"],
                    "owned_bytes": {name: digest(value) for name, value in writes.items()
-                                   if name not in {"AGENTS.md", "hooks.json", runtime_identity.MANIFEST_NAME}
+                                   if name not in {"AGENTS.md", "hooks.json", runtime_identity.MANIFEST_NAME, catalog.NAME}
                                    and not name.startswith("instruction_migrations/")},
                    "hook_handlers": hook_handlers}
         receipt["owned_bytes"]["AGENTS.md#global"] = digest(_global_owned_bytes(writes["AGENTS.md"]))
@@ -476,8 +491,12 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             receipt[mode_hint_config.RECORD_KEY] = hint_record
         if wait_guidance_record is not None:
             receipt[wait_guidance_config.RECORD_KEY] = wait_guidance_record
+        if catalog_record is not None:
+            receipt[catalog.RECORD_KEY] = catalog_record
         writes[RECEIPT_NAME] = (json.dumps(receipt, sort_keys=True, ensure_ascii=False) + "\n").encode()
         observed = _files(home)
+        if catalog.read_catalog(home) is not None:
+            observed[catalog.NAME] = catalog.read_catalog(home)
         observed.update(host_transition._observe(home, targets, targets=targets))
         if observed != before or runtime_identity.manifest_bytes(candidate) != runtime:
             raise ValueError("maintenance input changed during preflight")
@@ -491,6 +510,7 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
               "wait_guidance_record": wait_guidance_record,
               "wait_guidance_previous_record": wait_guidance_previous_record,
               "wait_guidance_status": wait_guidance_status}
+    finish.update(model_catalog_record=catalog_record, model_catalog_status=catalog_status)
     try:
         with host_transition.locked(home):
             transition = host_transition.begin(home, intent, before, writes, deletes, finish)
@@ -510,6 +530,7 @@ def _transition_failure(home, error):
 
 
 def _finish_install(home, transition):
+    from . import model_catalog_config as catalog
     from . import codex_adapter as adapter, lifecycle, codex_app_server, roles, host_transition, mode_hint_config, wait_guidance_config
     finish = transition["finish"]
     candidate, sha, runtime = Path(finish["candidate"]), finish["sha"], finish["runtime"].encode()
@@ -540,6 +561,9 @@ def _finish_install(home, transition):
         if wait_guidance["changed"]:
             changed_files.append("config.toml")
     if ready:
+        catalog_result = catalog.finish_install(home, transition)
+        if catalog_result["changed"]:
+            changed_files.append("config.toml")
         manual = []
         host_transition.complete(home, transition)
     elif trust_error:
@@ -548,6 +572,10 @@ def _finish_install(home, transition):
         manual = ["one_or_more_Thaliris_Host_hooks_are_disabled_by_user_state"]
     else:
         manual = ["Host registration or trust incomplete"]
+    if not ready:
+        catalog_result = finish.get("model_catalog_status", catalog.status("LEGACY_UNMANAGED"))
+    if catalog_result["status"] not in {"MANAGED", "TARGET_ABSENT_MANAGED", "LEGACY_UNMANAGED", "VERSION_SUPPORT_UNKNOWN"} or (catalog_result["status"] == "VERSION_SUPPORT_UNKNOWN" and finish.get("model_catalog_record") is not None):
+        manual.append("native_model_catalog_compatibility:" + catalog_result["status"])
     if hint["status"] in {"USER_CHANGED_PRESERVED", "USER_CUSTOM_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED", "APPLY_OUTCOME_UNKNOWN_PRESERVED"}:
         manual.append("native_mode_hint_compatibility:" + hint["status"])
     return {"ok": ready, "changed": bool(changed_files), "target": str(home),
@@ -559,6 +587,7 @@ def _finish_install(home, transition):
         "host_hook_expected_count": expected_count, "host_hook_trust_error": trust_error,
         "native_mode_hint_compatibility": hint,
         "controller_wait_guidance_compatibility": wait_guidance,
+        "native_model_catalog_compatibility": catalog_result,
         "host_integration_ready": "YES" if ready else "NO", "global_instruction_ready": "YES",
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,
@@ -572,6 +601,7 @@ def _finish_install(home, transition):
 
 
 def uninstall(home: Path, filename) -> dict:
+    from . import model_catalog_config as catalog
     from . import codex_adapter as adapter, lifecycle, codex_app_server, host_transition, mode_hint_config, wait_guidance_config
     import os
     try:
@@ -594,6 +624,13 @@ def uninstall(home: Path, filename) -> dict:
         mode_hint_config.validate(hint_record, home)
         wait_guidance_record = record.get(wait_guidance_config.RECORD_KEY)
         wait_guidance_config.validate(wait_guidance_record, home)
+        catalog_record = record.get(catalog.RECORD_KEY)
+        catalog.validate(catalog_record, home)
+        catalog_field_owned = False
+        if catalog_record is not None:
+            catalog_raw, catalog_config = catalog.read(home)
+            catalog_field_owned = catalog.KEY not in catalog_config or catalog.matches(catalog_raw, catalog_config, catalog_record)
+        catalog_before = catalog.read_catalog(home)
         if hint_record is not None:
             mode_hint_config.read(home)  # Reject malformed config before any disk transition.
         if wait_guidance_record is not None:
@@ -658,6 +695,21 @@ def uninstall(home: Path, filename) -> dict:
             writes[RECEIPT_NAME] = (json.dumps(retained, sort_keys=True) + "\n").encode()
         if _files(home) != before:
             raise ValueError("maintenance input changed during preflight")
+        if catalog.read_catalog(home) != catalog_before:
+            raise ValueError("model catalog changed during uninstall preflight")
+        if catalog_record is not None and catalog_before is not None:
+            # Hook ownership lookup can take time and user config is outside
+            # _files(). Recheck the exact root-field receipt immediately before
+            # planning the catalog deletion so a concurrent adoption is kept.
+            catalog_raw, catalog_config = catalog.read(home)
+            catalog_field_owned = (catalog.KEY not in catalog_config
+                                   or catalog.matches(catalog_raw, catalog_config, catalog_record))
+        if catalog_before is not None:
+            before[catalog.NAME] = catalog_before
+            if catalog_field_owned and digest(catalog_before) == catalog_record["catalog_sha256"]:
+                deletes.append(catalog.NAME)
+            else:
+                preserved.append(catalog.NAME)
     except (OSError, ValueError, TypeError, KeyError, RuntimeError, codex_app_server.CodexAppServerError) as exc:
         return _failure(home, exc)
     deletes += [name for name, contents in writes.items() if not contents]
@@ -665,6 +717,7 @@ def uninstall(home: Path, filename) -> dict:
     finish = {"keys": keys, "inert": inert, "preserved": preserved,
               "mode_hint_record": hint_record,
               "wait_guidance_record": wait_guidance_record,
+              "model_catalog_record": catalog_record,
               "changed_files": sorted(set(writes) | set(deletes))}
     try:
         with host_transition.locked(home):
@@ -675,6 +728,7 @@ def uninstall(home: Path, filename) -> dict:
 
 
 def _finish_uninstall(home, transition):
+    from . import model_catalog_config as catalog
     from . import codex_app_server, lifecycle, codex_adapter as adapter, host_transition, mode_hint_config, wait_guidance_config
     finish = transition["finish"]
     keys, inert, preserved = finish["keys"], finish["inert"], finish["preserved"]
@@ -683,6 +737,7 @@ def _finish_uninstall(home, transition):
         trust_removed = codex_app_server.remove_owned_hook_trust(home, keys) if keys else 0
         wait_guidance = wait_guidance_config.apply(home, finish.get("wait_guidance_record"), remove=True)
         hint = mode_hint_config.apply(home, finish.get("mode_hint_record"), remove=True)
+        catalog_result = catalog.apply(home, finish.get("model_catalog_record"), remove=True)
     except (OSError, ValueError, RuntimeError) as exc:
         result = _failure(home, exc)
         result.update(status="HOST_TRANSITION_PENDING", changed=True, runtime_audit_records=audits,
@@ -693,9 +748,10 @@ def _finish_uninstall(home, transition):
     manual = (["native_mode_hint_compatibility:USER_CHANGED_PRESERVED"] if hint["status"] == "USER_CHANGED_PRESERVED" else [])
     return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed or hint["changed"] or wait_guidance["changed"]), "target": str(home),
         "status": "UNINSTALLED_INERT_RUNNER_RETAINED" if inert else "UNINSTALLED",
-        "files": sorted(set(finish["changed_files"] + (["config.toml"] if hint["changed"] or wait_guidance["changed"] else []))), "preserved_files": preserved,
+        "files": sorted(set(finish["changed_files"] + (["config.toml"] if hint["changed"] or wait_guidance["changed"] or catalog_result["changed"] else []))), "preserved_files": preserved,
         "native_mode_hint_compatibility": hint,
         "controller_wait_guidance_compatibility": wait_guidance,
+        "native_model_catalog_compatibility": catalog_result,
         "retained_inert_runner": inert,
         "manual_action_required": manual,
         "runtime_audit_records": audits,

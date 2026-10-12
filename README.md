@@ -81,11 +81,11 @@ Fresh Child 是新的原生角色会话，通过选择性 Handoff 接收完成�
 
 结论应带有证据来源及其适用范围。文件 hash、Git blob 和 test/runtime observation 可以说明观察了哪个版本；freshness 只核对声明过的来源是否变化，不能证明所有依赖都未改变，也不能替模型判断结论是否仍然适用。证据不足的结论保留为 `UNVERIFIED`；缺少执行或身份观察时保留 `UNKNOWN`，不将推测升级为确认。已有记录只是可检索材料，不是下游必须接受的事实。
 
-短期任务记录保存当前 Task ID 的事实、待处理工作和证据，不复制对话 transcript。在 Core 项目记录中，`.agent-memory/` 保存经选择、可跨任务复用的知识，`.milestones/` 保存持续项目的进度与验证。Controller 判断哪些信息值得长期保留，哪些只对当前任务有用；持久化与向下一角色传递是两个独立选择。Host 的可选记忆集成另有自己的存储与授权契约。
+短期任务记录保存当前 Task ID 的事实、待处理工作和证据，不复制对话 transcript。Core 的 `task-promote` 只持久化 Controller 选择的 `.agent-memory/` Markdown 记录；每条记录要求 `id`、`path` 和 `text`，`title` 默认是 ID，`source_refs` 默认是空列表。它只创建新的非 INDEX Markdown 文件，Core 拒绝覆盖已有 durable target。推广事务以当前 Task ID 和 task revision CAS 提交。可选的 legacy `status` 是不透明字段，不表示确认或生命周期。每条记录的 text 最多 16,384 个字符、source_refs 最多 64 项。推广记录不能写入 `.milestones/`；可选的 INDEX 更新可面向 `.milestones/INDEX.md`。`INDEX.md` 是由模型撰写的语义导航；更新提交完整文件内容，Core 校验预期 digest、路径和链接，不替模型生成索引。Controller 决定哪些信息值得长期保留；持久化与向下一角色传递是两个独立选择。Host 的可选记忆集成另有自己的存储与授权契约。
 
 每个独立任务都有以 UUID 标识的 Task ID 和自己的本地状态文件。继续已有任务时明确选择 Task ID 与相关证据；开始新任务时创建新的 Task ID，不从旧工作区状态推断当前任务。旧 `ACTIVE`、`UNKNOWN` 或损坏记录不会自动占住唯一任务槽位，但真实的共享文件重叠写入仍需协调。原生会话关联、恢复和权限检查属于 adapter；Task ID 本身不授予权限，也不构成 Host 身份认证。
 
-最终产品验收通过一份独立、明确的 closing handoff，交给适当的现有执行角色：它按用户原始目标和标准检查候选，返回结论、对应证据与 `UNKNOWN`。Controller 整合该结果，对未满足标准或改变决策的未知项继续路由，并记录机械关闭；Controller 不自行完成最终验收。Reviewer 仍负责独立挑战，其 READY 不替代这份验收。人选 single-agent 或 controller-direct 时保持原模式，由已授权且可用的执行角色或人类提供验收；没有独立 closing 证据时明确验收未验证，交还人类作关闭决定。测试 `PASS` 只证明所运行检查的结果，子代理结束只证明执行终止，干净的 diff 也不证明产品行为符合要求。每个必要依赖由一个观察 owner 负责；已经得到可靠结果就使用它，不重复等待完成或因状态未变化而反复唤醒模型。验证与等待服务于尚未解决的实际问题。
+Controller 将用户原始目标、验收标准和可用证据结合起来，决定产品是否完成，以及应路由修复、请求有用的额外验证，还是记录机械关闭。Executor 实施并验证分配的工作，返回候选状态、逐项证据和未验证部分的 `UNKNOWN`。Reviewer 可在独立只读挑战确实有价值时参与；它不是必经阶段，也不需要单独的 closing handoff 或新 Agent。测试 `PASS`、Reviewer `READY`、原生 `Completed` 和机械 `DONE` 分别描述检查、评审、执行和任务记录，任何一项都不单独决定产品完成。人选 delegated、controller-direct 或 single-agent 时，Controller 都保留最终产品决策责任。每个必要依赖由一个观察 owner 负责；已经得到可靠结果就使用它，不重复等待完成或因状态未变化而反复唤醒模型。验证与等待服务于尚未解决的实际问题。
 
 ## 一个跨模块编码场景
 
@@ -95,7 +95,7 @@ Fresh Child 是新的原生角色会话，通过选择性 Handoff 接收完成�
 2. Controller 选择相关事实、硬不变量和未知项形成 Handoff。若取消、完成与写入互相耦合，Fresh Focused Implementer 围绕这些不变量实现并验证；方向稳定的独立修改可以交给普通 Implementer。
 3. 实现者返回具体候选、来源版本、测试覆盖和未覆盖情形。核心语义收敛后，剩余确定性同步、回归或 Git 收尾可交给新的普通 Implementer，而不延长原聚焦上下文。
 4. 如果独立挑战会影响验收，Fresh Reviewer 检查诸如「取消与完成同时发生」及旧 API 兼容等边界。未验证的运行时行为继续标记未知；审查发现带着依据返回，而不是自动视为结论。
-5. 适当的现有执行角色通过明确的 closing handoff，按原始需求验收候选。Controller 整合其结论、证据和未知项，必要时继续路由，并记录机械关闭。只有跨任务仍有价值的取消不变量或已验证 failure mode 才进入项目记忆；其余记录留在对应 Task ID 中。
+5. Controller 整合实现报告、测试与可用的运行时证据，按原始目标和标准决定是否完成；未满足的条件或改变决策的未知项继续路由修复或有用的额外验证。若独立挑战能影响判断，可选择 Reviewer。Controller 再根据实际验收结论记录机械关闭。只有跨任务仍有价值的取消不变量或已验证 failure mode 才进入项目记忆；其余记录留在对应 Task ID 中。
 
 源码、Git、测试、编译器和实际运行时行为仍然是正确性的依据。Thaliris 复用 Codex、DSH 的原生会话、Agent 与执行能力：它补充上下文选择、交接、记录与证据边界，不另造一套 Agent Runtime。
 
@@ -112,6 +112,8 @@ Codex 提供原生 Controller 会话、角色会话、工具和协作能力；ad
 全局指令同时承载共享工作原则：复用选定证据，按工作依赖协调写入，用最小但有意义的检查验证行为，并让一个 owner 观察必要依赖。正常 Controller 指导由 Bootstrap 交付；异常恢复和 Host 维护按需检索。详细运行时协议见[集成说明](adapter/codex/README.md)，任务边界见[Authority 契约](docs/thaliris-task-authority.md)。
 
 普通生成的角色 profile 故意省略 model 和 effort，因为 Codex 会在 spawn 参数之后应用 role model 配置。Controller 默认让 Investigator、Implementer、Curator 使用 gpt-6-luna/max，让 Reviewer、Focused Implementer、Reasoning Specialist 使用 gpt-6.1-sol/high；原生派遣必须显式传入 model 与 reasoning_effort，managed Hook 会在 reservation 前拒绝缺项。明确的 execution constraint 或经验证的必要例外可以指定其他受支持组合；这只改变执行选择，不改变角色职责或权限。Verifier 保持现有配置，Controller 自身模型不变。Astra 仍需当前任务的人类 opt-in；静态 Astra 兼容 profile 保持固定绑定，luna-only 继续冻结并禁止 per-spawn 覆盖。历史安装的 profile 可能仍固定模型；源码变化不证明当前 Host 已加载更新。见[原生选择优先级](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning)。
+
+Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目内角色 profile 分离。维护是显式、低频的同步：结果无变化时不写配置；有变化时只删除精确的 Thaliris 管理行，并保留相邻说明、自定义配置和其他模型的原始指令。CLI 内置目录、实际在线取得的目录与受管配置是不同来源；普通自导出不能证明刚从上游刷新。磁盘配置、当前进程已加载的目录和此前启动的会话是不同状态；编辑或安装不证明当前 Host 已激活更新。详见[模型目录维护报告](docs/model-catalog-maintenance-report.md)。
 
 ## 安装与本地开发
 
@@ -218,7 +220,7 @@ Bootstrap JSON 先序列化紧凑的工作区状态诊断，再序列化回执�
 
 Authority 恢复必须通过显式 Task ID，或已经关联到该任务的 session 选择目标，并保留该任务的来源证据和受保护用户 bytes；它不能批准已变化的 security baseline，也不能移除已知旧 child 的 fence。`task-recover-state` 必须提供 `--task-id` 或已有映射的 `--session-id`。legacy state 只能通过显式诊断/恢复路径访问，不会自动 adopt；未选择的旧 bytes 保持不变。`UNKNOWN` 仍保持 UNKNOWN；Controller 可按有界路径结束或放弃旧任务并隔离迟到结果，无需伪造 child Completed。已知可能仍在写入共享文件时，仍需按实际冲突处理。Host 文件修改、安装记录或一次 bootstrap 都不证明当前 Codex 进程已加载更新。详细操作见 [task authority](docs/thaliris-task-authority.md) 和 [runtime recovery](docs/thaliris-runtime-recovery.md)。
 
-任务进行中若用户明确切换执行方式，可通过 `task-mode` 更新选定 Task ID 的执行模式。该操作要求当前 Authority digest 和任务 revision 的 CAS，并单独提供用户新指令；它只修改 `execution_mode`，不会重写目标、边界、不变量或验收。活动依赖可通过 `task-dispose-dependency` 在同一 Task ID 下明确放弃：命令要求当前 handoff ID、任务 revision、生命周期摘要和理由；它记录 `ABANDONED_DEPENDENCY` 与风险，不会伪造子代理终态，并隔离该 handoff 的迟到结果。若可能仍有共享文件写入，Controller 必须先处理该实际冲突。处置后可在同一任务内通过双 CAS 切换模式。当前 session 关联使用 `task-associate`，显式给出 Task ID、session ID 和预期 Authority digest；它只建立导航，不证明 Host actor 身份。`task-start` 也可接收当前 `--session-id` 以建立任务导航。
+任务进行中若用户明确切换执行方式，可通过 `thaliris --task-id <id> task-mode ...` 更新选定 Task ID 的执行模式；`--task-id` 是命令前的全局选择器，只选择任务，不授予权限。该操作要求当前 Authority digest 和任务 revision 的 CAS，并单独提供用户新指令；它只修改 `execution_mode`，不会重写目标、边界、不变量或验收。活动依赖可通过 `task-dispose-dependency` 在同一 Task ID 下明确放弃：命令要求当前 handoff ID、任务 revision、生命周期摘要和理由；它记录 `ABANDONED_DEPENDENCY` 与风险，不会伪造子代理终态，并隔离该 handoff 的迟到结果。若可能仍有共享文件写入，Controller 必须先处理该实际冲突。处置后可在同一任务内通过双 CAS 切换模式。当前 session 关联使用 `task-associate`，显式给出 Task ID、session ID 和预期 Authority digest；它只建立导航，不证明 Host actor 身份。`task-start` 也可接收当前 `--session-id` 以建立任务导航。
 
 [共享文档](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs)、[ABCD 基准结果](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) 在主仓库；[DSH 兄弟适配器](https://github.com/Iris0fTheValley/Thaliris-dsh) 使用同一个 Core。
 
@@ -249,17 +251,17 @@ CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使�
 
 全局指令保留共享授权/隔离边界与一次性启动入口；必要的 bootstrap 响应将正常 Controller 指导直接交付到任务上下文，包括启动/准入、路由、交接、证据复用、等待、Workstream 终点、验收/独立 review 选择、持久知识准入与因果诊断。完整结果用 BEGIN/END 标记；同一当前上下文只在完整工具结果和 END 标记可见后，才可对另一仓库显式传入该 digest 来省略重复指导，不记录持久会话状态。响应截断时可省略 digest 重获完整文本，或用 `controller-instructions --resident` 恢复。项目指令保留共享边界和 canonical 指针；完整 Controller routine 不注入每个 fresh child。[Controller 操作程序](docs/thaliris-controller.md) 是权威源；异常恢复、Host 维护按需检索。安装的 pinned runner 的 `controller-instructions` 返回程序索引，`controller-instructions --resident` 返回完整正常指导，`controller-instructions --section <name>` 获取精确章节。评价完整正常任务上下文、检索成本与交付质量，而非单个最短 prompt。原生角色提示词负责当前角色的执行风格、委派和终点；新鲜 handoff 不向子角色批量注入无关 Controller 程序。所有角色仍可在自身权限内按需检索规则。设计理由与机械实现见 [Codex 协议](adapter/codex/README.md)与 [Core 提示词设计](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)。
 
-先继续应优先处理的独立工作，再判断是否需要等待，最后选择时长。此规则适用于所有合法派发下级的 Agent 层级，包括 Implementer、Focused Implementer、Reviewer 等待 Investigator Scanner。每层仅观察自己的直接依赖；每个必要依赖有一个观察 owner：执行角色用对应工具的实际等待能力运行并等待自己的测试、构建、process 与 CI，不机械套用 wait_agent 参数。父代理仅在已知直接 child 尚未结束、结果仍属必要依赖且没有其他应优先处理的工作时等待，不重复查同一作业。child 返回 FINAL 或 decision-changing unknown 后，该 slice 已结束，不继续等待。
+先继续应优先处理的独立工作，再判断必要依赖是否需要等待。规则适用于所有授权委派层，包括 Implementer、Focused Implementer 或 Reviewer 等待 Investigator Scanner。每层只观察自己的直接依赖；执行角色负责观察自己发起的测试、构建、process 与 CI，并用对应工具的真实等待能力。父代理只等待尚未结束且结果必要的直接 child，同时没有其他应优先处理的工作。完整交接后 child 自主推进，不需要父级反复 patrol；执行中的 child 只报告完成、关键阻碍、会改变决策的新发现或必要的上层决策。child 返回 FINAL 或 decision-changing unknown 后，该 slice 结束，不继续等待。
 
-事件驱动等待优先于定时轮询。先确认当前 Host 的实际工具最大值、等待期间实质事件提前返回、用户中断和 child 通知能力；未经确认的能力保持 UNKNOWN。如果实质事件提前返回及用户中断能力已确认且没有需要中途决策的依赖，默认使用工具支持的 60 分钟窗口（`timeout_ms=3600000`）。这是最大等待窗口，不是要求 child 执行 60 分钟；原生完成事件提前唤醒父代理后直接使用结果。不能因历史平均完成时间短而强制提前唤醒。确需时间性阶段检查或不能可靠提前返回时，极短任务推荐 60 秒，普通任务按规模推荐 10–60 分钟，较长任务阶段检查推荐约 30 分钟；事件可靠且无需阶段决策时仍优先 60 分钟。实际工具限制、明确适用的更高层时限、用户中断、异常恢复和及时决策优先；最大值不足 60 分钟时遵守实际限制，不修改或绕过 Host。
+事件驱动等待优先。先确认当前 Host 的工具上限、实质事件提前返回、用户中断与 child 通知能力；未经确认的能力保持 UNKNOWN。若事件提前返回和用户中断已确认，且无需中途决策，通常使用工具支持的 60 分钟窗口（`timeout_ms=3600000`）；这是最大等待窗口，实质事件可提前唤醒并直接使用结果。只有确需阶段检查或早返不可靠时才考虑较短窗口：极短任务约 60 秒、普通任务按规模 10–60 分钟、较长任务阶段检查约 30 分钟。这些是按情境选择的建议，不是硬性上限。遵守实际工具上限和明确适用的更高层时限，不修改或绕过 Host 来延长它。
 
-原生终止事件、普通 child 消息和 timeout 是不同证据，消息和 timeout 不证明完成。不要用 sleep、进度轮询器或每个并行 child 的独立定时循环观察未变化状态；等待能改变当前决策的原生事件。超时后先重新判断必要直接依赖和可继续的独立工作，避免无限无效等待，不重复查询或推理未变化状态。异常不伪造终止证据，未证明状态保持 UNKNOWN。等待窗口不是执行期限，不机械使用固定 60 秒或固定 60 分钟。执行中的子代理持续推进工作，只在完成、关键阻塞、重大新发现或需要上层决策时报告，不因时间经过发送进度或心跳。wake-only 的 V2 `wait_agent` 不证明完成；实质唤醒后用一次可用的精确原生状态检查（如 `list_agents`）。已证明完成无需二次确认。Hook 保留调用者参数，不自动延长等待。不同 Task ID 可独立并行；单个 Task ID 可同时包含多个已绑定的活动 child，但一次只保留一个待关联预约。是否并行由 Controller 按工作依赖决定；同一工作树中重叠写入需协调，独立 worktree 可承载独立修改。
+原生终止事件、普通 child 消息、timeout、异常和 UNKNOWN 是不同证据；消息和 timeout 不证明完成，异常不伪造终止证据。不要用 sleep、patrol、进度轮询器或每个 child 的定时循环反复观察未变化状态。超时后先重新判断必要直接依赖与可继续的独立工作；wake-only 的 V2 `wait_agent` 只需一次可用的精确原生状态检查（如 `list_agents`），已经证明完成无需二次确认。Hook 保留调用者等待参数，不自动延长或接管 timeout。不同 Task ID 可独立并行；同一 Task ID 中已绑定 child 可并行，但一次只保留一个待关联预约。Controller 按工作依赖决定并行，同一工作树内的重叠写入需协调，独立 worktree 可承载独立修改。
 
-Hook 失败在 stderr 输出有界 JSON，区分 receive、严格 decode、JSON syntax/shape、dispatch、maintenance-contract 与 runtime-identity 的真实边界。诊断不含 payload 或异常内容，不证明更深根因，也不改变拒绝/身份检查。Hook 文档只接受一个起始 UTF-8 BOM 的边界保持不变。Review READY 不替代最终产品验收。
+Hook 失败在 stderr 输出有界 JSON，区分 receive、严格 decode、JSON syntax/shape、dispatch、maintenance-contract 与 runtime-identity 的真实边界。诊断不含 payload 或异常内容，不证明更深根因，也不改变拒绝/身份检查。Hook 文档只接受一个起始 UTF-8 BOM 的边界保持不变。Reviewer `READY` 描述选定范围内的只读挑战；Controller 将其与原目标、标准和其他证据结合，决定产品是否完成。
 
 Controller 提供决策完备且经过选择的交接；实现方法由执行角色决定。普通 Implementer 负责稳定方向下的工作和确定性收敛。面对相互耦合的不变量时，Focused Implementer 负责完整的推理、实现、运行时反馈和修订循环；当聚焦证据支持核心语义，且剩余任务不会改变决策依据时，它返回 FINAL 并释放该工作上下文。
 新的普通 Implementer 负责剩余回归、构建与同步、确定性缺陷、安装和 Git 收尾。通用执行说明不会延长 Focused Implementer 的语义终点。Reviewer 是新建的独立只读角色；READY 需要支持关键验收的证据，不能仅因没有发现阻塞项就判为 READY。Core 和 lifecycle 的观察结果不决定验收。
-V1 wait_agent 的 status map 使用已生成 agent 的精确 ID，V2 list_agents 使用 canonical task name；不要求切换 V2 或重复确认已证明的完成。受支持的 Completed 证据为精确的单键 `{"completed": <string or null>}`；null 表示执行终止但不提供结果文字，也不决定语义验收。其他值类型和不支持的形状保持 UNKNOWN。原生执行终止、产品验收和任务取消/放弃是分开的事实；Controller 可通过有界路径结束管理任务，即使某个 child 的终止仍为 UNKNOWN。迟到结果不能重新进入已终止的任务；已知共享文件写入风险仍需处理。SubagentStop 是可选观察，缺失或延迟不推翻其他已支持证据。矛盾或身份冲突只限制依赖该证据的操作；它们不会把无关普通工作一并拒绝。Host 原生身份字段在 SubagentStart 与 PreToolUse 之间的真实稳定性仍为 UNKNOWN；合成测试不证明 Host 协议。Controller 整合 closing handoff 的验收结果并记录机械关闭；未经验证的兼容性保持 UNKNOWN。
+V1 wait_agent 的 status map 使用已生成 agent 的精确 ID，V2 list_agents 使用 canonical task name；不要求切换 V2 或重复确认已证明的完成。受支持的 Completed 证据为精确的单键 `{"completed": <string or null>}`；null 表示执行终止但不提供结果文字，也不决定语义验收。其他值类型和不支持的形状保持 UNKNOWN。原生执行终止、产品完成决策和任务取消/放弃是分开的事实；Controller 结合原始目标、验收标准和所有可用证据，决定修复、补充验证或记录机械关闭。迟到结果不能重新进入已终止的任务；已知共享文件写入风险仍需处理。SubagentStop 是可选观察，缺失或延迟不推翻其他已支持证据。矛盾或身份冲突只限制依赖该证据的操作；它们不会把无关普通工作一并拒绝。Host 原生身份字段在 SubagentStart 与 PreToolUse 之间的真实稳定性仍为 UNKNOWN；合成测试不证明 Host 协议。
 
 `thaliris_codex.roles` 是原生 profile 生成的规范来源。精确历史哈希用于安全升级；用户编辑过的字节和项目内 profile shadow 继续按 fail-closed 方式处理。[角色 profile 文档](docs/thaliris-role-packs.md)由源文件生成。源码变更不能证明运行中的 Host 已激活这些内容；父级任务处于 ACTIVE 时也不会在此安装。下方 ABCD 结果仍是历史证据；本次提示词规范化没有基准测试结论。
 
@@ -348,15 +350,17 @@ D 的成本约为 C 的 **9.1 倍**，时间约为 **1.57 倍**，但它是唯�
 
 ### 接下来要验证的两个成本假设
 
+以下 E/F 都是对已观察 D 路由的成本假设，不是当前任务的强制角色顺序；F 中 Reviewer 的语义验收职责只属于该反事实估算。当前产品完成由 Controller 根据原目标、验收标准和可用证据决定，Reviewer 仍是可选的独立挑战。
+
 **E — 全 Sol 反事实。** 保持 D 的任务、拓扑、角色顺序和 lifecycle 不变，仅把 Luna Investigator/Implementer 节点替换成 Sol。输入/上下文重放量近似不变；仅按 A/B 输出效率比（79.8k / 30.3k ≈ 2.64×）调整输出。这预测全 Sol 的 D 型运行成本约为 **$3.67**，相对于**观测到的 $2.475**，若保持 D 级质量，异构执行约可节省 **32.6%**。不做输出效率调整时，简单的同 token 估算约为 **$3.94**。这仍是反事实，尚未运行。
 
-**F — 语义收敛切换。** 保留 D 的架构和高能力语义节点，但在 Sol Focused Implementer 建立核心实现和硬不变量后结束其执行。广泛测试、构建/lint 收尾、确定性的兼容问题和小修复交给新的 Luna Implementer；新的 Sol Reviewer 仍负责语义验收。基于 trace 的估算移除约 **1.87M Sol 输入 / 15.3k Sol 输出**，增加约 **0.7–1.3M Luna 输入 / 8–16k 输出**，预测成本为 **~$2.06–2.07**，比 D 低约 **16–17%**，目标是同样的 8.3 水平。实际测试前，质量仍明确未知。
+**F — 语义收敛切换（反事实，未运行）。** 保留 D 的架构和高能力语义节点，但在 Sol Focused Implementer 建立核心实现和硬不变量后结束其执行。广泛测试、构建/lint 收尾、确定性的兼容问题和小修复交给新的 Luna Implementer；该假设路线把新的 Sol Reviewer 用作独立语义挑战，但这不意味着当前任务必须安排 Reviewer 或单独的 closing 角色。基于 trace 的估算移除约 **1.87M Sol 输入 / 15.3k Sol 输出**，增加约 **0.7–1.3M Luna 输入 / 8–16k 输出**，预测成本为 **~$2.06–2.07**，比 D 低约 **16–17%**，目标是同样的 8.3 水平。实际测试前，质量仍明确未知。
 
 ### 结语
 
 当前基准支持一个比“多 Agent 更好”更窄的结论：
 
-> **弱模型编排本身没有改善总质量。把更强智能有选择地放在语义实现、评审和收尾环节，确实带来了提升。**
+> **弱模型编排本身没有改善总质量；在历史 D 样本中，把更强智能有选择地放在语义实现和独立挑战环节，确实带来了提升。这是基准观察，不规定新任务必须设置 Reviewer 或单独的 closing 角色。**
 
 目前已经修正为了缩短昂贵上下文的生命周期。高能力模型应继续用于执行期间确实需要其推理的工作；语义方案收敛后，可以把确定性的收尾交给成本更低的新工作节点，避免反复重放庞大的 Sol 上下文。
 但我没钱继续跑基准测试了

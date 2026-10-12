@@ -547,6 +547,24 @@ for _profile_set in _ROLE_WAIT_SCOPE_PREDECESSOR_PROFILE_HASHES.values():
         _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash})
 _KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'07b0565e3790ae2768c557a50ce6e48feb6a366ec8eae3e4b0768a44129d22a1'})
 
+# Exact filename-bound profile outputs from immutable 257df596fd2047b4ca819992fe1a388ed23b4ef9,
+# captured before the product-completion and durable-memory prompt update. The
+# tracked profiles were matched byte-for-byte against that revision's renderer.
+_PRE_ACCEPTANCE_UPDATE_PROFILE_HASHES = {
+    "thaliris-curator.toml": "7696a236eb4eefd700b34e763c24c7f22d361c280474de67b0c5182538a2a15f",
+    "thaliris-implementer.toml": "436b5cb82c8465da6618df5f9a2908e93c8df7fcab651dc0cc32ab55cb97444d",
+    "thaliris-focused-implementer.toml": "93a6409f8984de5e2c93b0697755091d18c84045252d1a9f37319268997c4fa0",
+    "thaliris-focused-implementer-astra-medium.toml": "56d02ad34cc72b59de81cd064f303118d8d7bc6853ae4386adc868228542316d",
+    "thaliris-focused-implementer-xhigh.toml": "3579140a6eee9d75214d95b7249debaf3ae2ed7cf8b85fbefaf3411c02de4fa9",
+    "thaliris-verifier.toml": "95afcaf92a19d3ac46584b14a75ca86f6de57a26baf37bc982feab11678b3c2d",
+    "thaliris-reviewer.toml": "b59ed89b37aabb83c0cd395432978a8c1cc252224ed26c22dd0a8c4f9a4dc0b2",
+}
+for _profile_name, _profile_hash in _PRE_ACCEPTANCE_UPDATE_PROFILE_HASHES.items():
+    _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = (
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset())
+        | frozenset({_profile_hash})
+    )
+
 
 def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
@@ -1843,9 +1861,13 @@ def task_state_schema_error(root: Path, error: core.TaskStateSchemaIncompatible)
     """Add lifecycle recoverability without exposing the archived task ID."""
     result = dict(error.diagnostic)
     if result.get("recoverable") is True:
-        result["recovery_action"] = (
-            f"{result['recovery_action']} --controller-bridge-sha256 <current-bridge-sha256>"
-        )
+        action = str(result.get("recovery_action", ""))
+        if action.startswith("thaliris "):
+            action = "thaliris --task-id <task-id> " + action[len("thaliris "):]
+            if result.get("abandon_active_confirmation_required") is True:
+                action += " --abandon-active"
+        if action:
+            result["recovery_action"] = f"{action} --controller-bridge-sha256 <current-bridge-sha256>"
     if result.get("recoverable") is True and error.task_id is not None:
         blocker = lifecycle.task_state_recovery_blocker(core._repo_root(root), error.task_id)
         if blocker is not None:
@@ -1973,7 +1995,7 @@ def task_recover_state(
                 **diagnostic,
                 "ok": False,
                 "status": "STATE_ABANDON_CONFIRMATION_REQUIRED",
-                "recovery_action": f"thaliris task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 <current-bridge-sha256>",
+                "recovery_action": f"thaliris --task-id <task-id> task-recover-state --expected-sha256 {digest} --abandon-active --controller-bridge-sha256 <current-bridge-sha256>",
             }
         task_id = raw.get("task_id")
         blocker = lifecycle.task_state_recovery_blocker(root, task_id)
@@ -2037,7 +2059,7 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
     task_id = str(state["task_id"])
     override = anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}
     if not lifecycle.qualifying_child_completed(core._repo_root(root), allow_no_children=override):
-        raise ValueError("task-close requires authorized handoff/identity bindings, exact identity-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents (V2) or wait_agent status map (V1) to observe completion. SubagentStop is optional; final product acceptance through the explicit closing handoff remains separate")
+        raise ValueError("task-close requires authorized handoff/identity bindings, exact identity-bound native Completed for the last handoff, and no pending, active, unbound or conflicting managed work; use list_agents (V2) or wait_agent status map (V1) to observe completion. SubagentStop is optional; these lifecycle checks do not establish product acceptance, which the Controller decides from the original objective, criteria and available evidence")
     result = core.task_close(root, base_revision, expected_task_id=task_id)
     task_authority.checkpoint(core._repo_root(root))
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(core._repo_root(root), task_id), task_id)

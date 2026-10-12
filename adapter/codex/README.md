@@ -59,10 +59,27 @@ observation can establish execution termination; `SubagentStop` remains optional
 wake signals or child prose alone cannot prove termination. Missing or malformed evidence
 keeps status `UNKNOWN`. The Controller can explicitly cancel or abandon the associated task
 through its bounded path without claiming child `Completed`; preserve possible shared-write
-conflicts and fence late results. Final product acceptance is assigned through a separate
-explicit closing handoff to a suitable existing executor, which returns its conclusion,
-criterion-linked evidence and UNKNOWN. Controller integrates that result and records
-mechanical closure; local tests and Reviewer challenge/READY cannot replace acceptance.
+conflicts and fence late results.
+
+Core `task-close` checks that the selected task is active and that its expected revision
+and optional Task ID match, then records `DONE`; it does not inspect the candidate's product
+behavior. The Codex adapter can also enforce identity-bound native `Completed` and the absence
+of unresolved managed work when its lifecycle rules require those facts. That is execution
+qualification, not product acceptance. The Controller integrates the original objective,
+acceptance criteria and available evidence to decide whether product work is complete, and
+whether to route repair, request useful extra verification or record mechanical closure. A
+Reviewer is an optional independent read-only challenge. No closing handoff or new Agent is
+required. Test `PASS`, Reviewer `READY`, native `Completed` and mechanical `DONE` remain distinct.
+
+Core `task-promote` stores only Controller-selected Markdown records under `.agent-memory/`.
+Records require `id`, `path` and `text`; `title` defaults to the ID and `source_refs` defaults
+to an empty list. They create new non-INDEX Markdown files; Core refuses to overwrite an existing
+durable target. Optional legacy `status` is opaque. Text is limited to 16,384 characters and
+source references to 64. The promotion transaction uses current Task ID and task revision CAS.
+Promotion records cannot target `.milestones/`, though an optional INDEX update can target
+`.milestones/INDEX.md`. INDEX updates are full-content replacements; Core checks the expected
+digest, allowed path and links, while the Controller or selected Curator supplies the semantic
+content.
 
 V1 wait_agent status maps use the exact spawned agent ID; V2 list_agents status
 entries use canonical task names. Both establish execution evidence without
@@ -74,38 +91,38 @@ not unrelated ordinary reads or independent work.
 An unbound spawn can be recovered only from exact
 trusted name-bound native failure or spawn-failure callback, not timeout/not_found.
 
-First continue independent work that should take priority, then decide whether waiting is
-necessary before choosing duration. This policy applies at every authorized parent layer,
-including Implementer/Focused Implementer/Reviewer waiting for an Investigator Scanner;
-each observes only its direct dependencies. Event-driven waiting takes precedence over
-timed polling. A parent waits only for a known unfinished child result
-that remains necessary, with no other higher-priority work; after child FINAL or a decision-changing unknown, that slice ends
-and the Controller does not keep waiting for it. First confirm the actual current Host
-maximum, meaningful-event early return, user interruption and child notifications during
-waiting; unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early
-return and user interruption and no interim dependency decision, default to the supported 60-minute window
-(`timeout_ms=3600000`). This is a maximum window, not a required execution duration;
-native completion wakes the parent early. Historical averages must not force earlier
-wakes. When timed stage checks are necessary or early return is unreliable, recommend
-60 seconds for very short tasks, 10–60 minutes for ordinary tasks by scale, and about
-30 minutes for longer-task stage checks; reliable events without interim decisions still
-favor 60 minutes. Actual tool limits, explicit applicable higher-level limits, user
-interruption, recovery and urgent decisions take precedence; never bypass Host limits.
-Do not substitute `sleep`, add progress pollers or create per-child timed polling loops.
-Wait for native events that can change the current decision across parallel children.
-The Hook preserves caller wait arguments rather than promoting them to a capacity limit.
-Ordinary child messages and timeouts do not prove completion. A timeout creates
-no new evidence: reassess necessary direct dependencies and available independent work
-before further waiting, avoiding infinite useless waits and status snapshots for unchanged
-state. Exceptions do not fabricate terminal evidence; unproved status stays UNKNOWN.
-Neither fixed 60 seconds nor fixed 60 minutes applies universally. Executing children
-continue work; report only completion, key blockers, major discoveries or necessary
-upper-level decisions, never elapsed-time progress or heartbeat messages. A wake-only
-V2 `wait_agent` result is not completion evidence; use one `list_agents` snapshot after a
-meaningful wake. Executors observe/wait on their own tests, processes and CI, reporting
-substantive changes or terminal evidence; Controller does not duplicate those observations.
-Tests, builds, CI and external processes use their corresponding tools' actual wait
-capabilities, not wait_agent parameters. Waiting windows are not execution deadlines.
+First continue independent work that should take priority, then decide whether a necessary
+dependency needs waiting. This applies at every authorized parent layer, including an
+Implementer, Focused Implementer or Reviewer waiting for an Investigator Scanner; each
+observes only direct dependencies. Executors own observation of their tests, processes
+and CI, using the corresponding tools' actual waiting capabilities. A parent waits only
+for an unfinished necessary direct child when no higher-priority work remains. After a
+complete handoff, children advance without parent patrol and report completion, key
+blockers, decision-changing discoveries or necessary upper-level decisions. Child FINAL
+or a decision-changing unknown ends that slice.
+
+Event-driven waiting takes precedence. First confirm the current Host's actual tool
+maximum, meaningful-event early return, user interruption and child notifications;
+unconfirmed capabilities remain UNKNOWN. When event early return and user interruption
+are confirmed and there is no interim decision, normally use the supported 60-minute
+window (`timeout_ms=3600000`). This is a maximum window; meaningful events can wake the
+parent early. Shorten it only for a necessary brief stage check, such as 60 seconds for a
+very short task, 10–60 minutes for an ordinary task, or about 30 minutes for a long-task
+stage check. These are contextual recommendations for necessary stage checks or unreliable
+early return, not hard limits. Follow actual tool limits and explicit applicable higher-
+level limits; do not change or bypass Host behavior to extend them.
+
+Native terminal events, ordinary child messages, timeouts, exceptions and UNKNOWN are
+distinct evidence. Messages and timeouts do not prove completion; exceptions do not
+fabricate terminal evidence. Do not substitute `sleep`, patrol, progress pollers or
+per-child timed loops for meaningful events. After timeout, reassess necessary direct
+dependencies and available independent work. A wake-only V2 `wait_agent` result is not
+completion evidence; use one exact native status check after a meaningful wake. Proved
+completion needs no second confirmation. The Hook preserves caller wait arguments and
+does not automatically extend or take over a timeout. Tests, builds, CI and external
+processes use their corresponding tools' actual waiting capabilities, not `wait_agent`
+parameters; the Controller does not duplicate those observations. Waiting windows are
+not execution deadlines.
 
 Production Hook/maintenance diagnostics emit only allowlisted failed boundary labels
 on stderr: receive, decode, JSON syntax/shape, dispatch, maintenance-contract and
@@ -184,6 +201,38 @@ Ordinary closure owns broader regression/build/docs/generated sync, installation
 Git after Focused semantic convergence. Installation/smoke exposing a semantic defect
 requires a new Controller decision about reopening the core candidate. This source
 change has no live Host activation or compression benchmark claim.
+
+## Host-wide model-catalog maintenance
+
+The native model catalog is Host-global configuration: `model_catalog_json` points to a
+managed catalog in `CODEX_HOME`, shared across models and projects. It is separate from
+generated Thaliris role profiles. The explicit `codex-install` maintenance contract
+covers installation, upgrades and intentional low-frequency refresh; online data is the
+default, while bundled data requires explicit selection. Do not treat a managed copy or
+a normal CLI self-export as a newly fetched upstream catalog. An existing online catalog
+is not silently downgraded to bundled data.
+
+The `native_model_catalog` receipt binds the managed path, prior-absence state, exact
+managed fragment, catalog hash and source evidence. Management deletes only the exact
+Thaliris-owned line from each model's `model_messages.instructions_template`; it inserts
+no replacement and preserves all neighboring content, other model metadata and future
+models' original instructions. Missing, repeated or embedded target text returns the
+declared compatibility status and leaves the prior catalog intact. A source refresh that
+produces identical catalog output writes no catalog, root configuration or receipt
+bytes. Source failure preserves the prior catalog, and customized configuration or
+catalog bytes are retained for receipt-backed recovery and uninstall. Changes use the
+existing version journal rather than a new lifecycle.
+
+Catalog provenance, version admission, receipt and recovery details, and the distinction
+between disk writes, the running process, and sessions already in progress are recorded
+in the [model-catalog maintenance report](../../docs/model-catalog-maintenance-report.md).
+The current source gate accepts only `codex-cli 0.162.0-alpha.17.2`; its opt-in runtime
+capture reached a local mock with the installed CLI and observed catalog/request behavior.
+That capture does not prove a fresh online fetch or activation in a user's live process,
+and it records two separate native fork/resume delivery limitations.
+`HostIntegration=ready` and matching disk bytes do not prove catalog compatibility or
+effective session activation; those observations remain independent and may be
+`UNKNOWN`. This source change does not perform live Host maintenance.
 
 The [native execution contract](../../docs/codex-native-execution-design.md) preserves
 feature defaults. V2 event waiting signals mailbox activity; list supplies exact

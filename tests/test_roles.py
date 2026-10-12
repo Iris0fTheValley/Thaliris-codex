@@ -748,6 +748,28 @@ def _historical_profile(revision: str, name: str) -> bytes:
     return namespace["_agent_profile"](name.removesuffix(".toml"), role, model, effort)
 
 
+def test_controller_acceptance_prompt_update_keeps_exact_predecessor_profile_ownership() -> None:
+    base = Path(__file__).parent / "fixtures/role-acceptance-predecessor"
+    proof = json.loads((base / "provenance.json").read_text(encoding="utf-8-sig"))
+    assert proof["revision"] == "257df596fd2047b4ca819992fe1a388ed23b4ef9"
+    assert proof["profiles"] == codex_adapter._PRE_ACCEPTANCE_UPDATE_PROFILE_HASHES
+    current_profiles = roles.agent_profiles()
+
+    for name, digest in proof["profiles"].items():
+        predecessor = (base / name).read_bytes()
+        assert hashlib.sha256(predecessor).hexdigest() == digest
+        assert digest in codex_adapter._KNOWN_GENERATED_AGENT_PROFILE_HASHES[name]
+        assert codex_adapter._agent_profile_state(predecessor, name) == "legacy"
+        assert codex_adapter._agent_profile_state(predecessor + b"\n# user edit\n", name) == "user"
+        other_name = next(candidate for candidate in proof["profiles"] if candidate != name)
+        assert codex_adapter._agent_profile_state(predecessor, other_name) == "user"
+
+        model, effort, role = current_profiles[name]
+        current = codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort)
+        assert hashlib.sha256(current).hexdigest() not in proof["profiles"].values()
+        assert codex_adapter._agent_profile_state(current, name) == "current"
+
+
 @pytest.mark.parametrize("revision,hashes", [
     ("28e4297d2e489a8f893cb75aec7291cbb3518dcb", codex_adapter._HISTORICAL_28E4297_PROFILE_HASHES),
     ("69d9a33", codex_adapter._HISTORICAL_69D9A33_PROFILE_HASHES),

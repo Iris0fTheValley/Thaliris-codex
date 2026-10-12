@@ -122,8 +122,11 @@ def test_identity_and_mode_distinctions_reach_normal_controller_context():
 
 def test_waiting_guidance_uses_native_events_and_observation_ownership():
     waiting = normalized(controller_instructions.render(section="completion"))
+    handoff = normalized(controller_instructions.render(section="handoff"))
     concepts(waiting,
              ("unfinished direct child whose result is necessary", "one observation owner"),
+             ("monitoring", "rereading", "repeated searching", "patrolling", "same delegated workstream", "not independent work"),
+             ("wait", "decision-changing native event", "instead of continuing that patrol"),
              ("tests, builds, ci and external processes", "their direct executor", "actual waiting capability"),
              ("controller waits", "without rechecking", "executor"),
              ("do not substitute sleep", "status-only model wakeups"),
@@ -131,14 +134,20 @@ def test_waiting_guidance_uses_native_events_and_observation_ownership():
              ("wake-only v2 wait_agent does not prove completion", "check list_agents"),
              ("first confirm", "current host", "child notifications", "actual tool maximum"),
              ("confirmed meaningful-event early return", "user interruption", "no interim decision",
-              "default", "60-minute", "timeout_ms=3600000"),
-             ("windows are not execution deadlines", "completion can wake the parent early"),
+              "default", "60-minute", "timeout_ms=3600000", "completion can wake the parent early"),
+             ("windows are not execution deadlines"),
              ("historical averages", "must not force early wakes"),
              ("60 seconds for very short tasks", "10–60 minutes", "about 30 minutes"),
-             ("actual tool limits", "higher-level limits", "take precedence", "unknown"),
+             ("actual tool limits", "higher-level limits", "exceptions", "take precedence", "unknown"),
              ("ordinary messages", "timeout", "messages and timeouts do not prove completion"),
              ("parallel direct dependencies", "without per-child polling loops"),
              ("neither fixed 60 seconds nor fixed 60 minutes fits every task"))
+    concepts(handoff,
+             ("focused direct read", "spot-check", "one decision-critical fact"),
+             ("broad or continuing searches", "repeated diff review", "ordinary test runs", "routine local repair",
+              "investigator", "executor"),
+             ("after a complete handoff", "independent work", "can change the next decision", "monitoring", "patrol",
+              "delay waiting"))
 
 
 def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
@@ -227,6 +236,8 @@ def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
 def test_reviewer_critical_evidence_and_correction_boundary():
     reviewer = prompt("reviewer")
     concepts(reviewer, ("converged candidate", "original acceptance", "hard invariants", "cross-boundary"),
+             ("reviewer is optional", "ready reports the selected review", "controller integrates",
+              "objective", "criteria", "available evidence", "deciding product completion"),
              ("non-writing",),
              ("counterevidence", "finding"), ("inadequate evidence", "unverified", "insufficient"),
              ("ready only", "evidence", "critical closure"),
@@ -445,21 +456,28 @@ def test_role_model_predecessor_is_independent_and_filename_bound():
         assert state(edited) == "user"
 
 
-def test_explicit_closing_handoff_and_model_routing_reach_resident_context():
+def test_controller_owned_product_completion_and_model_routing_reach_resident_context():
     controller = controller_instructions.render()
-    concepts(controller, ("separate explicit closing handoff", "suitable existing executor"),
-             ("original user objective", "acceptance criteria", "exact candidate"),
-             ("conclusion", "criterion-linked evidence", "unknown", "mechanical task closure"),
-             ("reviewer", "challenge", "cannot replace", "core task-close", "mechanical record"),
+    concepts(controller, ("controller integrates", "original user objective", "acceptance criteria", "available evidence",
+                          "decide whether the candidate meets", "requested product behavior"),
+             ("executors implement and verify", "criterion-linked evidence", "unknown", "controller routes repairs"),
+             ("useful additional verification", "optional", "independent", "read-only", "no separate closing handoff",
+              "no new child", "required final stage"),
+             ("reviewer ready", "native completed", "mechanical done", "distinct", "none alone determines product completion",
+              "core task-close", "mechanical record"),
+             ("verifier", "optional compatibility check", "no verifier", "no reviewer", "required final stage"),
              ("investigator", "implementer", "curator", "reviewer", "focused implementer", "reasoning specialist",
               "explicit", "model", "reasoning_effort", "root model", "missing pair", "before making a reservation"),
              ("profiles remain model-free", "configured role model after spawn arguments", "task's explicit execution constraint",
               "necessary verification exception", "verifier", "controller's own model remains unchanged", "permissions"),
              ("astra", "current-task user authorization", "luna-only", "frozen constraint"))
-    concepts(controller, ("does not require a spawn in every mode", "single-agent", "controller-direct"),
-             ("already authorized available executor", "human acceptance", "unverified", "closing decision"),
-             ("do not create a child", "change mode automatically"))
-    require_local_prohibition(controller, action="perform", target="acceptance")
+    concepts(controller, ("same in delegated", "controller-direct", "single-agent"),
+             ("test pass", "reviewer ready", "native completed", "mechanical done", "distinct"))
+    concepts(roles._instructions("controller"),
+             ("focused direct read", "spot-check", "decision-critical fact"),
+             ("verifier", "optional compatibility check", "no verifier", "no reviewer", "required final stage"))
+    assert "Controller does not perform final acceptance itself" not in controller
+    assert "final product acceptance uses a separate explicit closing handoff" not in controller
     assert "200 lines" not in controller and "4096" not in controller
     for role in ("investigator", "implementer", "curator"):
         assert f"| {role.title()} |" in controller
@@ -477,8 +495,31 @@ def test_explicit_closing_handoff_and_model_routing_reach_resident_context():
         concepts(prompt(role), ("execution constraint", "verified necessary exception", "both fields explicitly",
                                 "frozen luna-only", "fixed role profile", "forbids per-spawn overrides"))
     for role in ("implementer", "focused-implementer"):
-        concepts(prompt(role), ("explicit closing handoff", "final product acceptance", "original objective"),
-                 ("conclusion", "criterion-linked evidence", "unknown", "controller integrates", "mechanical closure"))
+        concepts(prompt(role), ("report the candidate", "criterion-linked evidence", "unknown for unverified behavior"),
+                 ("controller integrates", "original objective", "acceptance criteria", "available evidence",
+                  "determine product completion"),
+                 ("no required separate closing handoff", "no new child"),
+                 ("test pass", "reviewer ready", "native completed", "mechanical done", "distinct"))
+        assert "final product acceptance through a separate explicit closing handoff" not in prompt(role)
+
+
+def test_controller_memory_contract_matches_bounded_core_surface():
+    controller = controller_instructions.render()
+    curator = prompt("curator")
+    for text in (controller, curator):
+        concepts(text, ("task-promote", "record requires id path and text", "title defaults to the id",
+                        "source_refs defaults to an empty list"),
+                 ("legacy status", "opaque", "no confirmation or lifecycle meaning"),
+                 ("16,384 text characters", "64 source references", "task revision"),
+                 ("promotion creates a new non-index markdown file", "refuses to overwrite an existing durable target"),
+                 ("promotion records cannot target .milestones", "optional", "complete index replacement",
+                  ".milestones/index.md"),
+                 ("expected digest", "core checks", "paths", "links", "does not generate or choose semantic entries"))
+    concepts(controller, ("before task-start", ".agent-memory/index.md", ".milestones/index.md",
+                          "create minimal thin navigation if absent"),
+             ("bounded get", "up to eight paths"))
+    assert "confirmed status" not in normalized(controller)
+    assert "type-based status" not in normalized(controller)
 
 
 def test_resident_waiting_observation_and_causal_contract_rejects_negation_reversal():

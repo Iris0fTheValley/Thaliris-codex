@@ -10,7 +10,8 @@ import pytest
 @pytest.fixture
 def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Supply a fake exact executable identity for Host installer unit tests."""
-    from thaliris_codex import codex_adapter, codex_app_server, lifecycle, mode_hint_config, wait_guidance_config
+    from thaliris_codex import codex_adapter, codex_app_server, lifecycle, mode_hint_config, wait_guidance_config, model_catalog_config
+    monkeypatch.setattr(model_catalog_config, "export_upstream", lambda _home, **_kwargs: (_ for _ in ()).throw(ValueError("VERSION_SUPPORT_UNKNOWN")))
     # No production CLI capability probe in tests using this fake runtime.
     # Model the source-verified CLI; unknown-version tests override this fact.
     monkeypatch.setattr(mode_hint_config, "capability", lambda: "SUPPORTED")

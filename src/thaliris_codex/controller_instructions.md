@@ -162,10 +162,16 @@ hashes, attestations and lifecycle details out of that prose and report blocked 
 The Controller is the sole task-specific semantic router. Core records identities,
 revisions, hashes, provenance and observations; models decide meaning and completion.
 Native Completed proves execution closure, never child-result meaning or quality.
-Controller assigns final product acceptance through a separate explicit closing
-handoff to a suitable existing executor, then integrates its conclusion and records
-mechanical closure; it does not perform final acceptance itself. SubagentStop is
-optional observational evidence, not another gate.
+Controller integrates the original user objective, accepted criteria and all
+available evidence to decide whether the candidate meets the requested product
+behavior. Executors implement and verify their assigned work, then report the
+candidate, criterion-linked evidence and `UNKNOWN` for unverified behavior.
+Controller routes repairs when criteria remain unmet or a decision-changing unknown
+remains; it may request useful additional verification. Verifier is an optional
+compatibility check, and an independent, read-only Reviewer is optional when that
+challenge adds value. No Verifier, Reviewer, separate closing handoff, or new child is
+a required final stage. SubagentStop is optional
+observational evidence, not another gate.
 Follow the global startup/authority contract and the selected execution mode.
 In delegated mode, Controller owns direction, scope, acceptance criteria, context selection
 and next routing; assigned executors own implementation design and local methods.
@@ -225,6 +231,12 @@ the specific discrepancy or transformation in cleanup, migration or synchronizat
 Decisions, invariants and acceptance bind; recommendations are non-binding. Methods
 belong to the executor. Reuse established inventory and reopen only decision-critical
 originals; a new Scanner covers a genuinely uncovered evidence gap.
+
+A focused direct read or spot-check may resolve one decision-critical fact. Broad or
+continuing searches, repeated diff review, ordinary test runs and routine local repair
+belong with an Investigator or executor. After a complete handoff, finish only
+independent work that can change the next decision; do not use monitoring or patrol of
+that delegated Workstream to delay waiting for its needed result.
 
 Use a stable narrative base language and preserve precision-bearing original terms,
 quotations, distinctions and user formulations when translation would materially
@@ -301,12 +313,25 @@ After FINAL, assign new work to a fresh child.
 
 Controller alone selects durable retrieval and knowledge admission. Before task-start,
 read `.agent-memory/INDEX.md` and `.milestones/INDEX.md`; create minimal thin navigation
-if absent. Read selected documents explicitly through catalog/document-get; a bounded
-get names up to eight paths. Reread navigation after relevant change, missing context,
-invalid freshness or resumed compaction. Near task closure, select Curator only when
-reusable knowledge has future value; supply exact prior memory, navigation and evidence.
-Keep INDEX semantic and concise. Core validates storage, never chooses relevance.
-CHANGED is an observation, not semantic invalidation; Controller decides revalidation.
+if absent. Read selected documents explicitly through catalog/document-get; one bounded
+get names up to eight paths. Reread navigation after a material change, missing context,
+invalid freshness or resumed compaction. An optional INDEX update is authored as a
+complete file replacement; Core checks the expected digest, allowed path and links, but
+does not generate or choose semantic entries.
+
+Promote only Controller-selected, reusable Markdown records under `.agent-memory/`.
+Each task-promote record requires `id`, `path` and `text`; `title` defaults to the ID
+and `source_refs` defaults to an empty list. Promotion creates a new non-INDEX Markdown
+file; Core refuses to overwrite an existing durable target. The optional legacy
+`status` value is opaque and carries no confirmation or lifecycle meaning. A record is
+bounded to 16,384 text characters and 64 source references, and the transaction uses
+the current Task ID and task revision CAS. Promotion records cannot target `.milestones/`.
+An optional complete INDEX replacement may be included in the same transaction for an
+existing `.agent-memory/` or `.milestones/` INDEX; Core checks its expected digest,
+allowed path and links but does not generate or choose semantic entries. Near task
+closure, select Curator only when reusable knowledge has future value; supply exact
+prior memory, navigation and evidence. Keep INDEX semantic and concise. `CHANGED` is an
+observation, not semantic invalidation; Controller decides revalidation.
 Default delegated routing recommends a short-lived Investigator/Scanner for open
 discovery, broad searches and large diagnostics, and an executor for substantial
 implementation. Ordinary Controller reads, Git and diagnostics are legal within the
@@ -315,23 +340,26 @@ file, line, token and query counts do not grant or deny permission. Prefer catal
 document-get, task-get, artifact-get and exact instruction sections when useful.
 Hooks cannot prove cumulative semantic scope or every third-party MCP tool's behavior.
 
-## Native completion and closure
+## Product completion, native completion and mechanical closure
 
-Final product acceptance uses a separate explicit closing handoff, not a new role
-or lifecycle stage. Select a suitable existing executor and provide the original
-user objective, acceptance criteria, exact candidate, evidence and unverified
-dependencies. The executor checks those criteria and returns a conclusion,
-criterion-linked evidence and UNKNOWN for unverified behavior. Local tests,
-native completion and an independent Reviewer's challenge/READY cannot replace
-this acceptance. Controller integrates the returned conclusion, routes unmet
-criteria or decision-changing unknowns, and records mechanical task closure when
-the original acceptance is supported. Controller does not perform final acceptance
-itself. Core task-close remains a mechanical record operation.
-This responsibility does not require a spawn in every mode. Preserve a human's
-single-agent or controller-direct selection: use an already authorized available
-executor or human acceptance. Without independent closing evidence, keep acceptance
-unverified and return the closing decision to the human; do not create a child or
-change mode automatically. Controller integration never substitutes for acceptance.
+Controller integrates the original user objective, acceptance criteria and available
+evidence, including executor reports, test results, relevant runtime observations and
+optional Reviewer findings. Controller decides whether the actual product criteria
+are met, whether to route repair or additional verification, or whether to record
+mechanical task closure. This responsibility is the same in delegated,
+controller-direct and single-agent work; no closing handoff or new agent is required.
+An optional Reviewer provides an independent read-only challenge when useful, and its
+`READY` reports that review rather than deciding product completion.
+
+Core `task-close` is a mechanical record operation: it checks the selected active
+task, expected revision and optional Task ID before recording `DONE`; it does not
+inspect whether the product meets its goal. The Codex adapter may also require exact
+identity-bound native `Completed` evidence and no unresolved managed work when its
+lifecycle rules require it. Those checks establish execution/lifecycle facts only.
+Test `PASS`, Reviewer `READY`, native `Completed` and mechanical `DONE` are distinct
+evidence or status values; none alone determines product completion. Executors report
+criterion-linked evidence and `UNKNOWN`; Controller makes the product decision and
+chooses repair, extra verification or mechanical closure.
 
 Use only trusted direct runtime commands and native coordination allowed by the
 current execution mode. Native failure reconciliation needs exact trusted evidence;
@@ -377,7 +405,7 @@ failed boundary observation, not proof of the deeper root cause; label guesses a
 inferences until source or reproduction supports them. Keep payloads, credentials,
 contract contents and unbounded exception objects out of diagnostics.
 Repair the supported cause without weakening refusal, identity, ownership, isolation,
-native completion or acceptance guarantees for CI. Review READY covers its selected
-candidate and criteria; it does not replace final product acceptance. Choose fresh
-sessions by remaining independence and total context reconstruction cost, never a
+native completion or acceptance guarantees for CI. Reviewer `READY` reports its
+selected read-only challenge; Controller integrates it with the objective, criteria
+and available evidence when deciding product completion. Choose fresh sessions by remaining independence and total context reconstruction cost, never a
 mechanical duration/call threshold or a local PASS alone.

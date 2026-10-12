@@ -1,8 +1,22 @@
 # Controller 等待策略收尾报告
 
-本次独立收尾依据用户原始等待要求及随后所有授权委派层的补充要求、最终合并候选源码、执行员测试证据和当前任务原生工具观察完成验收。结论：在源码、生成指令及测试覆盖范围内通过；不等于真实已安装 Host 已加载新指导，也不证明所有 Codex 版本都具备同样唤醒行为。
+## 2026-10-12 恢复说明
 
-## 修改与优先级
+本节记录本次恢复；下文是此前候选的历史报告，其测试及 CI 结论不代表本次候选。当前指导保持分层事件等待：先处理独立工作；只等待仍未完成且结果必要的直接依赖；先确认当前 Host 的实际上限、实质事件提前返回、用户中断和 child 通知，未经确认保持 `UNKNOWN`。这些能力已确认且没有中途决策时，默认使用工具支持的 60 分钟窗口（`timeout_ms=3600000`），原生实质事件提前唤醒就直接使用结果。只有确需阶段检查或提前返回不可靠时才缩短窗口：极短任务约 60 秒，普通任务 10–60 分钟，较长任务阶段检查约 30 分钟。这些是按情境选择的建议，不是硬性上限；60 分钟是最大等待窗口，不是执行期限，也不因历史平均时长而提前截断。
+
+Controller 继续掌握用户目标、范围、硬不变量和验收依据；完整交接后，受派角色拥有所分配工作的调查或实现方法，并在自己的工作集内持续推进。父层仅观察直接依赖，不重复巡查子代理或替它观察测试、构建、CI 和进程。子代理只回报完成、关键阻碍、会改变决策的新发现或必须由上层作出的决策；其他过程细节留在负责该工作的上下文。普通消息、timeout 和异常都不能代替完成证据；timeout 后先重新评估依赖和独立工作。wake-only 结果只做一次可用的精确原生状态检查，已证明完成无需再确认。
+
+本次恢复仅调整指导文本和对应文档。没有实现 timeout 接管、自动延长、定时 patrol 或 Host 内部等待机制。`wait_agent` 与工作进程行为是否由实际安装的 Host 加载并按此响应，仍需新的运行观察；磁盘和提示词测试不能证明该状态。原报告后续的验证和 CI 只对应此前候选，不覆盖本次恢复。
+
+## 本次候选验证与边界
+
+将 `PYTHONPATH` 指向当前 Adapter 与 Core 的 `src`，`THALIRIS_CORE_SOURCE` 指向当前 Core，并设置 `THALIRIS_RUN_CODEX_RUNTIME_TESTS=1` 后运行 `py -3.11 -m pytest`：1196 passed、9 skipped，退出码 0，耗时 1125.89 秒。Controller 等待指导的生成/README 一致性断言包含在该测试集中。`tools/sync_instruction_sources.py --check --core-routing-root <Core>` 输出 `instruction artifacts: current`；缓存和未缓存差异的 `git diff --check` 均通过。模型目录 runtime capture 的范围与限制见[模型目录维护报告](model-catalog-maintenance-report.md)。
+
+这些检查验证当前工作树与隔离 runtime fixture，不证明真实安装的 Codex Host 已加载新等待指导，也不证明所有 Host 版本的完成事件唤醒行为。本次未安装或维护 live Host；相关 activation 仍为 `UNKNOWN`。
+
+以下各节记录此前长等待窗口候选的独立收尾证据，仅适用于该历史候选。它们的测试、工具观察和 CI 不能替代对本次恢复候选的验证，也不证明真实已安装 Host 已加载任一版新指导。
+
+## 历史候选修改与优先级
 
 - 权威源 `src/thaliris_codex/controller_instructions.md` 和安装器的 `src/thaliris_codex/wait_guidance_config.py::GUIDANCE` 均先要求确认当前 Host 的实际上限、事件提前返回、中断与通知能力。未经确认保持 UNKNOWN。
 - 先继续应当优先处理的独立工作，再判断是否等待；只等待尚未结束且结果必要的直接 child，且没有其他更高优先级工作。每个授权父层只观察自己的直接依赖，包括执行员或 Reviewer 等待 Scanner。
@@ -15,7 +29,7 @@
 
 旧的“工具最大值永不作为默认值”及普遍固定短等待暗示已经从相关 Controller 和执行角色指导及文档移除。`roles.py` 的共享等待指导传递到全部原生 child profiles 和 role packs；`docs/thaliris-controller.md` 按现有同步机制生成；中文与英文 README、`adapter/codex/README.md` 同步相同条件与例外。Hook 仍保留调用者等待参数，未新增调度或自动延长机制。
 
-## 验证证据
+## 历史候选验证证据
 
 执行员在明确使用当前 Adapter/Core 源码导入路径的环境完成 83 项针对性检查：30 项等待配置测试、33 项提示词契约测试、20 项相关生命周期测试；随后新增生成及文档一致性检查通过，合计 84 项。同步检查与 `git diff --check` 通过。收尾复用这些有效结果，另独立核对候选差异、相关等待文字与 ownership 路径，并运行以下两项检查，通过；它们是已有覆盖的复核，不另计为新增独立场景：
 
@@ -35,19 +49,19 @@ python -m pytest -q tests/test_prompt_contract.py::test_controller_wait_policy_r
 - 测试使用真实旧版 GUIDANCE 文案的 ownership receipt，覆盖直接卸载、升级后卸载及用户改动保留；原有可选配置失败保护保持覆盖。receipt 校验和配置写入流程未改动。
 - 最终候选为变更前 `41157f5` 的 default/luna-only 共 22 项角色输出及 role packs 添加精确历史 ownership hash。保留 renderer、Git blob 与 hash witness；错文件名和用户修改仍为 user-owned，避免生成角色指导变化造成升级或卸载误拒绝。
 
-## 当前工具观察与真实 Host 边界
+## 历史候选工具观察与真实 Host 边界
 
 本任务当前工具元数据声明 `collaboration.wait_agent` 支持最大 `3600000` 毫秒、子代理通知和用户输入提前返回。Controller 实际调用该窗口：一次从 18:20:01 UTC 等待到 18:23:12 UTC，约 191 秒后收到普通实现消息且 `timed_out=false`。这证明当前工具能够在长窗口期间因消息提前返回，不能用该消息证明子代理完成。后续实质发现及 FINAL 通知被接收；Controller 用原生精确状态观察到该实现员的一键 completed 结果后直接复用，没有再次确认相同完成。
 
 随后用户补充要求实际中断 Controller 的 `3600000` 毫秒原生等待：工具返回 `Wait interrupted by new input`，`timed_out=false`。这为本任务当前工具的用户输入提前中断提供直接运行观察，不能扩展成其他 Host 版本或真实已安装指导加载的证明。以上观察仍不单独证明每一种原生完成事件都必然在阻塞中的每个 Host 提前唤醒。完成证据处理由上述 fixture 覆盖；当前工具可用能力与真实已安装 Codex Host 加载是两类事实。未修改真实 Host、全局 AGENTS、Core 或 DSH。其他 Host 版本、实际已安装指导加载及其端到端响应仍为 UNKNOWN。[官方子代理文档](https://learn.chatgpt.com/docs/agent-configuration/subagents)提供一般编排说明，不被当作特定 Host 60 分钟上限的证据。
 
-## 安装兼容性与剩余限制
+## 历史候选安装兼容性与剩余限制
 
 新 GUIDANCE 对安装器新写入受管说明生效。现有逻辑在升级时保留有效旧 ownership fragment 及其文本，因而旧已安装等待说明不会仅因升级自动改写成新策略；本次不声称实现这种迁移。历史 receipt 仍按自身规范 fragment 证明 ownership，不与当前模板强制匹配，卸载可恢复原有字节。用户改动不被回收或覆盖。该行为保留此前兼容契约，未增加新的安装状态、维护权限或恢复框架。
 
 本次是指导变更、针对性测试及历史生成角色 ownership hash 补充，未修改等待执行器、生命周期终止规则或 Host 内部实现。没有新增生产安装、升级、卸载写入路径；测试证明旧文案变化不制造 ownership 自锁，但真实 Host 的新指导交付和响应仍需另行授权、运行确认。
 
-## 交付与 CI
+## 历史候选交付与 CI
 
 第一里程碑源码提交 `41157f59ca26657e4b8ef99a09d55cbf6229fded`（`Prefer event-driven long Controller wait windows`）已推送 `main`；收尾以 `git ls-remote origin refs/heads/main` 观察到完全相同的远端 SHA。对应 [CI 38163975689](https://github.com/Iris0fTheValley/Thaliris-codex/actions/runs/38163975689) 由收尾执行员单独使用 `gh run watch --exit-status --interval 600` 观察，退出码 0；终态查询确认精确 headSha 一致，Ubuntu/Windows Python 3.11、3.12、3.13 六项全部 completed/success。这只证明该里程碑，不包含随后用户补充要求对应的新候选。
 

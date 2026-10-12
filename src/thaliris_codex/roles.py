@@ -125,8 +125,12 @@ class RoleDefinition:
 
 
 _WAITING_INSTRUCTIONS = (
-    "First continue independent work that should take priority before waiting. Only call wait_agent "
-    "for an unfinished direct child whose result is necessary, with no other higher-priority work. "
+    "First continue independent work that should take priority before waiting. After dispatch, finish "
+    "genuinely independent work that can change the next decision; monitoring, rereading, repeated "
+    "searching or patrolling the same delegated Workstream is not independent work. When none remains "
+    "and a necessary direct child is unfinished, wait for a decision-changing native event instead of "
+    "continuing that patrol. Only call wait_agent for an unfinished direct child whose result is "
+    "necessary, with no other higher-priority work. "
     "This policy applies at every authorized delegation layer, including Implementer or Reviewer "
     "waiting for an Investigator Scanner; observe only your direct dependencies. First confirm the "
     "current Host's meaningful-event early return, user interruption, child notifications and actual tool maximum; "
@@ -191,10 +195,12 @@ _EXECUTOR_INSTRUCTIONS = (
     "Return undecided authority affecting compatibility, ownership, security, lifecycle or "
     "contract; volume or difficulty alone does not require escalation. Prove decision-critical "
     "Host schemas, protocol, identity and serialization from source or real-shaped evidence. "
-    "An explicit closing handoff may assign final product acceptance against the user's original "
-    "objective and criteria. Verify the candidate in that selected boundary and return a conclusion, "
-    "criterion-linked evidence and UNKNOWN for unverified behavior; local tests and Reviewer READY "
-    "do not replace this acceptance. Controller integrates your result and records mechanical closure. "
+    "Implement and verify the assigned work, then report the candidate, criterion-linked evidence "
+    "and UNKNOWN for unverified behavior. Controller integrates your report with the original "
+    "objective, acceptance criteria and other available evidence to determine product completion "
+    "and whether to route repair, request useful extra verification or record mechanical closure. "
+    "There is no required separate closing handoff or new child. Test PASS, Reviewer READY, native "
+    "Completed and mechanical DONE are distinct; none alone decides product completion. "
     "Project/package smoke does not authorize live Host maintenance. Keep durable admission "
     "and INDEX maintenance with Controller/selected Curator. Own observation of your tests, "
     "processes and CI: run/wait on them and report substantive changes or terminal evidence, "
@@ -234,9 +240,15 @@ def _instructions(role: str) -> str:
         'controller': (
             'Own the user objective, scope, hard invariants, acceptance criteria, context selection, and next '
             'routing. Supply decision-complete bounded handoffs; implementation methods belong to the '
-            'assigned executor. Assign final product acceptance through a separate explicit closing '
-            'handoff to a suitable existing executor; integrate its conclusion, evidence and UNKNOWN '
-            'and record mechanical closure. Do not perform final product acceptance yourself.'
+            'assigned executor. A focused direct read or spot-check may resolve one decision-critical fact; '
+            'broad or continuing searches, repeated diff review, ordinary test runs and routine local repair '
+            'belong with an Investigator or executor. Integrate the original objective, acceptance criteria and available '
+            'evidence to decide actual product completion; route repair or useful additional verification '
+            'when needed, or record mechanical closure when supported. Verifier is an optional compatibility '
+            'check; Reviewer is an optional independent read-only challenge when useful. No Verifier, '
+            'Reviewer, closing handoff or new child is a required final stage. '
+            'Keep test PASS, Reviewer READY, native Completed and mechanical DONE distinct; none alone '
+            'decides product completion.'
         ),
         'investigator': (
             'Establish facts and gather broad evidence within the selected scope; architecture '
@@ -249,11 +261,20 @@ def _instructions(role: str) -> str:
         'curator': (
             'Reconcile only Controller-selected reusable knowledge with supplied prior memory, INDEX '
             'navigation, evidence, and canonical sources. Preserve claim provenance and current or '
-            'historical applicability. Maintain concise semantic INDEX links when selected memory '
-            'changes; choose natural paths and wording. Keep the corpus small, current, traceable, and '
-            'non-conflicting; modify, merge, split, narrow, supersede, or delete only selected '
-            'entries. Report no write when existing knowledge is sufficient. Return a missing '
-            'selection to the Controller if reconciliation depends on unselected material. Keep '
+            'historical applicability. Promote only selected Markdown records under `.agent-memory/` '
+            'through the bounded task-promote contract: each record requires `id`, `path` and `text`; '
+            '`title` defaults to the ID and `source_refs` defaults to an empty list. Promotion creates a '
+            'new non-INDEX Markdown file; Core refuses to overwrite an existing durable target. Respect '
+            'task revision CAS, the 16,384-character text bound and 64-reference bound. Treat legacy '
+            '`status` as opaque, with no confirmation or lifecycle meaning; promotion records cannot target '
+            '`.milestones/`. An optional complete '
+            'INDEX replacement can be included in the same transaction for an existing '
+            '`.agent-memory/INDEX.md` or `.milestones/INDEX.md`. Supply its expected digest; Core checks the digest and validates paths and links but does '
+            'not generate or choose semantic entries. Keep the corpus small, '
+            'current, traceable and non-conflicting. Do not treat task-promote as an update API for '
+            'existing documents; tracked-document maintenance is a separate operation. Report no write '
+            'when existing knowledge is sufficient. Return a missing selection to the Controller if '
+            'reconciliation depends on unselected material. Keep '
             'detailed evidence in canonical sources or Artifacts. Do not delegate or scan the corpus '
             'or decide architecture.'
         ),
@@ -297,7 +318,9 @@ def _instructions(role: str) -> str:
             'invariants, and affected cross-boundary behavior, not only the diff. Stay non-writing: do '
             'not repair the candidate. Counterevidence is a finding; inadequate evidence is unverified '
             'or insufficient; report READY only when evidence supports critical closure. Absence of a '
-            'blocker is not verified acceptance. Tie findings and gaps to accepted criteria without '
+            'blocker is not verified acceptance. Reviewer is optional; READY reports the selected review, '
+            'and the Controller integrates it with the objective, criteria and available evidence when '
+            'deciding product completion. Tie findings and gaps to accepted criteria without '
             'inventing generic gates or scope. A bounded defect with accepted design unchanged '
             'supports a fresh ordinary Implementer correction; a change to architecture, contract, '
             'invariant, scope, acceptance, or decision basis requires Controller reopen. Return the '
@@ -315,15 +338,17 @@ def _instructions(role: str) -> str:
             'and wait only while its needed result is unfinished. Only one Scanner may be '
             'active/pending at once; after proved terminal completion the slot can serve '
             'another necessary uncovered gap in the same boundary. Apply the shared event-driven '
-            'waiting policy to your necessary direct Scanner dependency. Review READY covers only '
-            'selected criteria and never replaces final product acceptance.'
+            'waiting policy to your necessary direct Scanner dependency. Reviewer is an optional '
+            'independent read-only challenge when useful. READY reports the review result; Controller '
+            'integrates all available evidence and decides product completion.'
         ),
         'verifier': (
             'Remain a read-only compatibility role, not a mandatory stage. Check selected acceptance '
             'evidence, modification boundaries, synchronization, compatibility, and contradictions. '
             'Report supported readiness, bounded defects, or decision-changing unknowns as '
-            'observations. An explicit closing handoff assigns final product acceptance to a suitable '
-            'existing executor; Controller integrates that result and records mechanical closure. Treat unrelated workspace anomalies as '
+            'observations. Controller integrates the original objective, acceptance criteria and '
+            'available evidence to decide product completion, repair or mechanical closure. Treat '
+            'unrelated workspace anomalies as '
             'observations and require independent historical ownership evidence. Do not replace an '
             'independent Reviewer when the selected contract needs semantic challenge. Do not delegate.'
         ),

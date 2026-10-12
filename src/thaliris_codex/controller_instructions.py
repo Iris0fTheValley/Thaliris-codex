@@ -16,7 +16,7 @@ SECTIONS = {
     "handoff": "Handoff and operational acceptance",
     "workstreams": "Workstream endpoints and review",
     "durable": "Durable retrieval and knowledge admission",
-    "completion": "Native completion and closure",
+    "completion": "Product completion, native completion and mechanical closure",
     "diagnosis": "Causal diagnosis and acceptance",
 }
 

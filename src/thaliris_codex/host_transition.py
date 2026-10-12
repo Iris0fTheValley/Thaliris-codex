@@ -135,6 +135,7 @@ def _profile_name(name):
 
 
 def load(home, intent):
+    from . import model_catalog_config as catalog
     from . import host_maintenance as maintenance, runtime_identity, lifecycle, host_preflight, roles, mode_hint_config, wait_guidance_config
     path = home / NAME
     maintenance.safe(path)
@@ -175,6 +176,7 @@ def load(home, intent):
     ownership = maintenance.validate_ownership(old_receipt, prior, intent)
     mode_hint_config.validate(ownership.get(mode_hint_config.RECORD_KEY), home)
     wait_guidance_config.validate(ownership.get(wait_guidance_config.RECORD_KEY), home)
+    catalog.validate(ownership.get(catalog.RECORD_KEY), home)
     if "mode_hint_record" in finish:
         mode_hint_config.validate(finish["mode_hint_record"], home)
     if "wait_guidance_record" in finish:
@@ -188,6 +190,9 @@ def load(home, intent):
                 finish.get("execution_constraint") != intent.get("execution_constraint")):
             raise ValueError("Host transition candidate differs from original approval")
         next_receipt = maintenance.validate_ownership(after.get(maintenance.RECEIPT_NAME), approved, intent)
+        catalog.validate_transition(finish, ownership, next_receipt.get(catalog.RECORD_KEY), before, after, home, install=True)
+        if finish.get("model_catalog_status", {}).get("status") in {"PLANNED", "UPDATE_PLANNED", "MANAGED"} and finish["model_catalog_record"]["source"]["kind"] != intent.get("model_catalog_source", "online"):
+            raise ValueError("Host transition model catalog source differs from maintenance selection")
         mode_hint_config.validate(next_receipt.get(mode_hint_config.RECORD_KEY), home)
         wait_guidance_config.validate(next_receipt.get(wait_guidance_config.RECORD_KEY), home)
         if "mode_hint_record" in finish and finish["mode_hint_record"] != next_receipt.get(mode_hint_config.RECORD_KEY):
@@ -253,6 +258,10 @@ def load(home, intent):
         raise ValueError("uninstall transition Controller wait guidance differs from prior receipt")
     allowed = {runtime_identity.MANIFEST_NAME, maintenance.RECEIPT_NAME, "AGENTS.md", "hooks.json",
                lifecycle.HOST_HOOK_SCRIPT_NAME, lifecycle.HOST_RUN_SCRIPT_NAME, host_preflight.NAME}
+    if "model_catalog_record" in finish:
+        allowed.add(catalog.NAME)
+    if intent["operation"] == "codex-uninstall":
+        catalog.validate_transition(finish, ownership, None, before, after, home, install=False)
     allowed.update("agents/" + name for name in roles.agent_profiles())
     allowed.update(name for name in ownership.get("owned_bytes", {}) if _profile_name(name))
     allowed.update(targets)

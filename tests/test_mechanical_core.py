@@ -1186,7 +1186,8 @@ def test_old_task_schema_reports_explicit_archive_recovery_without_mutation(tmp_
     packet = json.loads(capsys.readouterr().out)
     assert packet["status"] == "STATE_SCHEMA_INCOMPATIBLE"
     assert packet["abandon_active_confirmation_required"] is True
-    assert packet["recovery_action"].startswith("thaliris task-recover-state --expected-sha256 ")
+    assert packet["recovery_action"].startswith("thaliris --task-id <task-id> task-recover-state --expected-sha256 ")
+    assert " --abandon-active --controller-bridge-sha256 " in packet["recovery_action"]
     assert packet["recovery_action"].endswith("--controller-bridge-sha256 <current-bridge-sha256>")
     assert path.read_bytes() == before
 

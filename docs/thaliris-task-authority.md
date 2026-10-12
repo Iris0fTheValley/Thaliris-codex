@@ -78,9 +78,15 @@ exact identity-bound native Completed evidence from a V1 wait status map or V2 l
 descendants, unbound children or conflicting identities/statuses. This is the same
 execution distinction used in delegated mode: SubagentStop is optional observation,
 and missing/delayed Stop cannot veto proved native completion. Stop, wake signals
-or result prose alone cannot prove completion. Final product acceptance remains
-separate from native completion; Controller integrates the explicit closing
-handoff result and records mechanical closure.
+or result prose alone cannot prove completion. Core `task-close` records `DONE` after
+its selected-task, active-state and revision checks; it does not inspect product behavior.
+The Codex adapter may additionally require identity-bound native `Completed` and resolved
+managed work under its lifecycle rules. Those observations establish execution state only.
+Controller integrates the original objective, acceptance criteria and available evidence
+to decide product completion, route repair or useful extra verification, and record
+mechanical closure. Reviewer is an optional independent read-only challenge; no separate
+closing handoff or new child is required. Test `PASS`, Reviewer `READY`, native `Completed`
+and mechanical `DONE` remain distinct.
 The accepted Completed payload is exactly `{"completed": <string or null>}`;
 null proves execution completion without result text and never supplies semantic
 acceptance. Other value types, extra fields and unsupported shapes remain UNKNOWN. A
@@ -90,7 +96,7 @@ State, lifecycle or security conflicts leave the external authority unchanged.
 `task-status` reports its exact hash and a bounded recovery action:
 
 ```text
-thaliris task-recover-authority --expected-authority-sha256 <hash> --reason "recover the interrupted task"
+thaliris --task-id <task-id> task-recover-authority --expected-authority-sha256 <hash> --reason "recover the interrupted task"
 ```
 
 This continues existing authority: it archives the external anchor and current
@@ -99,7 +105,8 @@ security bytes, and adds fences for known old children. It does not bless
 current changed security config or unfence actors. Attempt native termination
 or observation of known old children where available; missing death proof
 remains UNKNOWN and does not permanently lock recovery. Old children are never
-called Completed; a new delegated handoff is required for delegated closure.
+called Completed; issue a new delegated handoff if additional delegated work is needed.
+No new child is required solely for the Controller's product-completion decision.
 An interrupted write between repository and anchor updates may require this
 restore; the prior recorded state is retained. New work can then continue
 under the same task UUID, goal, scope, acceptance and execution mode.

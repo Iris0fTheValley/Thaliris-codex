@@ -84,11 +84,11 @@ Roles are capabilities selected by work shape, not stages every task must traver
 
 Conclusions should identify their evidence and applicability. File hashes, Git blobs and test/runtime observations can identify the version observed. Freshness checks only declared sources for change; they cannot prove every dependency unchanged or decide whether a conclusion still applies. Insufficiently established conclusions remain `UNVERIFIED`; missing execution or identity observations remain `UNKNOWN`, rather than turning inference into confirmation. Existing records are retrievable material, not facts downstream roles must accept.
 
-Short-term records retain facts, pending work and evidence for the current Task ID rather than copying conversation transcripts. In Core project records, `.agent-memory/` holds selected knowledge reusable across tasks and `.milestones/` holds continuing project progress and verification. The Controller decides what merits long-term retention and what matters only to this task. Persistence and transmission to the next role are separate choices. Optional Host memory integrations have their own storage and authorization contracts.
+Short-term records retain facts, pending work and evidence for the current Task ID rather than copying conversation transcripts. Core `task-promote` persists only Controller-selected Markdown records under `.agent-memory/`; each record requires `id`, `path` and `text`, while `title` defaults to the ID and `source_refs` defaults to an empty list. It creates a new non-INDEX Markdown file, and Core refuses to overwrite an existing durable target. The promotion transaction uses the current Task ID and task revision CAS. Optional legacy `status` is opaque and conveys no confirmation or lifecycle state. Each record is limited to 16,384 text characters and 64 source references. Promotion records cannot target `.milestones/`; an optional INDEX update can target `.milestones/INDEX.md`. `INDEX.md` is model-authored semantic navigation; updates supply a complete file replacement, and Core validates the expected digest, path and links rather than generating the index. The Controller decides what merits long-term retention. Persistence and transmission to the next role are separate choices. Optional Host memory integrations have their own storage and authorization contracts.
 
 Each independent task has a UUID Task ID and its own local state file. Continuing a task means selecting its Task ID and relevant evidence; starting another creates a new Task ID rather than inferring the current task from old workspace state. Old `ACTIVE`, `UNKNOWN` or damaged records do not automatically occupy a singleton task slot. Actual overlapping writes to shared files still need coordination. Native session association, recovery and permission checks belong to adapters; a Task ID grants no authority and does not authenticate a Host actor.
 
-Final product acceptance uses a separate explicit closing handoff to a suitable existing executor, which checks the user's original objective and criteria and returns a conclusion, criterion-linked evidence and `UNKNOWN`. Controller integrates that result, routes unmet criteria or decision-changing unknowns, and records mechanical closure; it does not perform final acceptance itself. Reviewer remains an independent challenge, and its READY cannot replace this acceptance. Human-selected single-agent or controller-direct execution stays in that mode: use an already authorized available executor or human acceptance; without independent closing evidence, report acceptance unverified and return the closing decision to the human. A test `PASS` establishes the result of the checks run; child completion establishes execution termination; a clean diff does not establish the requested product behavior. Each necessary dependency has one observation owner. Use reliable results once available, without waiting for the same completion again or repeatedly waking a model to observe unchanged state. Verification and waiting serve actual unresolved questions.
+The Controller combines the user's original objective, acceptance criteria and available evidence to decide whether the product is complete, and whether to route repair, request useful extra verification or record mechanical closure. Executors implement and verify assigned work, then return the candidate state, criterion-linked evidence and `UNKNOWN` for unverified behavior. A Reviewer may provide an independent read-only challenge when useful; review is optional, and no separate closing handoff or new Agent is required. Test `PASS`, Reviewer `READY`, native `Completed` and mechanical `DONE` describe different evidence or status layers; none alone decides product completion. The Controller retains that decision in delegated, controller-direct and single-agent work. Each necessary dependency has one observation owner. Use reliable results once available, without waiting for the same completion again or repeatedly waking a model to observe unchanged state. Verification and waiting serve actual unresolved questions.
 
 ## A cross-module coding example
 
@@ -98,7 +98,7 @@ Suppose a user requests cancellation for an export feature spanning an API, queu
 2. The Controller selects relevant facts, hard invariants and unknowns for the Handoff. Where cancellation, completion and writes are coupled, a Fresh Focused Implementer implements and verifies those invariants. Independent changes with stable direction can go to an ordinary Implementer.
 3. The executor returns the exact candidate, source versions, test coverage and uncovered cases. After core semantic convergence, a fresh ordinary Implementer can handle remaining deterministic synchronization, regression or Git closure without extending the original focused context.
 4. Where independent challenge could affect acceptance, a Fresh Reviewer examines boundaries such as simultaneous cancellation and completion or older API compatibility. Unverified runtime behavior remains unknown; findings return with evidence rather than becoming accepted conclusions automatically.
-5. A suitable existing executor receives an explicit closing handoff and verifies the candidate against the original request. Controller integrates its conclusion, evidence and unknowns, routes further work when needed and records mechanical closure. Only cancellation invariants or verified failure modes with value beyond this task enter project memory; other records remain with their Task ID.
+5. The Controller integrates implementation reports, tests and available runtime evidence against the original objective and criteria. It routes repair or useful additional verification for unmet criteria or decision-changing unknowns, and selects a Reviewer only when independent challenge could affect the decision. The Controller then records mechanical closure when actual product completion is supported. Only cancellation invariants or verified failure modes with value beyond this task enter project memory; other records remain with their Task ID.
 
 Source code, Git, tests, compilers and actual runtime behavior remain the basis for correctness. Thaliris reuses native sessions, Agents and execution in Codex and DSH, adding context selection, handoffs, records and evidence boundaries rather than constructing another Agent Runtime.
 
@@ -115,6 +115,8 @@ Ordinary reads, edits, tests and Git work have different boundaries from managed
 Global instructions also carry shared working principles: reuse selected evidence, coordinate writes by work dependencies, verify behavior with the smallest meaningful checks, and give each necessary dependency one observation owner. Bootstrap delivers normal Controller guidance; exceptional recovery and Host maintenance are retrieved when needed. See the [integration protocol](adapter/codex/README.md) and [Authority contract](docs/thaliris-task-authority.md).
 
 Ordinary generated role profiles intentionally omit model and effort because Codex applies a configured role model after spawn arguments. Controller defaults Investigator, Implementer and Curator to gpt-6-luna/max, and Reviewer, Focused Implementer and Reasoning Specialist to gpt-6.1-sol/high. Native dispatch must pass both `model` and `reasoning_effort`; the managed Hook rejects a missing field before reservation. An explicit execution constraint or verified necessary exception may select another supported pair; this changes execution selection, not role responsibilities or permissions. Verifier keeps its existing configuration, and Controller's own model is unchanged. Astra still requires current-task human opt-in; static Astra compatibility profiles retain their fixed bindings, and luna-only stays frozen and forbids per-spawn overrides. Historical installed profiles can still be fixed; these source changes do not prove current Host activation. See [native selection precedence](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning).
+
+The Codex model catalog is Host-wide configuration (`model_catalog_json`), separate from project role profiles. Maintenance is an explicit, infrequent sync: an unchanged result leaves configuration untouched; a change removes only the exact Thaliris-managed line while preserving adjacent instructions, user configuration and other models' original instructions. The CLI-bundled catalog, a catalog actually fetched online and managed configuration are distinct sources; an ordinary self-export does not prove a fresh upstream fetch. Disk configuration, the catalog loaded by the current process and sessions started earlier are separate states; an edit or installation does not prove current Host activation. See the [model catalog maintenance report](docs/model-catalog-maintenance-report.md).
 
 ## Installation and local development
 
@@ -227,7 +229,7 @@ An intact task-scoped ACTIVE anchor can continue across turn, network or Hook in
 
 Authority recovery targets a Task ID selected explicitly or through a session already associated with it, and preserves that task's provenance and protected user bytes; it cannot approve a changed security baseline or remove a known old-child fence. `task-recover-state` requires `--task-id` or an already-associated `--session-id`. Legacy state is available only through explicit diagnostic/recovery paths and is never auto-adopted; unselected legacy bytes remain untouched. `UNKNOWN` remains UNKNOWN; the Controller can end or abandon the old task through a bounded path and fence late results without fabricating child `Completed`. If a child may still write shared files, handle that actual conflict. Host file changes, installation records, or a bootstrap run do not prove that the current Codex process loaded an update. See [task authority](docs/thaliris-task-authority.md) and [runtime recovery](docs/thaliris-runtime-recovery.md) for the exact procedure.
 
-If the user explicitly changes execution mode during a task, `task-mode` updates the selected Task ID's mode with the current Authority digest and task-revision CAS plus the user's new instruction. It changes only `execution_mode`; it does not rewrite the goal, boundary, invariants or acceptance. An active dependency can be explicitly disposed with `task-dispose-dependency` in the same Task ID, using the current handoff ID, task revision, lifecycle digest and a reason. This records `ABANDONED_DEPENDENCY` and risk without fabricating the child’s native terminal state, and fences late results for that handoff. The Controller must handle any actual shared-file write conflict. After disposition, a dual-CAS `task-mode` update can change the mode in the same task. The Controller associates the current session with `task-associate`, supplying the Task ID, session ID and expected Authority digest; this creates navigation only and does not authenticate a Host actor. `task-start` can also receive the current `--session-id` to establish task navigation.
+If the user explicitly changes execution mode during a task, `thaliris --task-id <id> task-mode ...` selects the Task ID through the global option before the command, then updates its mode with the current Authority digest and task-revision CAS plus the user's new instruction. `--task-id` selects a task but grants no authority. The operation changes only `execution_mode`; it does not rewrite the goal, boundary, invariants or acceptance. An active dependency can be explicitly disposed with `task-dispose-dependency` in the same Task ID, using the current handoff ID, task revision, lifecycle digest and a reason. This records `ABANDONED_DEPENDENCY` and risk without fabricating the child’s native terminal state, and fences late results for that handoff. The Controller must handle any actual shared-file write conflict. After disposition, a dual-CAS `task-mode` update can change the mode in the same task. The Controller associates the current session with `task-associate`, supplying the Task ID, session ID and expected Authority digest; this creates navigation only and does not authenticate a Host actor. `task-start` can also receive the current `--session-id` to establish task navigation.
 
 See [integration](adapter/codex/README.md), [authority](docs/thaliris-task-authority.md), and [recovery](docs/thaliris-runtime-recovery.md). The [shared documentation](https://github.com/Iris0fTheValley/Thaliris/tree/main/docs), [Core canonical README](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.md) and [English version](https://github.com/Iris0fTheValley/Thaliris/blob/main/README.en.md) stay in main. [Thaliris-DSH](https://github.com/Iris0fTheValley/Thaliris-DSH) is a sibling Host adapter using the same Core.
 
@@ -273,42 +275,36 @@ rules remain retrievable on demand within authority. Each
 invariant has one normal runtime authority; rationale and mechanical design live in
 [Codex protocol](adapter/codex/README.md) and [Core prompt design](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md).
 
-First continue independent work that should take priority; decide whether to wait before
-choosing duration. The policy applies at every authorized parent layer, including
+First continue independent work that should take priority, then decide whether a necessary
+dependency needs waiting. This applies at every authorized parent layer, including an
 Implementer, Focused Implementer or Reviewer waiting for an Investigator Scanner. Each
-observes only direct dependencies. Each necessary dependency has one observation owner:
-executors run/wait on their tests, builds, processes and CI using corresponding tool
-capabilities, not wait_agent parameters; a parent waits only for a known unfinished child result that remains
-necessary, with no other higher-priority work, without checking the same job again. A child FINAL or a decision-changing
-unknown ends that slice; do not keep waiting for it. Event-driven waiting takes precedence
-over timed polling. First confirm the current Host's actual maximum, meaningful-event
-early return, user interruption and child notifications during waiting; unconfirmed
-capabilities remain UNKNOWN. With confirmed meaningful-event early return and user
-interruption and no interim
-dependency decision, default to the supported 60-minute window (`timeout_ms=3600000`).
-This is a maximum waiting window, not a required execution duration: native completion
-wakes the parent early and its result is used directly. A short historical average must
-not force an earlier wake. When timed stage checks are necessary or early return is
-unreliable, recommend 60 seconds for very short tasks, 10–60 minutes for ordinary tasks by
-work scale, and about 30 minutes for longer-task stage checks. Reliable events without
-interim decisions still favor 60 minutes. Actual tool limits, explicit applicable
-higher-level limits, user interruption, recovery and urgent decisions take precedence;
-never bypass or change Host internals to extend a shorter maximum.
+layer observes only direct dependencies. Executors own observation of their tests,
+builds, processes and CI, using those tools' actual waiting capabilities. A parent waits
+only for an unfinished necessary direct child when no higher-priority work remains.
+After a complete handoff, the child advances its work without parent patrol. Children
+report completion, key blockers, decision-changing discoveries or necessary upper-level
+decisions. A child FINAL or decision-changing unknown ends that slice.
 
-Native terminal events, ordinary child messages and timeouts are distinct evidence:
-messages and timeouts do not prove completion. Do not substitute `sleep`, add progress
-pollers or create per-child timed polling loops; wait for native events that can change
-the current decision. After timeout, reassess necessary direct dependencies and available
-independent work before further waiting; avoid infinite useless waits and snapshots for
-unchanged state. Exceptions do not fabricate terminal evidence; unproved status stays
-UNKNOWN. Neither fixed 60 seconds nor fixed 60 minutes applies universally; windows are
-not execution deadlines. Executing children continue work and report only completion,
-key blockers, major discoveries or necessary upper-level decisions, never elapsed-time
-progress or heartbeat messages. A wake-only V2 result needs one
-available exact native status check (such as `list_agents`); proved completion needs no
-second confirmation. The Hook preserves caller wait arguments and does not extend them
-automatically. Independent Task IDs may proceed in parallel. Within one
-Task ID, multiple bound children may run simultaneously, with at most one unbound dispatch
+Event-driven waiting takes precedence. First confirm the current Host's actual tool
+maximum, meaningful-event early return, user interruption and child notifications;
+unconfirmed capabilities remain UNKNOWN. When event early return and user interruption
+are confirmed and there is no interim decision, normally use the supported 60-minute
+window (`timeout_ms=3600000`). This is a maximum window; a meaningful event can wake the
+parent early and its result is used directly. Shorten the window only when a brief stage
+check is necessary or early return is unreliable: about 60 seconds for a very short task,
+10–60 minutes for an ordinary task, or about 30 minutes for a long-task stage check. These
+are contextual recommendations, not hard limits. Follow actual tool limits and explicit
+applicable higher-level limits; do not change or bypass Host behavior to extend them.
+
+Native terminal events, ordinary child messages, timeouts, exceptions and UNKNOWN are
+distinct evidence. Messages and timeouts do not prove completion; exceptions do not
+fabricate terminal evidence. Do not substitute `sleep`, patrol, progress pollers or
+per-child timed loops for meaningful events. After timeout, reassess necessary direct
+dependencies and available independent work. A wake-only V2 result needs one available
+exact native status check (such as `list_agents`); proved completion needs no second
+confirmation. The Hook preserves caller wait arguments and does not automatically extend
+or take over a timeout. Independent Task IDs may proceed in parallel. Within one Task ID,
+multiple bound children may run simultaneously, with at most one unbound dispatch
 reservation awaiting association. The Controller chooses parallel work from its dependencies;
 overlapping writes in one worktree need coordination, while independent worktrees can carry
 separate changes.
@@ -317,7 +313,7 @@ Hook failures emit a bounded JSON diagnostic on stderr identifying the receive,
 strict decode, JSON syntax/shape, dispatch, maintenance-contract or runtime-identity
 boundary. They contain no payload or exception contents and do not establish a deeper
 root cause or change refusal/identity checks. One leading UTF-8 BOM is still accepted
-only at the Hook document boundary. Review READY never replaces final product acceptance.
+only at the Hook document boundary. Reviewer `READY` reports its selected read-only challenge; the Controller integrates it with the original objective, criteria and other available evidence when deciding product completion.
 
 Controller supplies decision-complete selected handoffs; implementation methods belong
 to the executor. Ordinary Implementer owns stable direction and deterministic convergence.
@@ -434,15 +430,21 @@ D cost about **9.1× C** and took about **1.57× longer**, but it was the only a
 
 ### Two cost hypotheses to test next
 
+E and F are cost hypotheses based on the observed D route, not required role
+sequences for current tasks. The Reviewer assigned semantic acceptance in the F
+counterfactual belongs only to that estimate. The current Controller decides
+product completion from the original objective, criteria and available evidence;
+Reviewer remains an optional independent challenge.
+
 **E — All-Sol counterfactual.** Keep D's task, topology, role sequence and lifecycle unchanged, but replace Luna Investigator/Implementer nodes with Sol. Input/context replay is held approximately constant; only output is adjusted using the observed A/B output-efficiency ratio (`79.8k / 30.3k ≈ 2.64×`). This predicts approximately **$3.67** for an all-Sol D-shaped run versus **$2.475 observed**, implying roughly **32.6% routing savings** from heterogeneous execution if D-level quality is preserved. Without the output-efficiency adjustment, the simple same-token estimate is about **$3.94**. This remains a counterfactual until run.
 
-**F — Semantic-Convergence Cut.** Keep D's architecture and high-capability semantic nodes, but terminate the Sol Focused Implementer once the core implementation and hard invariants are established. Broad tests, build/lint closure, deterministic compatibility fallout and small repairs move to a fresh Luna Implementer; a fresh Sol Reviewer remains responsible for semantic acceptance. Trace-based estimation removes roughly **1.87M Sol input / 15.3k Sol output** and adds approximately **0.7–1.3M Luna input / 8–16k output**, predicting **~$2.06–2.07**, or roughly **16–17% below D**, while targeting the same 8.3-level result. Quality remains explicitly unknown until tested.
+**F — Semantic-Convergence Cut (counterfactual, not run).** Keep D's architecture and high-capability semantic nodes, but terminate the Sol Focused Implementer once the core implementation and hard invariants are established. Broad tests, build/lint closure, deterministic compatibility fallout and small repairs move to a fresh Luna Implementer. The modeled route assigns a fresh Sol Reviewer for an independent semantic challenge; this does not make a Reviewer or separate closing role mandatory for current tasks. Trace-based estimation removes roughly **1.87M Sol input / 15.3k Sol output** and adds approximately **0.7–1.3M Luna input / 8–16k output**, predicting **~$2.06–2.07**, or roughly **16–17% below D**, while targeting the same 8.3-level result. Quality remains explicitly unknown until tested.
 
 ### Bottom line
 
 The benchmark currently supports a narrower claim than “multi-agent is better”:
 
-> **Weak-model orchestration alone did not improve aggregate quality. Selective placement of stronger intelligence at semantic implementation, review and closure points did.**
+> **Weak-model orchestration alone did not improve aggregate quality. In historical D, selective placement of stronger intelligence at semantic implementation and independent challenge points did. Those observations do not require a Reviewer or separate closing role in new tasks.**
 
 It also exposes the next optimization target: **not less high-capability implementation, but shorter expensive-context lifetime**. High-capability models should remain available for work that genuinely requires their reasoning during execution; once the semantic solution has converged, deterministic closure can move to cheaper fresh workers instead of repeatedly replaying a large Sol context.
 
