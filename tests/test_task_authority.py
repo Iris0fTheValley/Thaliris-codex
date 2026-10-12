@@ -129,7 +129,7 @@ def test_recovery_fences_old_children_without_death_claim(workspace):
     result = start(workspace)
     ledger_path = lifecycle._lifecycle_path(workspace, result["task_id"])
     ledger = lifecycle._load_lifecycle(ledger_path, result["task_id"])
-    ledger["children"].append({"agent_id_hash": lifecycle._identity_hash("old-child"), "managed": True, "terminal_state": "RUNNING"})
+    ledger["children"].append({"agent_id_hash": lifecycle._identity_hash("old-child"), "managed": True, "native_terminal_status": None})
     lifecycle._write_capture(ledger_path, ledger)
     original = task_authority.path(workspace).read_bytes()
     ledger_path.unlink()
@@ -468,7 +468,7 @@ def test_two_bound_workstreams_run_before_either_is_final(workspace):
     assert lifecycle._record_subagent_start(workspace, {"session_id": "first", "turn_id": "child-2-turn", "agent_id": "child-2", "agent_type": "thaliris-implementer"})
     ledger = json.loads(lifecycle._lifecycle_path(workspace, started["task_id"]).read_text(encoding="utf-8"))
     assert len(ledger["children"]) == 2
-    assert all(child["managed"] and child["terminal_state"] == "RUNNING" for child in ledger["children"])
+    assert all(child["managed"] and "terminal_state" not in child for child in ledger["children"])
 
 
 def test_disposed_child_stays_fenced_after_mode_change_and_late_result(workspace):
@@ -483,7 +483,6 @@ def test_disposed_child_stays_fenced_after_mode_change_and_late_result(workspace
     assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", child_call, lifecycle.MANAGED_HOOK_ABI)
     ledger = lifecycle._load_lifecycle(path, started["task_id"])
     assert lifecycle._record_native_terminal(ledger, ledger["children"][0], "completed", "wait_agent")
-    assert ledger["children"][0]["terminal_state"] == "RUNNING"
     assert ledger["children"][0]["native_terminal_status"] is None
     assert ledger["children"][0]["management_disposition"] == "ABANDONED_DEPENDENCY"
     closed = codex_adapter.task_close(workspace, disposed["revision"] + 1)

@@ -1359,7 +1359,7 @@ def _dispatch_identity_required(root: Path, state: dict[str, Any], session_hash:
         and item.get("kind") == "pending" and item.get("record", {}).get("session_id_hash") == session_hash
         for item in state.get("dependency_dispositions", [])) or any(
         isinstance(child, dict) and child.get("managed") is False
-        and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED"
+        and _native_execution_terminal(child)
         and "authorized_sequence" in child and child.get("agent_id_hash") is None
         and child.get("session_id_hash") == session_hash for child in state.get("children", []))
 
@@ -1459,7 +1459,7 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
                     if mutating and binding is not None and not binding.repo_write_allowed:
                         return _permission_deny("THALIRIS_READONLY_ACTOR: the known handoff role remains readonly despite missing fields or damaged authority")
                     expected = known[0]
-                    if mutating and expected.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+                    if mutating and _native_execution_terminal(expected):
                         return _permission_deny("THALIRIS_TERMINAL_ROLE_SESSION: exact native terminal evidence closes this managed turn; the identity cannot regain repository writes")
                     profile = _native_spawn_agent_type({"tool_input": payload})
                     conflict = (any(payload.get(key) is not None for key in ("agent_type", "agentType"))
@@ -2128,7 +2128,7 @@ def _parent_binding_matches(state: dict[str, Any], record: dict[str, Any], *, re
         and parent.get("turn_id_hash") == record["parent_turn_id_hash"]
         and parent.get("session_id_hash") == record.get("session_id_hash")
         and parent.get("handoff_id") == record["root_handoff_id"]
-        and (not require_live or parent.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"})
+        and (not require_live or not _native_execution_terminal(parent) and not parent.get("native_status_conflict"))
         for parent in state["children"])
 
 
@@ -2194,7 +2194,7 @@ def _bound_child_record(state: dict[str, Any], payload: dict[str, Any]) -> dict[
         and child.get("management_disposition") != "ABANDONED_DEPENDENCY"
         and isinstance(child.get("handoff_id"), str)
         and _parent_binding_matches(state, child, require_live=False)
-        and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}]
+        and not _native_execution_terminal(child) and not child.get("native_status_conflict")]
     return matches[0] if len(matches) == 1 else None
 
 
@@ -2213,7 +2213,7 @@ def _ordinary_child_record(root: Path, state: dict[str, Any], payload: dict[str,
                 and child.get("agent_type") in _native_agent_roles()
                 and _native_agent_roles()[child["agent_type"]] == child.get("role")
                 and _parent_binding_matches(state, child, require_live=False)
-                and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}
+                and not _native_execution_terminal(child)
                 and not child.get("native_status_conflict")):
             continue
         if any(payload.get(key) is not None for key in ("agent_type", "agentType")) and native_type != child["agent_type"]:
@@ -2514,7 +2514,7 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
                     )
             if state.get("identity_collisions") or any(isinstance(child, dict) and child.get("native_status_conflict") for child in state["children"]):
                 return _permission_deny("THALIRIS_NATIVE_IDENTITY_COLLISION: conflicting native spawn identities block new role-session authorization.")
-            if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"} for child in state["children"]):
+            if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
                 return _permission_deny("THALIRIS_SCANNER_SLOT_ACTIVE: this exact parent already has a live Scanner; coordinate its result before another same-parent Scanner")
             if state["pending_authorized_spawn"] is not None:
                 fingerprint = _lifecycle_block_fingerprint(state)
@@ -2567,7 +2567,7 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
 
 
 def recover_pending_spawn(root: Path, handoff_id: str) -> dict[str, object]:
-    """Clear one exact unbound reservation after Controller-observed failure."""
+    """Legacy exact-reservation recovery requires native terminal evidence."""
     task_id = _active_task_id(root)
     if task_id is None:
         raise ValueError("pending spawn recovery requires an ACTIVE task")
@@ -2592,7 +2592,7 @@ def recover_pending_spawn(root: Path, handoff_id: str) -> dict[str, object]:
         if not isinstance(pending, dict) or pending.get("handoff_id") != handoff_id:
             raise ValueError("pending spawn handoff id does not match")
         evidence = state.get("pending_spawn_terminal_evidence")
-        if not isinstance(evidence, dict) or evidence.get("handoff_id") != handoff_id or evidence.get("status") not in {"interrupted", "errored", "shutdown", "spawn_failed"}:
+        if not isinstance(evidence, dict) or evidence.get("handoff_id") != handoff_id or evidence.get("status") not in {"interrupted", "errored", "shutdown"}:
             raise ValueError("pending spawn recovery requires trusted terminal Host evidence")
         recoveries = state.setdefault("spawn_recoveries", [])
         if not isinstance(recoveries, list):
@@ -2681,7 +2681,7 @@ def task_state_recovery_blocker(root: Path, task_id: str) -> str | None:
         return "lifecycle child state is malformed"
     if any(
         not isinstance(child, dict)
-        or child.get("terminal_state") != "NATIVE_TERMINAL_RECONCILED"
+        or not _native_execution_terminal(child) or child.get("native_status_conflict")
         for child in children
     ):
         return "one or more child lifecycles are not explicitly terminal"
@@ -2733,7 +2733,8 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
         )
         prior = next((item for item in children if item.get("agent_id_hash") == child_hash), None)
         bound = authorized and (prior is None or (prior.get("managed") is False
-            and prior.get("terminal_state", "RUNNING") == "RUNNING"
+            and not _native_execution_terminal(prior) and not prior.get("native_status_conflict")
+            and prior.get("native_terminal_status") != "not_found"
             and prior.get("agent_type") == native_agent_type and prior.get("session_id_hash") == session_id_hash
             and prior.get("turn_id_hash") == turn_id_hash))
         bound = bound and _claim_agent_association(root, task_id, child_hash)
@@ -2752,8 +2753,6 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "payload_hash": pending.get("payload_hash") if bound else None,
                 "handoff_created_at_ns": pending.get("created_at_ns") if bound else None,
                 "started": state["sequence"],
-                "stopped": None,
-                "terminal_state": "RUNNING",
                 "native_terminal_status": None,
                 "task_name_hash": pending.get("task_name_hash") if bound else None,
                 **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")},
@@ -2839,13 +2838,14 @@ def _lifecycle_block_fingerprint(state: dict[str, Any]) -> str:
     active = [
         {
             "agent_id_hash": child.get("agent_id_hash"),
-            "terminal_state": child.get("terminal_state", "RUNNING"),
+            "native_terminal_status": child.get("native_terminal_status"),
+            "native_status_conflict": child.get("native_status_conflict", False),
             "task_name_hash": child.get("task_name_hash"),
         }
         for child in state.get("children", [])
         if isinstance(child, dict)
         and child.get("managed") is True
-        and (child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}
+        and (not _native_execution_terminal(child)
              or child.get("native_status_conflict") is True)
     ]
     pending = state.get("pending_authorized_spawn")
@@ -2864,6 +2864,12 @@ def _native_terminal_status(value: object) -> str | None:
     return None
 
 
+def _native_execution_terminal(child: dict[str, Any]) -> bool:
+    """Read the native turn observation without a second execution state."""
+    status = child.get("native_terminal_status")
+    return isinstance(status, str) and status in {"completed", "interrupted", "errored", "shutdown"}
+
+
 def _child_for_native_name(children: list[object], name: str) -> dict[str, Any] | None:
     name_hash = _identity_hash(name)
     matches = [
@@ -2880,27 +2886,22 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
     if child.get("management_disposition") == "ABANDONED_DEPENDENCY":
         child.setdefault("late_native_observations", []).append({"status": status, "source": source})
         return True
-    if status == "not_found":
-        child["terminal_state"] = "ORPHANED"
-        child["native_terminal_status"] = status
-        return True
-    if status in {"pending_init", "running"} and child.get("native_terminal_status") in {"completed", "interrupted", "errored", "shutdown"}:
-        child["native_status_conflict"] = True
-        return True
-    if status not in {"completed", "interrupted", "errored", "shutdown"}:
+    if status not in {"pending_init", "running", "not_found", "completed", "interrupted", "errored", "shutdown"}:
         return False
     prior = child.get("native_terminal_status")
-    if prior in {"completed", "interrupted", "errored", "shutdown"} and prior != status:
+    if _native_execution_terminal(child) and prior != status:
+        # Absence from a later snapshot does not erase an exact terminal fact.
+        # A live or different terminal observation contradicts the ended turn.
+        if status == "not_found":
+            return False
         child["native_status_conflict"] = True
         return True
-    if prior == status and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+    if prior == status:
         if source in {"list_agents", "wait_agent"} and child.get("native_terminal_source") not in {"list_agents", "wait_agent"}:
             child["native_terminal_source"] = source
             return True
         return False
     state["sequence"] = int(state.get("sequence", 0)) + 1
-    child["stopped"] = state["sequence"]
-    child["terminal_state"] = "NATIVE_TERMINAL_RECONCILED"
     child["native_terminal_status"] = status
     child["native_terminal_source"] = source
     state["stall"] = None
@@ -2923,7 +2924,7 @@ def _record_pending_terminal(state: dict[str, Any], name: str, status: str, sour
     if len(matches) > 1 or matches and matches[0].get("managed") is True:
         return False
     child = matches[0] if matches else {"agent_id_hash": pending.get("native_agent_id_hash"),
-        "started": None, "stopped": None}
+        "started": None}
     if matches:
         child["unbound_start_identity"] = {key: child.get(key)
             for key in ("agent_id_hash", "agent_type", "session_id_hash", "turn_id_hash", "role", "started")}
@@ -2974,15 +2975,9 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
         changed = observed = False
         if tool == "spawn_agent":
             pending = state.get("pending_authorized_spawn")
-            if (isinstance(pending, dict) and pending.get("spawn_tool_use_id_hash") is not None
-                    and pending["spawn_tool_use_id_hash"] == _identity_hash(payload.get("tool_use_id"))
-                    and _spawn_parent_matches(root, pending, payload)
-                    and _dispatch_status(response) == "REJECTED"):
-                state["pending_spawn_terminal_evidence"] = {
-                    "handoff_id": pending["handoff_id"], "status": "spawn_failed",
-                    "source": "spawn_agent", "observed_at_ns": time.time_ns(),
-                }
-                changed = True
+            # A native tool error may follow thread creation and best-effort
+            # asynchronous cleanup. It proves neither no child nor termination,
+            # even when this callback matches the exact reserved call.
             if (set(response) == {"agent_id", "nickname"} and isinstance(response["agent_id"], str)
                     and response["agent_id"] and (response["nickname"] is None or isinstance(response["nickname"], str))):
                 agent_hash = _identity_hash(response["agent_id"])
@@ -2997,7 +2992,8 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         pending["native_agent_id_hash"] = agent_hash
                         prior = next((child for child in state["children"] if isinstance(child, dict)
                             and child.get("agent_id_hash") == agent_hash and child.get("managed") is False
-                            and child.get("terminal_state", "RUNNING") == "RUNNING"
+                            and not _native_execution_terminal(child) and not child.get("native_status_conflict")
+                            and child.get("native_terminal_status") != "not_found"
                             and child.get("agent_type") == pending["expected_agent_type"]
                             and child.get("session_id_hash") == pending["session_id_hash"]), None)
                         if prior is not None:
@@ -3029,7 +3025,8 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         if isinstance(child, dict)
                         and child.get("managed") is True
                         and child.get("task_name_hash") is None
-                        and child.get("terminal_state", "RUNNING") == "RUNNING"
+                        and not _native_execution_terminal(child) and not child.get("native_status_conflict")
+                        and child.get("native_terminal_status") != "not_found"
                         and _spawn_parent_matches(root, child, payload)
                     ]
                     if len(candidates) == 1:
@@ -3047,7 +3044,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     metrics["reconciliation_attempts"] = int(metrics.get("reconciliation_attempts", 0)) + 1
                     changed = _record_native_terminal(state, child, status, tool)
                     changed = _record_pending_terminal(state, target, status, tool) or changed
-                    if changed and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+                    if changed and _native_execution_terminal(child):
                         metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
                 else:
                     changed = _record_pending_terminal(state, target, status, tool) or changed
@@ -3093,7 +3090,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     did_reconcile = _record_native_terminal(state, child, status, "list_agents")
                     changed = _record_pending_terminal(state, name, status, "list_agents") or changed
                     changed = changed or did_reconcile
-                    if did_reconcile and child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED":
+                    if did_reconcile and _native_execution_terminal(child):
                         metrics["reconciliation_successes"] = int(metrics.get("reconciliation_successes", 0)) + 1
         if changed or observed:
             _runtime_metadata(state, payload)
@@ -3188,8 +3185,7 @@ def native_execution_closed(root: Path) -> bool:
     identities = set()
     for child in children:
         if (not isinstance(child, dict)
-                or child.get("terminal_state") != "NATIVE_TERMINAL_RECONCILED"
-                or child.get("native_terminal_status") not in {"completed", "interrupted", "errored", "shutdown"}
+                or not _native_execution_terminal(child)
                 or child.get("native_status_conflict")):
             return False
         child_identities = [child.get(key) for key in ("task_name_hash", "agent_id_hash") if child.get(key) is not None]
@@ -3216,7 +3212,7 @@ def _managed_child_active(root: Path) -> bool:
         value = json.loads(_lifecycle_path(root, task_id).read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         return False
-    return isinstance(value, dict) and value.get("version") == LIFECYCLE_STATE_VERSION and value.get("managed_hook_spec_hash") == managed_hook_spec_hash() and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("managed") is True and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"} for child in value.get("children", []))
+    return isinstance(value, dict) and value.get("version") == LIFECYCLE_STATE_VERSION and value.get("managed_hook_spec_hash") == managed_hook_spec_hash() and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("managed") is True and not _native_execution_terminal(child) for child in value.get("children", []))
 
 
 def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None = None) -> bool:
@@ -3250,7 +3246,7 @@ def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None
             or any(
                 selected(child)
                 and child.get("managed") is True
-                and child.get("terminal_state", "RUNNING") in {"RUNNING", "ORPHANED", "STOP_ATTESTED"}
+                and not _native_execution_terminal(child)
                 for child in value.get("children", [])
             )
         )
@@ -4469,7 +4465,8 @@ def _active_child_communication(root: Path, payload: dict[str, Any]) -> bool:
     child = _child_for_native_name(state["children"], target)
     return bool(child is not None and child.get("managed") is True and child.get("handoff_bound") is True
         and child.get("management_disposition") != "ABANDONED_DEPENDENCY"
-        and child.get("terminal_state") == "RUNNING" and not child.get("native_status_conflict"))
+        and not _native_execution_terminal(child) and child.get("native_terminal_status") != "not_found"
+        and not child.get("native_status_conflict"))
 
 
 def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_hook_abi: str | None = None) -> str:

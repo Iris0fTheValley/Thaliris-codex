@@ -342,7 +342,7 @@ def test_parent_stop_before_scanner_start_is_not_terminal_evidence(active):
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
     lifecycle.handle_hook(active, "SubagentStop", parent)
     parent_record = state(active)["children"][0]
-    assert parent_record["terminal_state"] == "RUNNING"
+    assert "terminal_state" not in parent_record
     assert parent_record["native_terminal_status"] is None
     assert isinstance(parent_record["stop_observed"], int)
     assert lifecycle._record_subagent_start(active, identity("investigator", "scanner"))

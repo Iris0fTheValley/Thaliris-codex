@@ -94,10 +94,16 @@ does not reactivate when the same native identity is reused.
 Other value types, extra-field and otherwise unsupported payload shapes remain
 UNKNOWN. Contradictory native statuses block operations that depend on that child evidence,
 not unrelated ordinary reads or independent work.
+Execution-dependent checks use the native observation directly, without a second
+terminal-state or stopped-state mirror. `not_found` does not prove termination and
+cannot erase a prior terminal fact or a recorded contradiction.
 Exact native terminal evidence retires an unbound reservation without granting managed
 permissions and retains dispatch provenance against delayed Start callbacks. A canonical
 V2 task name does not identify the Start's native agent ID; ambiguous association remains
-unprivileged. A trusted spawn-failure callback also permits explicit pending recovery.
+unprivileged. A generic spawn error can follow native thread creation and asynchronous
+cleanup; even an exact call match proves neither no child nor termination. Such errors
+keep the reservation pending and cannot justify explicit pending recovery. Use exact
+native terminal evidence or the existing Controller dependency disposition/fence path.
 Timeout and not_found prove neither completion nor execution closure.
 
 First continue independent work that should take priority, then decide whether a necessary

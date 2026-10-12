@@ -403,11 +403,18 @@ wait, Stop, nickname, missing target or unsupported payload remains UNKNOWN.
 Conflicting native statuses block new
 managed handoffs and closure. SubagentStop is an optional observation; missing or delayed Stop cannot veto proved
 native completion. Stop/wake/prose alone is not completion; missing evidence keeps closure UNKNOWN.
+Execution-dependent checks read the native observation directly; the adapter does not
+maintain a second terminal-state or stopped-state mirror. `not_found` does not prove
+termination and cannot erase a prior terminal fact or a recorded contradiction.
 Exact terminal evidence for a spawn whose Start was not observed retires its reservation
 without granting managed permissions. Retain its dispatch provenance: a delayed Start
 cannot consume a later reservation. A canonical V2 task name does not identify the
 Start's native agent ID; ambiguous association remains unprivileged. Terminal failure
 can resolve execution risk while product acceptance still requires Controller judgment.
+A generic spawn error can follow native thread creation and asynchronous cleanup;
+an exact call match proves neither no child nor termination. Preserve its pending
+reservation. Such errors cannot justify pending recovery; use exact native terminal
+evidence or the existing Controller dependency disposition/fence path.
 All descendants must have resolved execution risk. Host instruction/catalog
 activation remains UNKNOWN without native evidence; changed disk files alone do not
 prove activation. Keep security/control-state mutations and live Host installation

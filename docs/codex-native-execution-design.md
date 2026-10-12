@@ -26,12 +26,18 @@ parent's selected native spawn handoff remain the task-specific input boundary;
 inherited AGENTS snapshots cannot be undone with ThreadInstructionsProvider.
 
 The adapter retains independent authority and exact handoff/identity bindings and
-records naturally returned native observations. Exact-identity native Completed for
-the latest authorized top-level handoff, with no pending or active descendants,
-establishes execution closure. SubagentStop is retained when observed; absent or
+records naturally returned native observations. Exact-identity native terminal facts
+resolve remaining execution risk without requiring the latest handoff to succeed or
+complete historical handoff/Start/Stop records. No issued child requires no child
+proof, including in delegated mode. Execution-dependent checks read native status
+directly, without a second terminal-state or stopped-state mirror. SubagentStop is
+retained when observed; absent or
 delayed Stop cannot veto already proved native completion. Stop alone cannot prove
-native terminal execution. Conflicting identities, unbound children, malformed or
-missing native terminal evidence fail closed. Controller-direct auxiliary children
+native terminal execution. Conflicting identities and malformed or missing native
+terminal evidence fail closed. Exact native terminal facts retire an unbound
+reservation while preserving its unprivileged provenance. `not_found` does not prove
+termination and cannot erase a prior terminal fact or contradiction. Controller-direct
+auxiliary children
 use the same execution distinction. Controller acceptance remains independent. V1
 `wait_agent` returns a status map keyed by the exact spawned agent ID; V2 `list_agents`
 returns canonical-name status entries. A wake-only V2 `wait_agent` is not completion
@@ -50,6 +56,20 @@ but supplies no semantic result. Other value types, extra fields and unsupported
 payload shapes remain UNKNOWN. Wake-only V2 waits supply no status evidence.
 A contradictory native status also blocks new
 managed handoffs and closure.
+
+Generic spawn errors do not prove that creation failed before a native child existed.
+The current native control path can fail after thread creation, and cleanup is
+asynchronous and best-effort. The version-pinned sources are
+[`spawn.rs`](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/agent/control/spawn.rs),
+[`spawn_guard.rs`](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/agent/control/spawn_guard.rs),
+and [the error mapper](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/tools/handlers/multi_agents_common.rs).
+Exact call correlation cannot distinguish those errors
+from rejection before creation. Keep the authorization reservation pending; do not
+generate terminal evidence or permit explicit recovery from generic `spawn_failed`
+records. Exact identity-bound native terminal observations still retire pending
+reservations automatically. Without those observations, the existing Controller
+dependency disposition/fence path remains available. This is a minimum authorization
+association retained at the native schema boundary, not another execution state.
 
 The native shape is sourced from OpenAI Codex
 [`rust-v0.162.0-alpha.2` at `74e804deeb1241d5fe699b31fb319f7d46454c42`](https://github.com/openai/codex/blob/74e804deeb1241d5fe699b31fb319f7d46454c42/codex-rs/core/src/tools/handlers/multi_agents_spec.rs):

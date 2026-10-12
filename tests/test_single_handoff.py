@@ -933,7 +933,7 @@ def test_state_recovery_blocks_when_lifecycle_authority_is_not_terminal(tmp_path
     lifecycle_path.write_text(json.dumps({
         "version": lifecycle_module.LIFECYCLE_STATE_VERSION,
         "task_id_hash": lifecycle_module._task_key(task_id),
-        "children": [{"terminal_state": "RUNNING"}],
+        "children": [{"native_terminal_status": None}],
         "pending_authorized_spawn": None,
         "sequence": 1,
     }), encoding="utf-8")
@@ -976,7 +976,7 @@ def test_state_recovery_refuses_unresolved_lifecycle_authority(tmp_path: Path, l
         record = {
             "version": lifecycle_module.LIFECYCLE_STATE_VERSION,
             "task_id_hash": lifecycle_module._task_key(task_id),
-            "children": [] if lifecycle_state == "pending" else [{"terminal_state": "RUNNING"}],
+            "children": [] if lifecycle_state == "pending" else [{"native_terminal_status": None}],
             "pending_authorized_spawn": {"unresolved": True} if lifecycle_state == "pending" else None,
             "sequence": 1,
         }
@@ -2545,8 +2545,7 @@ def test_native_spawn_failure_without_posttool_keeps_pending_reservation(tmp_pat
     pending = lifecycle(root)["pending_authorized_spawn"]
     assert pending is not None
 
-    # Codex 0.154 returns the native error without PostToolUse. The reservation
-    # therefore remains until the Controller explicitly invokes recovery.
+    # A missing PostToolUse event supplies no native rejection evidence.
     assert lifecycle(root)["pending_authorized_spawn"] == pending
 
 
@@ -2608,7 +2607,8 @@ def test_pending_recovery_rejects_nonfailure_native_status(tmp_path: Path, statu
     assert lifecycle(root)["pending_authorized_spawn"] is not None
 
 
-def test_pending_recovery_requires_exact_spawn_failure_callback_identity(tmp_path: Path) -> None:
+@pytest.mark.parametrize("response", [{"error": "spawn failed"}, {"isError": True}, {"ok": False}, {"exception": "unknown native failure"}])
+def test_exact_spawn_error_keeps_pending_without_native_creation_or_terminal_proof(tmp_path: Path, response) -> None:
     root = repo(tmp_path)
     _owned_task_start(root, "exact failure callback", None, None)
     spawn = hook_payload(tool_name="spawn_agent", tool_use_id="native-tool-1", tool_input={
@@ -2619,8 +2619,56 @@ def test_pending_recovery_requires_exact_spawn_failure_callback_identity(tmp_pat
     handle_hook(root, "PostToolUse", {**spawn, "tool_use_id": "other-tool", "tool_response": {"error": "spawn failed"}})
     with pytest.raises(ValueError, match="trusted terminal Host evidence"):
         lifecycle_module.recover_pending_spawn(root, handoff_id)
-    handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"error": "spawn failed"}})
-    assert lifecycle_module.recover_pending_spawn(root, handoff_id)["recovered"] is True
+    handle_hook(root, "PostToolUse", {**spawn, "tool_response": response})
+    state = lifecycle(root)
+    assert state["pending_authorized_spawn"]["handoff_id"] == handoff_id
+    assert state.get("pending_spawn_terminal_evidence") is None
+    assert state["children"] == []
+    assert not lifecycle_module.native_execution_closed(root)
+    with pytest.raises(ValueError, match="trusted terminal Host evidence"):
+        lifecycle_module.recover_pending_spawn(root, handoff_id)
+
+    # The same tool error can occur after native creation. Independent ordinary
+    # work remains available, but another managed grant cannot replace this one.
+    ordinary = hook_payload(tool_name="spawn_agent", tool_use_id="ordinary-call", tool_input={
+        "fork_turns": "none", "agent_type": "default", "message": "independent ordinary task",
+    })
+    assert handle_hook(root, "PreToolUse", ordinary) == ""
+    handle_hook(root, "PostToolUse", {**ordinary, "tool_response": {"task_name": "/root/ordinary"}})
+    assert lifecycle(root)["pending_authorized_spawn"]["handoff_id"] == handoff_id
+    assert handle_hook(root, "PreToolUse", hook_payload(tool_name="Bash",
+        tool_input={"command": "Set-Content independent.py fixed"})) == ""
+    another = hook_payload(tool_name="spawn_agent", tool_use_id="new-call", tool_input={
+        "fork_turns": "none", "agent_type": "worker", "message": "a different managed handoff",
+    })
+    assert "THALIRIS_UNBOUND_DISPATCH_PENDING" in handle_hook(root, "PreToolUse", another)
+    assert lifecycle(root)["pending_authorized_spawn"]["handoff_id"] == handoff_id
+    handle_hook(root, "SubagentStart", hook_payload(agent_id="created-before-error", agent_type="worker"))
+    child = lifecycle(root)["children"][-1]
+    assert child["managed"] is True and child["handoff_id"] == handoff_id
+    assert not lifecycle_module.native_execution_closed(root)
+    reconcile(root, "created-before-error", {"completed": None})
+    assert lifecycle_module.native_execution_closed(root)
+
+
+def test_legacy_generic_spawn_failed_evidence_cannot_release_pending(tmp_path):
+    root = repo(tmp_path)
+    started = _owned_task_start(root, "old inferred spawn failure is not terminal proof", None, None)
+    spawn = hook_payload(tool_name="spawn_agent", tool_use_id="native-call", tool_input={
+        "fork_turns": "none", "agent_type": "worker", "message": "selected handoff",
+    })
+    handle_hook(root, "PreToolUse", spawn)
+    state = lifecycle(root)
+    handoff_id = state["pending_authorized_spawn"]["handoff_id"]
+    state["pending_spawn_terminal_evidence"] = {"handoff_id": handoff_id, "status": "spawn_failed",
+        "source": "spawn_agent", "observed_at_ns": 1}
+    path = lifecycle_module._lifecycle_path(root, started["task_id"])
+    lifecycle_module._write_capture(path, state)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="trusted terminal Host evidence"):
+        lifecycle_module.recover_pending_spawn(root, handoff_id)
+    assert path.read_bytes() == before
+    assert not lifecycle_module.native_execution_closed(root)
 
 
 def test_pending_spawn_recovery_rejects_handoff_already_bound_to_child(tmp_path: Path) -> None:
@@ -2665,15 +2713,15 @@ def test_lifecycle_binds_matching_identity_and_stop(tmp_path: Path) -> None:
 
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id="reviewer-1", agent_type="thaliris-reviewer")) == ""
     running = lifecycle(root)["children"][-1]
-    assert running["managed"] is True and running["terminal_state"] == "RUNNING"
+    assert running["managed"] is True and running["native_terminal_status"] is None
     assert handle_hook(root, "SubagentStop", hook_payload(agent_id="other", agent_type="thaliris-reviewer")) == ""
-    assert lifecycle(root)["children"][-1]["terminal_state"] == "RUNNING"
+    assert lifecycle(root)["children"][-1]["native_terminal_status"] is None
     assert handle_hook(root, "SubagentStop", hook_payload(agent_id="reviewer-1", agent_type="thaliris-reviewer")) == ""
     stopped = lifecycle(root)["children"][-1]
-    assert stopped["terminal_state"] == "RUNNING"
+    assert "terminal_state" not in stopped
     assert stopped["native_terminal_status"] is None
     assert isinstance(stopped["started"], int) and isinstance(stopped["stop_observed"], int)
-    assert stopped["stopped"] is None
+    assert "stopped" not in stopped
 
 
 def test_stop_requires_explicit_native_completed_for_close(tmp_path: Path) -> None:
@@ -2725,7 +2773,7 @@ def test_task_name_string_response_binds_distinct_host_child_id_through_close(tm
         tool_response=json.dumps({"agents": [{"agent_name": task_name, "agent_status": {"completed": "result"}}]}),
     )) == ""
     child = lifecycle(root)["children"][-1]
-    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
+    assert "terminal_state" not in child
     assert child["native_terminal_status"] == "completed"
     assert codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])["status"] == "DONE"
 
@@ -2819,7 +2867,7 @@ def test_string_list_response_reconciles_completed_child_and_allows_close(tmp_pa
         tool_response=json.dumps({"agents": [{"agent_name": "worker-1", "agent_status": {"completed": "result"}}]}),
     )) == ""
     child = lifecycle(root)["children"][-1]
-    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
+    assert "terminal_state" not in child
     assert child["native_terminal_status"] == "completed"
     assert codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])["status"] == "DONE"
 
@@ -2839,7 +2887,7 @@ def test_malformed_or_non_dict_string_response_produces_no_completion_fact(tmp_p
         tool_response=response,
     )) == ""
     child = lifecycle(root)["children"][-1]
-    assert child["terminal_state"] == "RUNNING"
+    assert "terminal_state" not in child
     assert child["native_terminal_status"] is None
 
 
@@ -2856,7 +2904,7 @@ def test_missing_stop_native_completed_proves_execution_closure(tmp_path: Path) 
         tool_response={"agents": [{"agent_name": "worker-1", "agent_status": {"completed": "result"}}]},
     )) == ""
     child = lifecycle(root)["children"][-1]
-    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
+    assert "terminal_state" not in child
     assert child["native_terminal_status"] == "completed"
 
     assert child.get("stop_observed") is None
@@ -2879,7 +2927,7 @@ def test_optional_stop_preserves_native_completed_in_either_order(tmp_path, stop
         stop(root, "child")
     child = lifecycle(root)["children"][-1]
     assert isinstance(child["stop_observed"], int)
-    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
+    assert "terminal_state" not in child
     assert child["native_terminal_status"] == "completed"
     assert lifecycle_module.qualifying_child_completed(root)
 
@@ -2895,7 +2943,7 @@ def test_unsupported_completed_payload_keeps_native_status_unknown(tmp_path, uns
     spawn_start(root, "child")
     reconcile(root, "child", unsupported)
     child = lifecycle(root)["children"][-1]
-    assert child["terminal_state"] == "RUNNING"
+    assert "terminal_state" not in child
     assert child["native_terminal_status"] is None
     assert not lifecycle_module.qualifying_child_completed(root)
     with pytest.raises(ValueError, match="exact native terminal status"):
@@ -3131,7 +3179,7 @@ def test_native_status_conflict_blocks_new_spawn_and_close(tmp_path):
     reconcile(root, "child", "running")
     child = lifecycle(root)["children"][-1]
     assert child["native_status_conflict"] is True
-    assert child["terminal_state"] == "NATIVE_TERMINAL_RECONCILED"
+    assert "terminal_state" not in child
 
     denied = handle_hook(root, "PreToolUse", hook_payload(
         tool_name="spawn_agent",
@@ -3244,6 +3292,70 @@ def test_native_terminal_closure_does_not_require_nonessential_history(tmp_path)
     reconcile(root, "/root/child", {"completed": None})
     assert core.task_show(root)["state"]["status"] == "ACTIVE"
     assert codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])["status"] == "DONE"
+
+
+@pytest.mark.parametrize("native_status, legacy_state", [
+    (None, "NATIVE_TERMINAL_RECONCILED"),
+    ("running", "NATIVE_TERMINAL_RECONCILED"),
+    ("not_found", "NATIVE_TERMINAL_RECONCILED"),
+    ("completed", "RUNNING"),
+    ("completed", "ORPHANED"),
+    ("errored", "STOP_ATTESTED"),
+])
+def test_native_observation_alone_controls_consumers_despite_legacy_mirror(tmp_path, native_status, legacy_state):
+    root = repo(tmp_path)
+    started = _owned_task_start(root, "native observation is the only execution state", None, None)
+    spawn_start(root, "child")
+    state = lifecycle(root)
+    child = state["children"][-1]
+    child.update({"native_terminal_status": native_status, "native_terminal_source": "list_agents",
+        "terminal_state": legacy_state, "stopped": 999})
+    lifecycle_module._write_capture(lifecycle_module._lifecycle_path(root, started["task_id"]), state)
+    terminal = native_status in {"completed", "errored"}
+    assert lifecycle_module.native_execution_closed(root) is terminal
+    assert lifecycle_module.managed_dependency_pending(root) is not terminal
+    assert (lifecycle_module.task_state_recovery_blocker(root, started["task_id"]) is None) is terminal
+    command = hook_payload(agent_id="child", agent_type="worker", tool_name="Bash",
+        tool_input={"command": "Set-Content src/example.py fixed"})
+    decision = handle_hook(root, "PreToolUse", command)
+    assert ("THALIRIS_TERMINAL_ROLE_SESSION" in decision) is terminal
+    assert lifecycle_module._active_child_communication(root, hook_payload(
+        tool_name="send_message", tool_input={"target": "child"})) is (not terminal and native_status != "not_found")
+
+
+def test_missing_native_snapshot_cannot_erase_terminal_or_launder_conflict(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "native absence is not a contradictory execution status", None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", "not_found")
+    assert lifecycle(root)["children"][-1]["native_terminal_status"] == "not_found"
+    assert not lifecycle_module.native_execution_closed(root)
+    reconcile(root, "child", "running")
+    assert lifecycle(root)["children"][-1]["native_terminal_status"] == "running"
+    reconcile(root, "child", {"completed": None})
+    reconcile(root, "child", "not_found")
+    assert lifecycle_module.native_execution_closed(root)
+    reconcile(root, "child", "running")
+    reconcile(root, "child", "not_found")
+    reconcile(root, "child", {"completed": None})
+    child = lifecycle(root)["children"][-1]
+    assert child["native_terminal_status"] == "completed" and child["native_status_conflict"] is True
+    assert not lifecycle_module.native_execution_closed(root)
+    assert lifecycle_module.task_state_recovery_blocker(root, core.selected_task(root)) is not None
+
+
+def test_doctor_distinguishes_optional_stop_from_native_terminal_fact(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "native and hook observations are independent", None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", {"completed": None})
+    report = codex_adapter.doctor(root)
+    assert report["managed_readiness"]["subagent_stop_observed"] == "UNKNOWN"
+    assert report["lifecycle_reconciliation"]["native_terminal_reconciliation"] == "PASS"
+    stop(root, "child")
+    report = codex_adapter.doctor(root)
+    assert report["managed_readiness"]["subagent_stop_observed"] == "YES"
+    assert report["lifecycle_reconciliation"]["native_terminal_reconciliation"] == "PASS"
 
 
 @pytest.mark.parametrize("protocol", ["v1", "v2"])

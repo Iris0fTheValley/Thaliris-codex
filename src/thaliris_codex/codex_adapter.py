@@ -2199,10 +2199,13 @@ def doctor(root: Path) -> dict[str, object]:
         if not isinstance(lifecycle_state, dict) or lifecycle_state.get("version") != lifecycle.LIFECYCLE_STATE_VERSION or lifecycle_state.get("managed_hook_spec_hash") != expected or lifecycle_state.get("adapter_protocol_version") != lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION:
             continue
         for child in lifecycle_state.get("children", []):
+            if isinstance(child, dict):
+                lifecycle_stop = lifecycle_stop or isinstance(child.get("stop_observed"), int)
+                lifecycle_reconciled = lifecycle_reconciled or (
+                    lifecycle._native_execution_terminal(child) and not child.get("native_status_conflict")
+                    and child.get("native_terminal_source") in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"})
             if isinstance(child, dict) and isinstance(child.get("started"), int):
                 lifecycle_start = True
-                lifecycle_stop = lifecycle_stop or isinstance(child.get("stopped"), int)
-                lifecycle_reconciled = lifecycle_reconciled or child.get("terminal_state") == "NATIVE_TERMINAL_RECONCILED"
                 binding = roles.get_codex_binding(child.get("role")) if isinstance(child.get("role"), str) else None
                 metric = binding.orchestration_metric if binding is not None else None
                 if metric is not None:

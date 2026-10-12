@@ -160,7 +160,7 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--supersedes", action="append", default=[])
     q = sub.add_parser("task-close")
     q.add_argument("--base-revision", required=True, type=int)
-    q = sub.add_parser("recover-pending-spawn", help="clear one exact failed pending spawn reservation")
+    q = sub.add_parser("recover-pending-spawn", help="recover an exact pending spawn with trusted native terminal evidence")
     q.add_argument("handoff_id")
     q = sub.add_parser(
         "task-promote",
