@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from thaliris_codex import codex_adapter as adapter, codex_bootstrap, host_maintenance as maintenance, lifecycle, runtime_identity
+from thaliris_codex import codex_adapter as adapter, codex_bootstrap, host_maintenance as maintenance, lifecycle, runtime_identity, model_catalog_config as catalog
 
 
 def intent(tmp_path, home, exe, operation="codex-install", *, legacy=None):
@@ -354,9 +354,12 @@ def test_uninstall_reinstall_preserves_config_user_profiles_and_recovery_evidenc
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert result["ok"] is True, result
     from thaliris_codex import mode_hint_config
-    field = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())[mode_hint_config.RECORD_KEY]
+    receipt = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())
+    field = receipt[mode_hint_config.RECORD_KEY]
     # A fresh reinstall manages the absent leaf; all preceding user bytes survive.
-    assert (home / "config.toml").read_bytes().replace(field["fragment"].encode(), b"", 1) == b"user_setting = true\n"
+    config = (home / "config.toml").read_bytes().replace(field["fragment"].encode(), b"", 1)
+    config = config.replace(receipt[catalog.RECORD_KEY]["fragment"].encode(), b"", 1)
+    assert config == b"user_setting = true\n"
     assert (home / "agents/user.toml").read_bytes() == b"user role\n"
     assert (home / "recovery-authority.json").read_bytes() == b"retained task recovery evidence"
     assert result["host_session_load_status"] == "UNKNOWN"
@@ -546,6 +549,8 @@ def test_generation_crash_replays_original_contract(operation, surface, tmp_path
     op = "codex-uninstall" if operation == "uninstall" else "codex-install"
     path = intent(tmp_path, home, exe, op)
     approved_before = maintenance._files(home)
+    if (home / catalog.NAME).exists():
+        approved_before[catalog.NAME] = (home / catalog.NAME).read_bytes()
     original_write = adapter._atomic_host_write
     original_unlink = Path.unlink
     hit = []
@@ -590,8 +595,9 @@ def test_generation_crash_replays_original_contract(operation, surface, tmp_path
     config_bytes = (home / "config.toml").read_bytes()
     if operation == "fresh":
         from thaliris_codex import mode_hint_config
-        field = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())[mode_hint_config.RECORD_KEY]
-        config_bytes = config_bytes.replace(field["fragment"].encode(), b"", 1)
+        receipt = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())
+        config_bytes = config_bytes.replace(receipt[mode_hint_config.RECORD_KEY]["fragment"].encode(), b"", 1)
+        config_bytes = config_bytes.replace(receipt[catalog.RECORD_KEY]["fragment"].encode(), b"", 1)
     assert config_bytes == b"user_setting=true\n"
     if operation == "uninstall":
         assert not (home / runtime_identity.MANIFEST_NAME).exists()
@@ -651,6 +657,8 @@ def test_legacy_prior_generation_crash_replays_with_exact_receipt(
     )
     path = intent(tmp_path, home, candidate, operation)
     approved_before = maintenance._files(home)
+    if (home / catalog.NAME).exists():
+        approved_before[catalog.NAME] = (home / catalog.NAME).read_bytes()
     assert maintenance.validate_ownership(prior_receipt, prior, {})["runtime_sha256"] == maintenance.digest(prior)
 
     original_write = adapter._atomic_host_write

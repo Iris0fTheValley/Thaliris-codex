@@ -15,6 +15,8 @@ from . import runtime_identity, diagnostics
 RECEIPT_NAME = "thaliris-ownership.json"
 FORMAT = "thaliris-host-maintenance-v1"
 RECEIPT_FORMAT = "thaliris-authorized-host-installation-v1"
+CATALOG_RECEIPT_FORMAT = "thaliris-authorized-host-installation-v2"
+CATALOG_CAPABILITY = "receipt-owned-model-catalog-v1"
 
 
 def digest(value: bytes) -> str:
@@ -113,6 +115,8 @@ def _contract_document(filename: str | Path | None, operation: str, home: Path, 
     if actor and (actor.get("agent_id") is not None or actor.get("agent_type") is not None or
                   actor.get("readonly") is True or actor.get("fenced") is True):
         raise ValueError("HOST_MAINTENANCE_ACTOR_DENIED")
+    from . import catalog_recovery
+    catalog_recovery.policy_from_intent(value)
     return value, raw
 
 
@@ -128,7 +132,7 @@ def validate_ownership(contents: bytes | None, installed: bytes | None, intent: 
         # Neither historical render hashes nor candidate equality supply it.
         return {"owned_bytes": intent.get("legacy_owned_bytes", {}), "hook_handlers": {}}
     record = json.loads(contents)
-    if not isinstance(record, dict) or record.get("format") != RECEIPT_FORMAT or (
+    if not isinstance(record, dict) or record.get("format") not in {RECEIPT_FORMAT, CATALOG_RECEIPT_FORMAT} or (
             record.get("runtime_sha256") != (digest(installed) if installed is not None else "ABSENT")):
         raise ValueError("installed ownership record does not match trusted current installation")
     if not re.fullmatch(r"[0-9a-f]{64}", record.get("maintenance_contract_sha256", "")):
@@ -151,6 +155,16 @@ def validate_ownership(contents: bytes | None, installed: bytes | None, intent: 
     mode_hint_config.validate(record.get(mode_hint_config.RECORD_KEY))
     wait_guidance_config.validate(record.get(wait_guidance_config.RECORD_KEY))
     model_catalog_config.validate(record.get(model_catalog_config.RECORD_KEY))
+    if record["format"] == CATALOG_RECEIPT_FORMAT and (
+            record.get(model_catalog_config.RECORD_KEY) is None or
+            record.get("required_capabilities") != [CATALOG_CAPABILITY]):
+        raise ValueError("invalid required model catalog receipt capability")
+    if record["format"] == RECEIPT_FORMAT and "required_capabilities" in record:
+        raise ValueError("legacy receipt cannot declare required capabilities")
+    from . import catalog_recovery
+    catalog_recovery.validate_policy(record.get(catalog_recovery.POLICY_KEY))
+    if record.get(catalog_recovery.POLICY_KEY) is not None and record["format"] != CATALOG_RECEIPT_FORMAT:
+        raise ValueError("legacy ownership cannot authorize independent catalog recovery")
     return record
 
 
@@ -391,10 +405,24 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         hint_record, hint_status = mode_hint_config.plan_install(home, record)
         wait_guidance_record, wait_guidance_status, wait_guidance_previous_record = wait_guidance_config.plan_install(home, record)
         catalog_record, catalog_status, catalog_bytes = catalog.plan_install(home, record, source=intent.get("model_catalog_source", "online"))
+        if catalog_status["status"] not in {"PLANNED", "UPDATE_PLANNED", "MANAGED", "USER_CONFIG_PRESERVED", "USER_CATALOG_PRESERVED", "USER_CHANGED_PRESERVED"}:
+            result = _failure(home, ValueError("native_model_catalog_compatibility:" + catalog_status["status"]))
+            result.update(native_model_catalog_compatibility=catalog_status,
+                          host_integration_ready="NO", install_status="INSTALL_INCOMPLETE")
+            return result
         catalog_before = catalog.read_catalog(home)
         if catalog_bytes is not None:
             old_catalog = record.get(catalog.RECORD_KEY)
-            if ((old_catalog is None and catalog_before is not None) or
+            reclaimed = False
+            if catalog_status.get("retained_backing_reclaimed") is True:
+                from . import catalog_recovery
+                retained = catalog_recovery.retained_record(home)
+                reclaimed = (old_catalog is None and retained is not None and
+                             catalog_before is not None and digest(catalog_before) == retained["catalog_sha256"] and
+                             catalog.KEY not in catalog.read(home)[1])
+                if not reclaimed:
+                    raise ValueError("retained catalog lost exact generation ownership")
+            if ((old_catalog is None and catalog_before is not None and not reclaimed) or
                     (old_catalog is not None and (catalog_before is None or digest(catalog_before) != old_catalog["catalog_sha256"]))):
                 raise ValueError("model catalog changed during upstream export; preserve user bytes")
         if catalog_before is not None:
@@ -474,10 +502,17 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             if not hook_handlers[event]:
                 hook_handlers[event] = [entry for entry in merged.get("hooks", {}).get(event, [])
                     if entry in record.get("hook_handlers", {}).get(event, [])]
-        installation_changed = catalog_record != record.get(catalog.RECORD_KEY) or hint_status["status"] == "PLANNED" or wait_guidance_status["status"] in {"PLANNED", "MIGRATION_PLANNED"} or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
+        from . import catalog_recovery
+        recovery_policy = (catalog_recovery.policy_from_intent(intent) or record.get(catalog_recovery.POLICY_KEY)) if catalog_record is not None else None
+        if recovery_policy is not None:
+            # Reinstallation creates a fresh active integration. A completed
+            # past restoration cannot authorize reinserting a later user deletion.
+            recovery_policy = {key: value for key, value in recovery_policy.items() if key != "restored"}
+        receipt_format = CATALOG_RECEIPT_FORMAT if catalog_record is not None else RECEIPT_FORMAT
+        installation_changed = record.get("format") != receipt_format or recovery_policy != record.get(catalog_recovery.POLICY_KEY) or catalog_record != record.get(catalog.RECORD_KEY) or hint_status["status"] == "PLANNED" or wait_guidance_status["status"] in {"PLANNED", "MIGRATION_PLANNED"} or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
             before.get(name) != contents for name, contents in writes.items()
         )
-        receipt = {"format": RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
+        receipt = {"format": CATALOG_RECEIPT_FORMAT if catalog_record is not None else RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
                    "execution_constraint": execution_constraint,
                    "maintenance_contract_sha256": intent["contract_sha256"] if installation_changed else record["maintenance_contract_sha256"],
                    "source_pin": intent["candidate"]["source_pin"] if installation_changed else record.get("source_pin", intent["candidate"]["source_pin"]),
@@ -493,6 +528,9 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             receipt[wait_guidance_config.RECORD_KEY] = wait_guidance_record
         if catalog_record is not None:
             receipt[catalog.RECORD_KEY] = catalog_record
+            receipt["required_capabilities"] = [CATALOG_CAPABILITY]
+            if recovery_policy is not None:
+                receipt[catalog_recovery.POLICY_KEY] = recovery_policy
         writes[RECEIPT_NAME] = (json.dumps(receipt, sort_keys=True, ensure_ascii=False) + "\n").encode()
         observed = _files(home)
         if catalog.read_catalog(home) is not None:
@@ -574,11 +612,15 @@ def _finish_install(home, transition):
         manual = ["Host registration or trust incomplete"]
     if not ready:
         catalog_result = finish.get("model_catalog_status", catalog.status("LEGACY_UNMANAGED"))
-    if catalog_result["status"] not in {"MANAGED", "TARGET_ABSENT_MANAGED", "LEGACY_UNMANAGED", "VERSION_SUPPORT_UNKNOWN"} or (catalog_result["status"] == "VERSION_SUPPORT_UNKNOWN" and finish.get("model_catalog_record") is not None):
+    catalog_ready = catalog_result["status"] in {"MANAGED", "LEGACY_UNMANAGED", "USER_CONFIG_PRESERVED", "USER_CATALOG_PRESERVED", "USER_CHANGED_PRESERVED"}
+    if not catalog_ready:
         manual.append("native_model_catalog_compatibility:" + catalog_result["status"])
+    elif catalog_result["status"] in {"USER_CONFIG_PRESERVED", "USER_CATALOG_PRESERVED", "USER_CHANGED_PRESERVED"}:
+        manual.append("native_model_catalog_compatibility:" + catalog_result["status"] + "; catalog goal not applied to user-owned input")
     if hint["status"] in {"USER_CHANGED_PRESERVED", "USER_CUSTOM_PRESERVED", "VERSION_SUPPORT_UNKNOWN", "STRUCTURE_UNSUPPORTED_PRESERVED", "APPLY_OUTCOME_UNKNOWN_PRESERVED"}:
         manual.append("native_mode_hint_compatibility:" + hint["status"])
-    return {"ok": ready, "changed": bool(changed_files), "target": str(home),
+    complete = ready and catalog_ready
+    return {"ok": complete, "changed": bool(changed_files), "target": str(home),
         "files": sorted(set(changed_files)), "manual_action_required": manual,
         "host_actor_assurance": "UNKNOWN", "maintenance_authority": "EXPLICIT_HUMAN_INTENT",
         "execution_constraint": execution_constraint, "host_profile_definition_present": adapter._host_profile_definition_present(home),
@@ -588,7 +630,8 @@ def _finish_install(home, transition):
         "native_mode_hint_compatibility": hint,
         "controller_wait_guidance_compatibility": wait_guidance,
         "native_model_catalog_compatibility": catalog_result,
-        "host_integration_ready": "YES" if ready else "NO", "global_instruction_ready": "YES",
+        "catalog_goal_met": catalog_result["status"] == "MANAGED",
+        "host_integration_ready": "YES" if complete else "NO", "global_instruction_ready": "YES",
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,
         "native_profile_names": sorted(roles.native_profile_names()), "project_files_touched": [],
@@ -596,7 +639,7 @@ def _finish_install(home, transition):
                                       if name in changed_files],
         "transition_pending": not ready,
         "recovery_action": None if ready else "Replay the original codex-install --maintenance-contract FILE",
-        "install_status": "RESTART_CODEX_ONCE" if ready and changed_files else "HOST_INTEGRATION_UNCHANGED" if ready else "INSTALL_INCOMPLETE",
+        "install_status": "RESTART_CODEX_ONCE" if complete and changed_files else "HOST_INTEGRATION_UNCHANGED" if complete else "INSTALL_INCOMPLETE",
         "session_restart_required": bool(ready and changed_files), "host_setup_requires_session_start": bool(changed_files)}
 
 
@@ -626,10 +669,8 @@ def uninstall(home: Path, filename) -> dict:
         wait_guidance_config.validate(wait_guidance_record, home)
         catalog_record = record.get(catalog.RECORD_KEY)
         catalog.validate(catalog_record, home)
-        catalog_field_owned = False
         if catalog_record is not None:
-            catalog_raw, catalog_config = catalog.read(home)
-            catalog_field_owned = catalog.KEY not in catalog_config or catalog.matches(catalog_raw, catalog_config, catalog_record)
+            catalog.read(home)  # Reject malformed config before any mutation.
         catalog_before = catalog.read_catalog(home)
         if hint_record is not None:
             mode_hint_config.read(home)  # Reject malformed config before any disk transition.
@@ -697,19 +738,13 @@ def uninstall(home: Path, filename) -> dict:
             raise ValueError("maintenance input changed during preflight")
         if catalog.read_catalog(home) != catalog_before:
             raise ValueError("model catalog changed during uninstall preflight")
-        if catalog_record is not None and catalog_before is not None:
-            # Hook ownership lookup can take time and user config is outside
-            # _files(). Recheck the exact root-field receipt immediately before
-            # planning the catalog deletion so a concurrent adoption is kept.
-            catalog_raw, catalog_config = catalog.read(home)
-            catalog_field_owned = (catalog.KEY not in catalog_config
-                                   or catalog.matches(catalog_raw, catalog_config, catalog_record))
         if catalog_before is not None:
             before[catalog.NAME] = catalog_before
-            if catalog_field_owned and digest(catalog_before) == catalog_record["catalog_sha256"]:
-                deletes.append(catalog.NAME)
-            else:
-                preserved.append(catalog.NAME)
+            # An external config writer does not share our lock. Keep this
+            # backing file even after field restoration: no late reference can
+            # point at a file we deleted. The exact generation retains ownership
+            # evidence for a later explicitly authorized reinstall.
+            preserved.append(catalog.NAME)
     except (OSError, ValueError, TypeError, KeyError, RuntimeError, codex_app_server.CodexAppServerError) as exc:
         return _failure(home, exc)
     deletes += [name for name, contents in writes.items() if not contents]
@@ -736,8 +771,8 @@ def _finish_uninstall(home, transition):
     try:
         trust_removed = codex_app_server.remove_owned_hook_trust(home, keys) if keys else 0
         wait_guidance = wait_guidance_config.apply(home, finish.get("wait_guidance_record"), remove=True)
-        hint = mode_hint_config.apply(home, finish.get("mode_hint_record"), remove=True)
         catalog_result = catalog.apply(home, finish.get("model_catalog_record"), remove=True)
+        hint = mode_hint_config.apply(home, finish.get("mode_hint_record"), remove=True)
     except (OSError, ValueError, RuntimeError) as exc:
         result = _failure(home, exc)
         result.update(status="HOST_TRANSITION_PENDING", changed=True, runtime_audit_records=audits,
@@ -745,6 +780,8 @@ def _finish_uninstall(home, transition):
                       host_hook_trust_cleanup_status="FAILED", host_hook_trust_cleanup_error=str(exc))
         return result
     host_transition.complete(home, transition)
+    if (home / catalog.NAME).exists():
+        catalog_result["backing_artifact_status"] = "RETAINED_REFERENCE_SAFE"
     manual = (["native_mode_hint_compatibility:USER_CHANGED_PRESERVED"] if hint["status"] == "USER_CHANGED_PRESERVED" else [])
     return {"ok": True, "changed": bool(finish["changed_files"] or trust_removed or hint["changed"] or wait_guidance["changed"]), "target": str(home),
         "status": "UNINSTALLED_INERT_RUNNER_RETAINED" if inert else "UNINSTALLED",

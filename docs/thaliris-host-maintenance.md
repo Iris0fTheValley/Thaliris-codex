@@ -277,6 +277,54 @@ approval. This retains runtime/ownership validation; it does not authorize an
 automated child to bypass the old Hook or manually delete guards. Restart Codex
 as required and re-observe the loaded integration afterward.
 
+### Host-wide model-catalog preservation and recovery
+
+The Host-global `model_catalog_json` field is receipt-owned alongside its backing
+catalog. A catalog-required receipt uses the v2 format and declares its catalog
+capability, so an older reader fails closed instead of ignoring the field. The
+current reader accepts a valid legacy v1 receipt and an authorized install or
+upgrade migrates it. A v2 receipt causes an older reader's install or uninstall to
+stop before mutation; for a downgrade, first uninstall with the current reader,
+then install the older reader. The committed archive preserves exact catalog
+ownership so a later current-reader upgrade can reclaim it if the field is absent
+and the bytes still match. Catalog compatibility and online-source failures are checked
+before the Host generation is written. A user-edited catalog can be reported as
+`USER_CHANGED_PRESERVED` while other authorized Host changes proceed, but
+`catalog_goal_met` stays false and manual follow-up is required.
+
+`codex-maintenance-plan codex-install` proposes the `--root` location as
+`catalog_recovery_project_root` by default. `--catalog-recovery-project-root`
+selects another absolute project path, and `--catalog-recovery-source-root` can
+select an additional source path. These are proposed contract fields; only the
+human-authorized contract stores the recovery policy in the receipt. On the next
+actual `SessionStart`, the verified pinned runtime checks those selected locations
+before project dispatch. If the selected
+activation marker or source is gone, it restores only the exact managed
+`model_catalog_json` field to its recorded absent state when both field ownership
+and catalog digest still match. The physical catalog remains on disk. A legacy
+receipt without recovery policy, changed user bytes, unknown ownership, malformed
+payload, unfinished transition, or runtime failure does not trigger cleanup;
+recovery remains unknown or failed and preserves the evidence. A detected field
+edit reports `USER_CHANGED_PRESERVED`; changed backing bytes report
+`CATALOG_CHANGED_PRESERVED`. If the field is already absent and the receipt has no
+completed-restoration proof, recovery reports `RECOVERY_PROVENANCE_UNKNOWN`; absence
+alone cannot authorize later reclaim. No project checkout is downloaded or recreated.
+
+Uninstall removes the owned field but keeps the catalog file and archives the
+committed generation. A later upgrade may reclaim that file only from an exact
+committed archive or once from a receipt proving a completed project-loss
+restoration, with the field absent and the catalog digest unchanged. Recovery
+records its `restored` proof only when it removes the exact owned field; an already
+absent field without prior proof reports `RECOVERY_PROVENANCE_UNKNOWN` and cannot
+authorize reclaim. Successful reinstatement clears the restoration marker. Missing configuration is not evidence
+that the backing file may be deleted. The field writer rechecks before atomic
+replacement, but a non-cooperating writer can still race after that comparison;
+simultaneous unobserved edits are not guaranteed safe. See the
+[model-catalog maintenance report](model-catalog-maintenance-report.md) for the
+recorded states and compatibility rules. The accepted boundary is observed-user
+change preservation plus retaining the backing file; the remaining concurrent
+writer interval is documented and is not treated as a pending decision.
+
 After installation, run the installed `thaliris-run.cmd --root <repo>
 codex-bootstrap`. Unknown role documents/README/generated documentation are
 preserved with `preserved_manual_followup`; they do not alone block admission.
@@ -400,6 +448,36 @@ Host generation rollback。写入器在原子替换前重读 bytes，但仍无�
 TOML 片段完整时会恢复之前迁移的 `enabled` 布尔值。用户修改和后来发生的结构变化会被
 保留并报告。安装与卸载 contract 仍须满足上文的可信 runtime、candidate、executor、
 当前安装身份及明确人类意图要求。
+
+### Host 全局模型目录的保留与恢复
+
+Host 全局 `model_catalog_json` 字段与其 backing catalog 一起由 receipt 管理。
+包含必需 catalog 的 receipt 使用带显式 catalog capability 的 v2 格式，使旧 reader
+无法忽略该字段而误将它当作非受管配置；新 reader 兼容有效 v1 receipt，并在明确授权的
+安装/升级中迁移。v2 receipt 会使旧 reader 的安装或卸载在写入前拒绝；需要降级时，先用当前
+reader 卸载，再安装旧 reader。已提交 archive 保留精确 catalog ownership，之后当前 reader 只在字段
+缺失且 bytes 摘要仍匹配时才能重新认领。目录兼容性或在线来源失败在 Host generation 写入前判定并保留旧状态。
+用户已编辑的目录可以报告为 `USER_CHANGED_PRESERVED`，并在继续其他已授权 Host 操作时保留；
+但 `catalog_goal_met` 仍为 false，结果需要人工跟进。
+
+`codex-maintenance-plan codex-install` 默认把 `--root` 提议为
+`catalog_recovery_project_root`；`--catalog-recovery-project-root` 可选择其他绝对 project path，
+`--catalog-recovery-source-root` 可额外指定 source path。这些只是 contract 提议字段，只有人类授权的
+contract 才会把恢复 policy 写入 receipt。下一次真实 Host `SessionStart` 会由经过验证的 pinned runtime
+在 project dispatch 前检查这些位置。
+若指定的 activation marker 或 source 已不存在，只在字段 ownership 和 catalog digest 均精确匹配时，
+才把受管 `model_catalog_json` 字段恢复为此前缺失状态。物理 catalog 文件保留在磁盘上。没有恢复
+policy 的旧 receipt、被修改的用户 bytes、未知 ownership、malformed payload、未完成 transition
+或 runtime failure 都不会触发清理；状态保留为 UNKNOWN 或 failed，并保全证据。检测到字段修改时报告
+`USER_CHANGED_PRESERVED`，检测到 backing bytes 修改时报告 `CATALOG_CHANGED_PRESERVED`。流程不会下载或重建 project checkout。
+
+卸载会移除受管字段，但保留 catalog 文件，并归档已提交 generation。之后的升级只有在字段缺失、
+catalog digest 未变化且证据来自精确的 committed archive，或只使用一次的已完成 project-loss
+restoration receipt 时才能重新认领该文件；只有实际移除过精确受管字段的 receipt 才能提供这项证明。字段原本已缺失而没有证明时报告 `RECOVERY_PROVENANCE_UNKNOWN`，不授权重新认领。成功后会清除 restoration marker。字段写入前会重新检查
+bytes，但非协作 writer 仍可能在最后比较与 atomic replacement 之间并发修改，因此无法保证保全该时间窗内
+未观察到的编辑。配置字段缺失并不授权删除 backing file。见
+[模型目录维护报告](model-catalog-maintenance-report.md)了解兼容规则和记录状态。已接受的事务边界是保留
+已观察到的用户修改并保留 backing file；并发 writer 剩余时间窗已公开说明，不是待决议事项。
 
 磁盘证据不能证明 Host 实际生效。重启 Codex 并使用新的 Host session，观察默认提示
 是否消失；随后用真实 Fresh Child 验收 V2 `fork_turns="none"` 或 V1

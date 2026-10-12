@@ -113,7 +113,7 @@ Codex 提供原生 Controller 会话、角色会话、工具和协作能力；ad
 
 普通生成的角色 profile 故意省略 model 和 effort，因为 Codex 会在 spawn 参数之后应用 role model 配置。Controller 默认让 Investigator、Implementer、Curator 使用 gpt-6-luna/max，让 Reviewer、Focused Implementer、Reasoning Specialist 使用 gpt-6.1-sol/high；原生派遣必须显式传入 model 与 reasoning_effort，managed Hook 会在 reservation 前拒绝缺项。明确的 execution constraint 或经验证的必要例外可以指定其他受支持组合；这只改变执行选择，不改变角色职责或权限。Verifier 保持现有配置，Controller 自身模型不变。Astra 仍需当前任务的人类 opt-in；静态 Astra 兼容 profile 保持固定绑定，luna-only 继续冻结并禁止 per-spawn 覆盖。历史安装的 profile 可能仍固定模型；源码变化不证明当前 Host 已加载更新。见[原生选择优先级](https://learn.chatgpt.com/docs/agent-configuration/subagents#choosing-models-and-reasoning)。
 
-Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目内角色 profile 分离。维护是显式、低频的同步：结果无变化时不写配置；有变化时只删除精确的 Thaliris 管理行，并保留相邻说明、自定义配置和其他模型的原始指令。CLI 内置目录、实际在线取得的目录与受管配置是不同来源；普通自导出不能证明刚从上游刷新。磁盘配置、当前进程已加载的目录和此前启动的会话是不同状态；编辑或安装不证明当前 Host 已激活更新。详见[模型目录维护报告](docs/model-catalog-maintenance-report.md)。
+Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目内角色 profile 分离。维护是显式、低频的同步：只有通过受支持版本和模型名单兼容检查的模板才会移除目标句；已知模板要求精确完整行及预期相邻行，新模型要求目标句恰好作为完整行出现。缺失、移动、改写、拆分、嵌入或重复均保留旧目录并报告不兼容。受管 receipt 显式声明目录能力，新 reader 兼容旧 receipt，并在成功的授权升级中迁移；旧 reader 遇到新格式会在写入前拒绝。降级时先用当前 reader 卸载，精确归档使之后的升级可在字段缺失且字节匹配时重新认领。用户修改可在继续其他已授权 Host 操作时保留，但目录目标会保持未达成。安装 contract 可明确指定项目丢失恢复位置；真实 Host `SessionStart` 仅在 marker、receipt 和目录摘要仍满足精确校验时移除受管配置字段，物理目录文件继续保留。已完成恢复 receipt 只支持一次重新认领，只有恢复过程实际移除了精确受管字段，receipt 才会记录一次重新认领所需的恢复证据。字段在恢复前已缺失且没有既有证据时，报告 `RECOVERY_PROVENANCE_UNKNOWN`，不会让用户删除或不确定的崩溃状态授权重新认领。成功重装后会清除该证据。磁盘配置、当前进程加载状态和此前启动的会话是不同状态；编辑或安装不证明当前 Host 已激活更新。详见[模型目录维护报告](docs/model-catalog-maintenance-report.md)。本次接受的事务边界是保留最终字节比较已观察到的用户修改并保留 catalog backing file；非协作 writer 仍可能在比较与 atomic replacement 之间并发修改。该剩余时间窗已公开说明，不是待决议事项。
 
 ## 安装与本地开发
 

@@ -7,6 +7,7 @@ import pytest
 
 from thaliris_codex import model_catalog_config as catalog, codex_adapter as adapter, host_maintenance as maintenance, host_transition
 from tests.test_host_maintenance_contract import intent
+from tests.model_catalog_fixtures import observed_catalog, bundled_compatible_catalog, supply
 
 PRODUCTION_EXPORTER = catalog.export_upstream
 
@@ -17,10 +18,6 @@ def upstream(extra=False):
     return json.dumps({"metadata": {"etag": "original"}, "models": [model] + ([dict(deepcopy(model), slug="new-model")] if extra else [])}).encode()
 
 
-def supply(monkeypatch, raw=None):
-    monkeypatch.setattr(catalog, "export_upstream", lambda _home, **_kwargs: (raw or upstream(), {"kind": "online", "cli_version": "codex-cli 0.162.0-alpha.17.2"}))
-
-
 def test_only_exact_sentence_changes_and_new_models_preserved():
     raw = upstream(True)
     patched, result = catalog.patch_catalog(raw)
@@ -28,14 +25,156 @@ def test_only_exact_sentence_changes_and_new_models_preserved():
     for model in expected["models"]:
         model["model_messages"]["instructions_template"] = "first\nlast\n"
     assert json.loads(patched) == expected
+    assert result["status"] == "COMPATIBLE"
     assert result["patched_templates"] == 2
 
 
-@pytest.mark.parametrize("template,status", [("missing", "TARGET_ABSENT"), (catalog.TARGET + "\n" + catalog.TARGET, "TARGET_MULTIPLE_MATCHES"), ("prefix " + catalog.TARGET, "TARGET_CHANGED_OR_EMBEDDED")])
+@pytest.mark.parametrize("template,status", [("missing", "TARGET_ABSENT_UNEXPECTED"), (catalog.TARGET + "\n" + catalog.TARGET, "TARGET_MULTIPLE_MATCHES"), ("prefix " + catalog.TARGET, "TARGET_CHANGED_OR_EMBEDDED")])
 def test_compatibility_refuses_fuzzy_or_multiple(template, status):
     value = json.loads(upstream())
     value["models"][0]["model_messages"]["instructions_template"] = template
-    assert catalog.patch_catalog(json.dumps(value).encode()) == (None, catalog.status(status))
+    patched, result = catalog.patch_catalog(json.dumps(value).encode())
+    assert patched is None and result["status"] == status
+
+
+def test_split_target_line_is_not_accepted_as_exact():
+    split = catalog.TARGET.replace("longer than 60", "longer than\n60")
+    value = json.loads(upstream())
+    value["models"][0]["model_messages"]["instructions_template"] = "before\n" + split + "\nafter\n"
+    patched, result = catalog.patch_catalog(json.dumps(value).encode())
+    assert patched is None and result["status"] == "TARGET_ABSENT_UNEXPECTED"
+
+
+def test_observed_bundled_11_models_allow_only_known_absent_slug():
+    raw = bundled_compatible_catalog()
+    patched, result = catalog.patch_catalog(raw, cli_version="codex-cli 0.162.0-alpha.17.2", source="bundled")
+    assert result["status"] == "COMPATIBLE"
+    assert result["patched_templates"] == 10
+    assert result["template_statuses"] == {"EXACT_MATCH": 10, "KNOWN_ABSENT": 1}
+    original = json.loads(raw)
+    expected = deepcopy(original)
+    for model in expected["models"]:
+        if model["slug"] != "gpt-5.5":
+            lines = model["model_messages"]["instructions_template"].splitlines(keepends=True)
+            model["model_messages"]["instructions_template"] = "".join(
+                line for line in lines if line.rstrip("\r\n") != catalog.TARGET
+            )
+    assert json.loads(patched) == expected
+
+
+def test_observed_online_10_models_have_source_specific_roster():
+    patched, result = catalog.patch_catalog(
+        observed_catalog("online"), cli_version="codex-cli 0.162.0-alpha.17.2", source="online"
+    )
+    assert patched is not None and result["status"] == "COMPATIBLE"
+    assert result["patched_templates"] == 9
+    assert result["template_statuses"] == {"EXACT_MATCH": 9, "KNOWN_ABSENT": 1}
+
+
+def test_version_source_and_schema_variations_fail_closed():
+    raw = observed_catalog("online")
+    patched, result = catalog.patch_catalog(raw, cli_version="codex-cli 0.162.0-alpha.17.2")
+    assert patched is None and result["status"] == "CATALOG_PROFILE_UNKNOWN"
+
+    value = json.loads(raw)
+    del value["models"][0]["model_messages"]["instructions_template"]
+    patched, result = catalog.patch_catalog(
+        json.dumps(value).encode(), cli_version="codex-cli 0.162.0-alpha.17.2", source="online"
+    )
+    assert patched is None and result["status"] == "MODEL_TEMPLATE_UNSUPPORTED"
+
+    patched, result = catalog.patch_catalog(b"{")
+    assert patched is None and result["status"] == "CATALOG_JSON_UNSUPPORTED"
+    patched, result = catalog.patch_catalog(b'{"models":[]}')
+    assert patched is None and result["status"] == "CATALOG_SCHEMA_UNSUPPORTED"
+
+
+def test_plan_preserves_state_on_unsupported_catalog_schema(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(catalog, "export_upstream", lambda *_args, **_kwargs: (
+        b'{"models":[]}', {"kind": "online", "cli_version": "codex-cli 0.162.0-alpha.17.2"}
+    ))
+    record, result, changed = catalog.plan_install(home, {})
+    assert record is None and changed is None
+    assert result["status"] == "TEMPLATE_INCOMPATIBILITY_PRESERVED"
+    assert result["template_compatibility"]["status"] == "CATALOG_SCHEMA_UNSUPPORTED"
+    assert not (home / catalog.NAME).exists()
+
+
+@pytest.mark.parametrize("slug,template,expected_status", [
+    ("formerly-matched", "edited upstream wording", "TARGET_ABSENT_UNEXPECTED"),
+    ("gpt-5.5", "before\n" + catalog.TARGET + "\nafter\n", "KNOWN_ABSENT_MODEL_CHANGED"),
+    ("new-model", "new model without the pinned target", "TARGET_ABSENT_UNEXPECTED"),
+])
+def test_partial_or_new_model_absence_is_incompatible(slug, template, expected_status):
+    value = json.loads(bundled_compatible_catalog())
+    model = {"slug": slug, "model_messages": {"instructions_template": template}}
+    if slug == "formerly-matched":
+        value["models"][0] = model
+    elif slug == "gpt-5.5":
+        value["models"] = [model]
+    else:
+        value["models"].append(model)
+    changed, result = catalog.patch_catalog(json.dumps(value).encode(), cli_version="codex-cli 0.162.0-alpha.17.2", source="bundled")
+    assert changed is None and result["status"] == expected_status
+
+
+def test_moved_known_target_requires_review():
+    value = json.loads(bundled_compatible_catalog())
+    model = next(m for m in value["models"] if m["slug"] == "gpt-6-astra")
+    lines = model["model_messages"]["instructions_template"].splitlines()
+    target_index = lines.index(catalog.TARGET)
+    lines[target_index - 1], lines[target_index] = lines[target_index], lines[target_index - 1]
+    model["model_messages"]["instructions_template"] = "\n".join(lines) + "\n"
+    patched, result = catalog.patch_catalog(
+        json.dumps(value).encode(), cli_version="codex-cli 0.162.0-alpha.17.2", source="bundled"
+    )
+    assert patched is None and result["status"] == "TARGET_LOCATION_CHANGED"
+
+
+def test_removed_known_model_does_not_invalidate_remaining_catalog():
+    original = json.loads(bundled_compatible_catalog())
+    removed_slug = "gpt-6-astra"
+    input_value = deepcopy(original)
+    input_value["models"] = [model for model in input_value["models"] if model["slug"] != removed_slug]
+    expected = deepcopy(input_value)
+    for model in expected["models"]:
+        if model["slug"] == "gpt-5.5":
+            continue
+        lines = model["model_messages"]["instructions_template"].splitlines(keepends=True)
+        model["model_messages"]["instructions_template"] = "".join(
+            line for line in lines if line.rstrip("\r\n") != catalog.TARGET
+        )
+
+    patched, result = catalog.patch_catalog(
+        json.dumps(input_value).encode(),
+        cli_version="codex-cli 0.162.0-alpha.17.2", source="bundled"
+    )
+
+    assert patched is not None and result["status"] == "COMPATIBLE"
+    assert result["patched_templates"] == 9
+    assert json.loads(patched) == expected
+
+
+def test_present_known_model_still_requires_its_exact_target():
+    value = json.loads(bundled_compatible_catalog())
+    model = next(m for m in value["models"] if m["slug"] == "gpt-6-astra")
+    model["model_messages"]["instructions_template"] = "known model without the target\n"
+    patched, result = catalog.patch_catalog(
+        json.dumps(value).encode(), cli_version="codex-cli 0.162.0-alpha.17.2", source="bundled"
+    )
+    assert patched is None and result["status"] == "TARGET_ABSENT_UNEXPECTED"
+
+
+def test_new_exact_target_model_is_removed_but_new_absent_model_is_incompatible():
+    raw = observed_catalog("online", extra=True)
+    patched, result = catalog.patch_catalog(
+        raw, cli_version="codex-cli 0.162.0-alpha.17.2", source="online"
+    )
+    assert result["status"] == "COMPATIBLE"
+    new = next(m for m in json.loads(patched)["models"] if m["slug"] == "new-model")
+    assert catalog.TARGET not in new["model_messages"]["instructions_template"]
 
 
 @pytest.mark.parametrize("value", ["", "custom.json", False])
@@ -62,13 +201,13 @@ def test_install_update_nochange_uninstall(tmp_path, monkeypatch, pinned_test_th
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert result["ok"] and not result["changed"], result
     assert before == [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
-    supply(monkeypatch, upstream(True))
+    supply(monkeypatch, observed_catalog("online", extra=True))
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert result["ok"], result
-    assert len(json.loads((home / catalog.NAME).read_bytes())["models"]) == 2
+    assert len(json.loads((home / catalog.NAME).read_bytes())["models"]) == 11
     result = adapter.codex_uninstall(maintenance_contract=intent(tmp_path, home, exe, "codex-uninstall"))
     assert result["ok"], result
-    assert not (home / catalog.NAME).exists()
+    assert (home / catalog.NAME).exists()
     assert catalog.KEY not in (home / "config.toml").read_text()
 
 
@@ -81,6 +220,7 @@ def test_user_changed_catalog_preserved_across_upgrade_and_uninstall(tmp_path, m
     (home / catalog.NAME).write_bytes(b"user modified catalog")
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert result["ok"] and result["native_model_catalog_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
+    assert (home / catalog.NAME).read_bytes() == b"user modified catalog"
     result = adapter.codex_uninstall(maintenance_contract=intent(tmp_path, home, exe, "codex-uninstall"))
     assert result["ok"], result
     assert (home / catalog.NAME).read_bytes() == b"user modified catalog"
@@ -96,8 +236,31 @@ def test_failed_refresh_does_not_claim_stale_healthy(tmp_path, monkeypatch, pinn
     before = (home / catalog.NAME).read_bytes()
     monkeypatch.setattr(catalog, "export_upstream", lambda _home, **_kwargs: (_ for _ in ()).throw(ValueError("offline")))
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
+    assert not result["ok"], result
     assert result["native_model_catalog_compatibility"]["status"] == "UPSTREAM_REFRESH_FAILED_PRESERVED"
     assert (home / catalog.NAME).read_bytes() == before
+
+
+def test_old_record_install_incompatibility_fails_and_preserves_owned_state(tmp_path, monkeypatch, pinned_test_thaliris):
+    exe, _ = pinned_test_thaliris
+    home = tmp_path / "home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    supply(monkeypatch)
+    first = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
+    assert first["ok"], first
+    paths = [home / catalog.NAME, home / "config.toml", home / maintenance.RECEIPT_NAME]
+    before = [path.read_bytes() for path in paths]
+
+    changed = json.loads(observed_catalog())
+    changed["models"][0]["model_messages"]["instructions_template"] = "upstream wording changed\n"
+    supply(monkeypatch, json.dumps(changed).encode())
+    result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
+    assert not result["ok"], result
+    compatibility = result["native_model_catalog_compatibility"]
+    assert compatibility["status"] == "TEMPLATE_INCOMPATIBILITY_PRESERVED"
+    assert compatibility["template_compatibility"]["status"] == "TARGET_ABSENT_UNEXPECTED"
+    assert [path.read_bytes() for path in paths] == before
+    assert not host_transition.pending(home)
 
 
 def test_prepared_rollback_and_committed_recovery(tmp_path, monkeypatch, pinned_test_thaliris):
@@ -203,13 +366,26 @@ def test_source_selection_and_version_boundary(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog.subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, b"codex-cli 0.162.0-alpha.17.3", b""))
     with pytest.raises(ValueError, match="VERSION_SUPPORT_UNKNOWN"):
         catalog.export_upstream(tmp_path)
-    monkeypatch.setattr(catalog, "export_upstream", lambda _home, **kwargs: (upstream(), {"kind": "bundled", "cli_version": "codex-cli 0.162.0-alpha.17.2"}))
+    monkeypatch.setattr(catalog, "export_upstream", lambda _home, **kwargs: (bundled_compatible_catalog(), {"kind": "bundled", "cli_version": "codex-cli 0.162.0-alpha.17.2"}))
     record, result, raw = catalog.plan_install(tmp_path, {}, source="bundled")
     assert record and result["status"] == "PLANNED" and raw
     record["source"]["kind"] = "online"
     old = deepcopy(record)
     new, result, raw = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: record}, source="bundled")
     assert new == old and raw is None and result["status"] == "SOURCE_DOWNGRADE_PRESERVED"
+
+
+def test_plan_rejects_unlisted_cli_version_even_if_exporter_returns_catalog(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(catalog, "export_upstream", lambda _home, **_kwargs: (
+        upstream(), {"kind": "online", "cli_version": "codex-cli 0.162.0-alpha.17.3"}
+    ))
+    record, result, changed = catalog.plan_install(home, {})
+    assert record is None and changed is None
+    assert result["status"] == "VERSION_SUPPORT_UNKNOWN"
+    assert not (home / catalog.NAME).exists()
+    assert not (home / "config.toml").exists()
 
 
 def test_user_change_during_export_never_overwrites(tmp_path, monkeypatch, pinned_test_thaliris):
@@ -308,33 +484,150 @@ def test_observed_export_timeout_preserves_prior_catalog(tmp_path, monkeypatch, 
     assert (home / catalog.NAME).read_bytes() == before
 
 
-def test_first_absent_no_takeover_existing_absent_syncs_verbatim_and_recovers(tmp_path, monkeypatch, pinned_test_thaliris):
-    raw = upstream(True).replace(catalog.TARGET.encode(), b"upstream replacement rule")
-    supply(monkeypatch, raw)
-    first_home = tmp_path / "first"
-    first_home.mkdir()
-    (first_home / "config.toml").write_bytes(b"# untouched\n")
-    record, result, changed = catalog.plan_install(first_home, {})
-    assert record is None and changed is None and result["status"] == "TARGET_ABSENT"
-    assert (first_home / "config.toml").read_bytes() == b"# untouched\n"
-    exe, _ = pinned_test_thaliris
+def test_first_incompatible_catalog_is_not_claimed_or_written(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    monkeypatch.setenv("CODEX_HOME", str(home))
-    supply(monkeypatch)
-    assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))["ok"]
+    home.mkdir()
+    config = home / "config.toml"
+    config.write_bytes(b"# untouched\n")
+    raw = observed_catalog().replace(catalog.TARGET.encode(), b"upstream replacement rule")
     supply(monkeypatch, raw)
-    path = intent(tmp_path, home, exe)
-    trust = adapter._install_host_hook_trust
-    monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *_: (_ for _ in ()).throw(ValueError("trust unavailable")))
-    result = adapter.codex_install(maintenance_contract=path)
-    assert not result["ok"] and host_transition.pending(home)
-    assert (home / catalog.NAME).read_bytes() == raw
-    monkeypatch.setattr(adapter, "_install_host_hook_trust", trust)
-    result = adapter.codex_install(maintenance_contract=path)
-    assert result["ok"] and result["native_model_catalog_compatibility"]["status"] == "TARGET_ABSENT_MANAGED", result
-    assert (home / catalog.NAME).read_bytes() == raw
-    assert len(json.loads(raw)["models"]) == 2
-    receipt = json.loads((home / maintenance.RECEIPT_NAME).read_bytes())
-    assert receipt[catalog.RECORD_KEY]["catalog_sha256"] == receipt[catalog.RECORD_KEY]["source"]["upstream_sha256"]
-    result = adapter.codex_uninstall(maintenance_contract=intent(tmp_path, home, exe, "codex-uninstall"))
-    assert result["ok"] and not (home / catalog.NAME).exists()
+    record, result, changed = catalog.plan_install(home, {})
+    assert record is None and changed is None
+    assert result["status"] == "TEMPLATE_INCOMPATIBILITY_PRESERVED"
+    assert result["template_compatibility"]["status"] == "TARGET_ABSENT_UNEXPECTED"
+    assert config.read_bytes() == b"# untouched\n"
+    assert not (home / catalog.NAME).exists()
+
+
+def test_old_record_partial_absence_is_preserved_by_plan(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    supply(monkeypatch)
+    old_record, planned, catalog_bytes = catalog.plan_install(home, {})
+    assert old_record and planned["status"] == "PLANNED" and catalog_bytes
+    (home / catalog.NAME).write_bytes(catalog_bytes)
+    (home / "config.toml").write_bytes(old_record["fragment"].encode())
+    receipt = {catalog.RECORD_KEY: old_record}
+    catalog_before = (home / catalog.NAME).read_bytes()
+    config_before = (home / "config.toml").read_bytes()
+
+    changed = json.loads(observed_catalog())
+    changed["models"][0]["model_messages"]["instructions_template"] = "new upstream wording\n"
+    raw = json.dumps(changed).encode()
+    supply(monkeypatch, raw)
+    planned_record, planned, changed_bytes = catalog.plan_install(home, receipt)
+    assert planned_record == old_record and changed_bytes is None
+    assert planned["status"] == "TEMPLATE_INCOMPATIBILITY_PRESERVED"
+    assert planned["template_compatibility"]["status"] == "TARGET_ABSENT_UNEXPECTED"
+    assert (home / catalog.NAME).read_bytes() == catalog_before
+    assert (home / "config.toml").read_bytes() == config_before
+
+
+def test_archive_proven_retained_catalog_can_be_reacquired_only_with_missing_field(tmp_path, monkeypatch):
+    from thaliris_codex import catalog_recovery
+
+    home = tmp_path / "home"
+    home.mkdir()
+    supply(monkeypatch)
+    retained, planned, original_bytes = catalog.plan_install(home, {})
+    assert retained and planned["status"] == "PLANNED" and original_bytes
+    (home / catalog.NAME).write_bytes(original_bytes)
+    before_config = b"# config has no catalog field\n"
+    (home / "config.toml").write_bytes(before_config)
+    monkeypatch.setattr(
+        catalog_recovery, "retained_record",
+        lambda _home, catalog_bytes=None: retained if catalog_bytes in (None, original_bytes) else None,
+    )
+
+    record, model_status, new_bytes = catalog.plan_install(home, {})
+    assert record is not None and new_bytes == original_bytes
+    assert model_status["status"] == "PLANNED"
+    assert model_status["retained_backing_reclaimed"] is True
+    finish = {"model_catalog_record": record, "model_catalog_status": model_status}
+    before = {catalog.NAME: original_bytes, "config.toml": before_config}
+    after = {catalog.NAME: new_bytes, "config.toml": before_config}
+    catalog.validate_transition(finish, {}, record, before, after, home, install=True)
+
+
+def test_retained_catalog_reclaim_refuses_changed_or_field_present_state(tmp_path, monkeypatch):
+    from thaliris_codex import catalog_recovery
+
+    home = tmp_path / "home"
+    home.mkdir()
+    supply(monkeypatch)
+    retained, _, original_bytes = catalog.plan_install(home, {})
+    (home / catalog.NAME).write_bytes(original_bytes + b"user edit")
+    (home / "config.toml").write_bytes(b"# config has no catalog field\n")
+    monkeypatch.setattr(catalog_recovery, "retained_record", lambda *_args, **_kwargs: retained)
+    record, result, changed = catalog.plan_install(home, {})
+    assert record is None and changed is None and result["status"] == "USER_CATALOG_PRESERVED"
+
+    (home / catalog.NAME).write_bytes(original_bytes)
+    (home / "config.toml").write_text("model_catalog_json = \"custom.json\"\n")
+    record, result, changed = catalog.plan_install(home, {})
+    assert record is None and changed is None and result["status"] == "USER_CONFIG_PRESERVED"
+
+
+def test_restored_receipt_reacquires_missing_field_with_exact_helper_proof(tmp_path, monkeypatch):
+    from thaliris_codex import catalog_recovery
+
+    home = tmp_path / "home"
+    home.mkdir()
+    supply(monkeypatch)
+    old_record, _, old_bytes = catalog.plan_install(home, {})
+    (home / catalog.NAME).write_bytes(old_bytes)
+    before_config = b"# restored catalog field is absent\n"
+    (home / "config.toml").write_bytes(before_config)
+    policy = {
+        "format": catalog_recovery.POLICY_FORMAT,
+        "project_root": str((tmp_path / "project").absolute()),
+        "restored": True,
+    }
+    ownership = {catalog.RECORD_KEY: old_record, catalog_recovery.POLICY_KEY: policy}
+    monkeypatch.setattr(
+        catalog_recovery, "retained_record",
+        lambda _home, catalog_bytes=None: old_record if catalog_bytes in (None, old_bytes) else None,
+    )
+    record, model_status, new_bytes = catalog.plan_install(home, ownership)
+    assert record is not None and new_bytes == old_bytes
+    assert model_status["status"] == "UPDATE_PLANNED"
+    assert model_status["restored_field_reacquired"] is True
+    finish = {"model_catalog_record": record, "model_catalog_status": model_status}
+    before = {catalog.NAME: old_bytes, "config.toml": before_config}
+    after = {catalog.NAME: new_bytes, "config.toml": before_config}
+    catalog.validate_transition(finish, ownership, record, before, after, home, install=True)
+
+    calls = []
+    monkeypatch.setattr(catalog, "apply", lambda _home, _record, **kwargs: (calls.append(kwargs) or catalog.status("MANAGED")))
+    monkeypatch.setattr(host_transition, "_write", lambda *_args, **_kwargs: None)
+    result = catalog.finish_install(home, {"finish": finish})
+    assert result["status"] == "MANAGED"
+    assert calls == [{"allow_insert": True}]
+
+
+def test_old_absent_target_journal_cannot_complete_as_managed(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    # Build a structurally valid historical record whose catalog bytes were the
+    # old upstream pass-through after the target disappeared.
+    source_bytes = upstream().replace(catalog.TARGET.encode(), b"upstream replacement rule")
+    owned_record = {
+        "path": str((home / "config.toml").absolute()),
+        "catalog_path": str((home / catalog.NAME).absolute()),
+        "prior": {"present": False},
+        "fragment": catalog.fragment(home, "\n"),
+        "catalog_sha256": catalog.digest(source_bytes),
+        "source": {"kind": "online", "cli_version": "codex-cli 0.162.0-alpha.17.2",
+                   "upstream_sha256": catalog.digest(source_bytes)},
+    }
+    finish = {
+        "model_catalog_record": owned_record,
+        "model_catalog_status": catalog.status(
+            "MANAGED", template_compatibility=catalog.status("TARGET_ABSENT")
+        ),
+    }
+    with pytest.raises(ValueError, match="incompatible model catalog template cannot be managed"):
+        catalog.validate_transition(
+            finish, {catalog.RECORD_KEY: owned_record}, owned_record,
+            {catalog.NAME: source_bytes}, {catalog.NAME: source_bytes}, home, install=True,
+        )

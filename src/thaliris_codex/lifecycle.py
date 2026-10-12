@@ -314,6 +314,28 @@ def _v041_host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
 
 
 def host_hook_script_bytes() -> bytes:
+    """Check the independent SessionStart recovery before project dispatch."""
+    old = _pre_catalog_recovery_host_hook_script_bytes()
+    preparation = (
+        'set "THALIRIS_HOOK_EVENT=%~4"\r\n'
+        f'set "{THALIRIS_EXECUTABLE_ENV}=%~1"\r\n'
+        f'set "{THALIRIS_EXECUTABLE_SHA256_ENV}=%~2"\r\n'
+        f'set "{THALIRIS_RUNTIME_SHA256_ENV}=%~3"\r\n'
+        f'set "THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}"\r\n'
+        f'set "THALIRIS_PREFLIGHT=%~dp0{HOST_PREFLIGHT_SCRIPT_NAME}"\r\n'
+        'set "THALIRIS_SESSION_START_ABI=%~5"\r\n'
+        f'powershell.exe -NoProfile -NonInteractive -Command "{host_preflight.command_entry()}"\r\n'
+        'if errorlevel 1 goto thaliris_identity_rejected\r\n'
+        'exit /b 0\r\n'
+    )
+    prefix = ('if /i not "%~4"=="SessionStart" goto thaliris_find_project\r\n' + preparation +
+              ':thaliris_find_project\r\n')
+    result = old.replace(b'set "_thaliris_search_dir=%CD%"\r\n',
+                         prefix.encode("ascii") + b'set "_thaliris_search_dir=%CD%"\r\n', 1)
+    return result
+
+
+def _pre_catalog_recovery_host_hook_script_bytes() -> bytes:
     """Render the Host trampoline with a pre-Python runtime file check."""
     entry = host_preflight.command_entry()
     return (
@@ -637,7 +659,7 @@ def _host_hook_command_is_managed(
         if not script.is_absolute() or script.resolve(strict=True) != (codex_home / HOST_HOOK_SCRIPT_NAME).resolve(strict=True):
             return False
         if script.is_symlink() or script.read_bytes() not in {
-            host_hook_script_bytes(), _v041_host_hook_script_bytes(), _previous_host_hook_script_bytes(), _legacy_host_hook_script_bytes()
+            host_hook_script_bytes(), _pre_catalog_recovery_host_hook_script_bytes(), _v041_host_hook_script_bytes(), _previous_host_hook_script_bytes(), _legacy_host_hook_script_bytes()
         }:
             return False
         if not executable.is_absolute() or executable.is_symlink():

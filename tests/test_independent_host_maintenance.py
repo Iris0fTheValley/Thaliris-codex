@@ -65,6 +65,8 @@ def test_independent_entry_installs_into_isolated_home(tmp_path):
 
     home = tmp_path / "isolated-codex-home"
     home.mkdir()
+    # Keep this maintenance-entry test independent of online freshness while
+    # allowing the real app-server to read a valid disposable CODEX_HOME.
     contract = tmp_path / "isolated-install.json"
     contract.write_text(json.dumps({
         "format": host_maintenance.FORMAT,
@@ -75,6 +77,7 @@ def test_independent_entry_installs_into_isolated_home(tmp_path):
         "candidate": selection,
         "installed_runtime_sha256": "ABSENT",
         "execution_constraint": None,
+        "model_catalog_source": "bundled",
     }), encoding="utf-8")
 
     tool = Path(__file__).resolve().parents[1] / "tools/thaliris_host_maintenance.py"

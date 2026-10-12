@@ -5,8 +5,9 @@ import tomllib
 
 import pytest
 
-from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, host_transition, mode_hint_config as hint, wait_guidance_config
+from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, host_transition, mode_hint_config as hint, wait_guidance_config, model_catalog_config as catalog
 from tests.test_host_maintenance_contract import intent, snapshot
+from tests.model_catalog_fixtures import without_managed_fragment
 from thaliris_codex.codex_app_server import owned_hook_keys_from_host as real_owned_keys, remove_owned_hook_trust as real_remove_trust
 
 
@@ -134,7 +135,8 @@ def test_inline_structure_and_unknown_version_preserved(tmp_path, target, monkey
     (home / "config.toml").write_bytes(original)
     result = install(tmp_path, target)
     assert result["native_mode_hint_compatibility"]["status"] == "STRUCTURE_UNSUPPORTED_PRESERVED"
-    assert (home / "config.toml").read_bytes() == original
+    receipt_now = receipt(home)
+    assert without_managed_fragment((home / "config.toml").read_bytes(), receipt_now.get(catalog.RECORD_KEY)) == original
     (home / "config.toml").write_bytes(b'# user\n')
     monkeypatch.setattr(hint, "capability", lambda: "UNKNOWN")
     result = install(tmp_path, target)
@@ -194,6 +196,8 @@ def test_boolean_scaffold_user_edits_preserved_on_field_restore(tmp_path, target
     assert result["native_mode_hint_compatibility"]["status"] == "RESTORED_ABSENT_STRUCTURE_PRESERVED"
     config = hint.read(home)[1]
     assert not hint.leaf(config)[0]
+    assert catalog.KEY not in config
+    expected.pop(catalog.KEY, None)
     assert hint.without_leaf(config) == expected
     assert config["features"]["multi_agent_v2"]["enabled"] is (change == "enabled")
 

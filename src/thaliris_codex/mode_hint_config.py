@@ -202,7 +202,15 @@ def apply(home: Path, record: dict | None, *, remove: bool = False, allow_insert
         if not matched:
             return status("USER_CHANGED_PRESERVED")
         candidates = []
-        if raw.count(fragment) == 1:
+        # A later Host field may have been inserted between the original
+        # scaffold separator and this newly-created table. In that state the
+        # scaffold's leading newline is adjacent to the other field's final
+        # newline; consuming it would rewrite that field's owned/user bytes.
+        # Let Host remove its independent root fields first, then use the full
+        # historical fragment only when no such root field remains.
+        has_neighboring_root_field = any(key in config for key in ("model_catalog_json", "developer_instructions"))
+        scaffolded_table = "[features.multi_agent_v2]" in record["fragment"]
+        if raw.count(fragment) == 1 and not (has_neighboring_root_field and scaffolded_table):
             removed = raw.replace(fragment, b"", 1)
             if migration:
                 placeholder = migration["placeholder"].encode()
@@ -210,12 +218,35 @@ def apply(home: Path, record: dict | None, *, remove: bool = False, allow_insert
                     candidates.append(removed.replace(placeholder, migration["original_line"].encode(), 1))
             else:
                 candidates.append(removed)
-        candidates.append(raw.replace(owned_leaf, b"", 1))
+        leaf_removed = raw.replace(owned_leaf, b"", 1)
+        table = config.get("features", {}).get("multi_agent_v2") if isinstance(config.get("features"), dict) else None
+        leaf_name = KEY.rsplit(".", 1)[-1]
+        other_table_keys = (set(table) - {leaf_name}) if isinstance(table, dict) else set()
+        if scaffolded_table and not migration and not other_table_keys:
+            # The table itself is our scaffold. Remove its header and line
+            # ending while retaining the separator before it, which may now
+            # terminate an independently managed or user-owned root field.
+            newline = b"\r\n" if b"\r\n" in owned_leaf else b"\n"
+            header_line = b"[features.multi_agent_v2]" + newline
+            if leaf_removed.count(header_line) == 1:
+                leaf_removed = leaf_removed.replace(header_line, b"", 1)
+        candidates.append(leaf_removed)
         after = None
+        expected_semantics = without_leaf(config)
+        scaffold_only = scaffolded_table and not migration and not other_table_keys
+        if scaffold_only and isinstance(expected_semantics.get("features"), dict):
+            expected_features = expected_semantics["features"]
+            expected_features.pop("multi_agent_v2", None)
+            if not expected_features:
+                expected_semantics.pop("features", None)
         for candidate in candidates:
             try:
                 parsed = tomllib.loads(candidate.decode("utf-8"))
-                if leaf(parsed)[0] is False and without_leaf(parsed) == without_leaf(config):
+                semantics = without_leaf(parsed)
+                if leaf(parsed)[0] is False and semantics == without_leaf(config):
+                    after = candidate
+                    break
+                if scaffold_only and leaf(parsed)[0] is False and semantics == expected_semantics:
                     after = candidate
                     break
             except (ValueError, TypeError):

@@ -74,6 +74,10 @@ def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, mo
     assert json.loads(planned.stdout)["maintenance_contract"]["candidate"] == selection
     assert not home.exists()
     assert runtime_identity.manifest_bytes(executable) == before
+    home.mkdir()
+    # This boundary test exercises the real installed runtime and launcher,
+    # not online catalog freshness. A user-owned override keeps it offline.
+    (home / "config.toml").write_text('model_catalog_json = "user-owned-catalog.json"\n', encoding="utf-8")
     # Exercise the real interpreter origin and native console-launcher ABI
     # probe; actual Codex trust/catalog loading stays outside this fixture.
     probe = codex_adapter._host_install_executable(home, executable, json.loads(before)["executable_sha256"])
@@ -483,6 +487,7 @@ def test_prior_owned_generation_without_location_or_probe_can_upgrade(tmp_path, 
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(home))
+    (home / "config.toml").write_text('model_catalog_json = "user-owned-catalog.json"\n', encoding="utf-8")
     (home / runtime_identity.MANIFEST_NAME).write_bytes(prior)
     global_bytes = b"<!-- thaliris:global:begin -->\n## Authorized prior generation\n<!-- thaliris:global:end -->\n"
     (home / "AGENTS.md").write_bytes(global_bytes)
@@ -531,7 +536,7 @@ def test_prior_owned_generation_without_location_or_probe_can_upgrade(tmp_path, 
         return original_smoke(path, contents)
     monkeypatch.setattr(runtime_identity, "console_smoke", smoke)
     upgraded = codex_adapter.codex_install(maintenance_contract=contract)
-    assert upgraded["ok"], upgraded
+    assert upgraded["ok"], json.dumps(upgraded, indent=2)
     assert (home / runtime_identity.MANIFEST_NAME).read_bytes() == runtime_identity.manifest_bytes(exe)
     assert host_maintenance.ownership(home, host_maintenance._installed(home), {})["runtime_sha256"] == candidate["runtime_sha256"]
     assert runtime_identity._manifest_bytes(old_exe, candidate=False) == prior

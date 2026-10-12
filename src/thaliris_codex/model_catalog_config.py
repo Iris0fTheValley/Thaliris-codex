@@ -23,7 +23,55 @@ RECORD_KEY = "native_model_catalog"
 NAME = "thaliris-model-catalog.json"
 MARKER = "# thaliris:model-catalog\n"
 TARGET = "- Avoid performing blocking sleep or wait calls longer than 60 seconds, as they may prevent you from communicating with the user for their duration."
-SUPPORTED_VERSIONS = frozenset({"codex-cli 0.162.0-alpha.17.2"})
+_PINNED_VERSION = "codex-cli 0.162.0-alpha.17.2"
+SUPPORTED_VERSIONS = frozenset({_PINNED_VERSION})
+_MULTILINE_PREVIOUS = (
+    "- For multiline PR descriptions, issue bodies, and comments, prefer a structured tool argument. "
+    "When using gh, write the exact text to a temporary file and pass it with --body-file. "
+    "Preserve actual newlines and intentional literal escapes."
+)
+_ESCAPING_PREVIOUS = (
+    "- Exercise caution when escaping text for exec_command calls - backticks and \x60$()\x60 "
+    "passed to the \x60cmd\x60 argument will still execute. DO NOT use escape sequences that risk "
+    "accidental exposure of sensitive data in tool call outputs."
+)
+_NEXT = (
+    "- When declaring env vars or script variables, always avoid common system options. "
+    "Never repurpose \x60$HOME\x60, \x60$home\x60, or \x60$CODEX_HOME\x60. "
+    "Instead, use a task-specific variable name."
+)
+_MODEL_PROFILES = {
+    (_PINNED_VERSION, "online"): {
+        "matched": frozenset({
+            "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
+            "gpt-reserve", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+            "codex-auto-review",
+        }),
+        "absent": frozenset({"gpt-5.5"}),
+    },
+    (_PINNED_VERSION, "bundled"): {
+        "matched": frozenset({
+            "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
+            "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+            "gpt-daybreak-blue-latest", "gpt-daybreak-red-latest",
+            "codex-auto-review",
+        }),
+        "absent": frozenset({"gpt-5.5"}),
+    },
+}
+_KNOWN_TARGET_CONTEXT = {
+    "gpt-6-astra": (_MULTILINE_PREVIOUS, _NEXT),
+    "gpt-6.1-sol": (_MULTILINE_PREVIOUS, _NEXT),
+    "gpt-6-sol": (_MULTILINE_PREVIOUS, _NEXT),
+    "gpt-6-luna": (_MULTILINE_PREVIOUS, _NEXT),
+    "gpt-reserve": (_ESCAPING_PREVIOUS, _NEXT),
+    "gpt-5.6-sol": (_ESCAPING_PREVIOUS, _NEXT),
+    "gpt-5.6-terra": (_ESCAPING_PREVIOUS, _NEXT),
+    "gpt-5.6-luna": (_ESCAPING_PREVIOUS, _NEXT),
+    "gpt-daybreak-blue-latest": (_ESCAPING_PREVIOUS, _NEXT),
+    "gpt-daybreak-red-latest": (_ESCAPING_PREVIOUS, _NEXT),
+    "codex-auto-review": (_ESCAPING_PREVIOUS, _NEXT),
+}
 
 
 def digest(raw: bytes) -> str:
@@ -36,39 +84,78 @@ def status(name: str, *, changed: bool = False, **facts) -> dict:
             "online_freshness": "UNKNOWN", **facts}
 
 
-def patch_catalog(raw: bytes) -> tuple[bytes | None, dict]:
-    """Preserve every other JSON value, including models unknown to this adapter."""
-    catalog = json.loads(raw)
+def patch_catalog(raw: bytes, *, cli_version: str | None = None,
+                  source: str | None = None) -> tuple[bytes | None, dict]:
+    """Remove the target only from compatible model templates.
+
+    Managed callers provide the exact CLI version and export source. The
+    observed source-specific model roster and adjacent target lines then form
+    the compatibility contract. New models are accepted only with one exact
+    full-line target; present known models must retain their observed target context.
+    """
+    try:
+        catalog = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return None, status("CATALOG_JSON_UNSUPPORTED", error=str(exc))
     if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list) or not catalog["models"]:
-        raise ValueError("unsupported model catalog shape")
+        return None, status("CATALOG_SCHEMA_UNSUPPORTED")
     patched = deepcopy(catalog)
     count = 0
-    template_statuses = {"EXACT_MATCH": 0, "TARGET_ABSENT": 0, "TEMPLATE_ABSENT": 0}
+    profile = None
+    if cli_version is not None or source is not None:
+        profile = _MODEL_PROFILES.get((cli_version, source))
+        if profile is None:
+            return None, status("CATALOG_PROFILE_UNKNOWN", cli_version=cli_version, source=source)
+    known_absent = profile["absent"] if profile else frozenset()
+    known_matched = profile["matched"] if profile else frozenset()
+    seen_slugs: set[str] = set()
+    template_statuses = {"EXACT_MATCH": 0, "KNOWN_ABSENT": 0}
     for model in patched["models"]:
         if not isinstance(model, dict):
-            raise ValueError("unsupported model catalog model")
+            return None, status("MODEL_SCHEMA_UNSUPPORTED")
+        slug = model.get("slug")
+        if not isinstance(slug, str) or not slug:
+            return None, status("MODEL_IDENTITY_UNSUPPORTED")
+        if slug in seen_slugs:
+            return None, status("DUPLICATE_MODEL_IDENTITY", model_slug=slug)
+        seen_slugs.add(slug)
         messages = model.get("model_messages")
-        if not isinstance(messages, dict) or messages.get("instructions_template") is None:
-            template_statuses["TEMPLATE_ABSENT"] += 1
-            continue
+        if not isinstance(messages, dict) or "instructions_template" not in messages:
+            return None, status("MODEL_TEMPLATE_UNSUPPORTED", model_slug=slug)
         template = messages["instructions_template"]
         if not isinstance(template, str):
-            raise ValueError("unsupported model instructions template")
+            return None, status("MODEL_TEMPLATE_UNSUPPORTED", model_slug=slug)
         occurrences = template.count(TARGET)
+        if slug in known_absent:
+            if occurrences:
+                return None, status("KNOWN_ABSENT_MODEL_CHANGED", model_slug=slug)
+            template_statuses["KNOWN_ABSENT"] += 1
+            continue
         if occurrences > 1:
-            return None, status("TARGET_MULTIPLE_MATCHES")
+            return None, status("TARGET_MULTIPLE_MATCHES", model_slug=slug)
         if occurrences == 1:
             lines = template.splitlines(keepends=True)
-            matches = [line for line in lines if line.rstrip("\r\n") == TARGET]
-            if len(matches) != 1:
-                return None, status("TARGET_CHANGED_OR_EMBEDDED")
-            messages["instructions_template"] = "".join(line for line in lines if line != matches[0])
+            match_indexes = [index for index, line in enumerate(lines)
+                             if line.rstrip("\r\n") == TARGET]
+            if len(match_indexes) != 1:
+                return None, status("TARGET_CHANGED_OR_EMBEDDED", model_slug=slug)
+            target_index = match_indexes[0]
+            if slug in known_matched:
+                neighbors = (
+                    lines[target_index - 1].rstrip("\r\n") if target_index else None,
+                    lines[target_index + 1].rstrip("\r\n") if target_index + 1 < len(lines) else None,
+                )
+                if neighbors != _KNOWN_TARGET_CONTEXT[slug]:
+                    return None, status("TARGET_LOCATION_CHANGED", model_slug=slug)
+            messages["instructions_template"] = "".join(
+                line for index, line in enumerate(lines) if index != target_index
+            )
             count += 1
             template_statuses["EXACT_MATCH"] += 1
         else:
-            template_statuses["TARGET_ABSENT"] += 1
+            return None, status("TARGET_ABSENT_UNEXPECTED", model_slug=slug)
     if not count:
-        return None, status("TARGET_ABSENT")
+        return None, status("NO_COMPATIBLE_TARGETS")
     return (json.dumps(patched, ensure_ascii=False, indent=2) + "\n").encode(), status("COMPATIBLE", patched_templates=count, template_statuses=template_statuses)
 
 
@@ -220,45 +307,87 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
 
 
 def plan_install(home: Path, ownership: dict, *, source: str = "online") -> tuple[dict | None, dict, bytes | None]:
-    record = ownership.get(RECORD_KEY)
-    validate(record, home)
+    original_record = ownership.get(RECORD_KEY)
+    validate(original_record, home)
+    record = original_record
+    retained_backing_reclaimed = False
+    restored_field_reacquired = False
     if source not in {"online", "bundled"}:
         raise ValueError("model catalog source must be online or explicitly bundled")
-    if record and record["source"]["kind"] == "online" and source == "bundled":
-        return record, status("SOURCE_DOWNGRADE_PRESERVED"), None
+    if original_record and original_record["source"]["kind"] == "online" and source == "bundled":
+        return original_record, status("SOURCE_DOWNGRADE_PRESERVED"), None
     try:
         raw, config = read(home)
         current = read_catalog(home)
     except (OSError, ValueError):
-        return record, status("OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"), None
-    if record:
-        if not matches(raw, config, record) or current is None or digest(current) != record["catalog_sha256"]:
-            return record, status("USER_CHANGED_PRESERVED"), None
+        return original_record, status("OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"), None
+    if original_record:
+        if matches(raw, config, original_record) and current is not None and digest(current) == original_record["catalog_sha256"]:
+            record = original_record
+        elif KEY not in config and current is not None:
+            from . import catalog_recovery
+            policy = ownership.get(catalog_recovery.POLICY_KEY)
+            try:
+                catalog_recovery.validate_policy(policy)
+                retained = catalog_recovery.retained_record(home)
+            except (OSError, ValueError, RuntimeError, TypeError, KeyError):
+                retained = None
+            if (isinstance(policy, dict) and policy.get("restored") is True and
+                    retained == original_record and digest(current) == original_record["catalog_sha256"]):
+                record = original_record
+                restored_field_reacquired = True
+            else:
+                return original_record, status("USER_CHANGED_PRESERVED"), None
+        else:
+            return original_record, status("USER_CHANGED_PRESERVED"), None
     elif KEY in config:
         return None, status("USER_CONFIG_PRESERVED"), None
     elif current is not None:
-        return None, status("USER_CATALOG_PRESERVED"), None
+        from . import catalog_recovery
+        try:
+            retained = catalog_recovery.retained_record(home)
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError):
+            retained = None
+        if retained is None:
+            return None, status("USER_CATALOG_PRESERVED"), None
+        try:
+            validate(retained, home)
+        except (ValueError, TypeError, KeyError):
+            return None, status("USER_CATALOG_PRESERVED"), None
+        if digest(current) != retained["catalog_sha256"]:
+            return None, status("USER_CATALOG_PRESERVED"), None
+        record = retained
+        retained_backing_reclaimed = True
     try:
         upstream, evidence = export_upstream(home, source=source)
         if evidence.get("kind") != source:
             raise ValueError("model catalog export source differs from selected maintenance source")
-        patched, compatibility = patch_catalog(upstream)
+        cli_version = evidence.get("cli_version")
+        if cli_version not in SUPPORTED_VERSIONS:
+            raise ValueError("VERSION_SUPPORT_UNKNOWN")
+        patched, compatibility = patch_catalog(upstream, cli_version=cli_version, source=source)
     except (OSError, ValueError, RuntimeError) as exc:
         result_status = "VERSION_SUPPORT_UNKNOWN" if str(exc) == "VERSION_SUPPORT_UNKNOWN" else "UPSTREAM_REFRESH_FAILED_PRESERVED"
-        return record, status(result_status, error=str(exc)), None
+        return original_record, status(result_status, error=str(exc)), None
     if patched is None:
-        if record is not None and compatibility["status"] == "TARGET_ABSENT":
-            # Fresh upstream already removed the sentence. Keep the managed
-            # catalog current byte-for-byte, without inventing replacement text.
-            patched = upstream
-        else:
-            return record, compatibility, None
+        return original_record, status("TEMPLATE_INCOMPATIBILITY_PRESERVED", template_compatibility=compatibility), None
     newline = "\r\n" if b"\r\n" in raw else "\n"
     updated = {"path": str((home / "config.toml").absolute()), "catalog_path": str((home / NAME).absolute()),
                "prior": {"present": False}, "fragment": record["fragment"] if record else fragment(home, newline),
                "catalog_sha256": digest(patched), "source": evidence | {"upstream_sha256": digest(upstream)}}
     validate(updated, home)
-    return updated, status("MANAGED" if record and patched == current else "UPDATE_PLANNED" if record else "PLANNED", source=updated["source"], template_compatibility=compatibility), patched
+    if retained_backing_reclaimed:
+        planned_status = "PLANNED"
+    elif restored_field_reacquired:
+        planned_status = "UPDATE_PLANNED"
+    else:
+        planned_status = "MANAGED" if record and patched == current else "UPDATE_PLANNED" if record else "PLANNED"
+    facts = {"source": updated["source"], "template_compatibility": compatibility}
+    if retained_backing_reclaimed:
+        facts["retained_backing_reclaimed"] = True
+    if restored_field_reacquired:
+        facts["restored_field_reacquired"] = True
+    return updated, status(planned_status, **facts), patched
 
 
 def apply(home: Path, record: dict | None, *, remove=False, allow_insert=False) -> dict:
@@ -304,10 +433,13 @@ def finish_install(home: Path, transition: dict) -> dict:
     def report(result):
         if "template_compatibility" in selected:
             result["template_compatibility"] = selected["template_compatibility"]
-            if result["status"] == "MANAGED" and selected["template_compatibility"]["status"] == "TARGET_ABSENT":
-                result["status"] = "TARGET_ABSENT_MANAGED"
         return result
-    if selected["status"] != "PLANNED":
+    needs_insert = (
+        selected["status"] == "PLANNED" or
+        selected.get("retained_backing_reclaimed") is True or
+        selected.get("restored_field_reacquired") is True
+    )
+    if not needs_insert:
         return report(apply(home, record))
     phase = finish.get("model_catalog_phase")
     if phase in {"ATTEMPTING", "APPLIED"}:
@@ -341,25 +473,59 @@ def validate_transition(finish: dict, previous: dict, next_record: dict | None, 
             raise ValueError("uninstall catalog lacks exact ownership")
         return
     selected = finish.get("model_catalog_status", {}).get("status")
-    allowed = {"PLANNED", "UPDATE_PLANNED", "MANAGED", "USER_CHANGED_PRESERVED", "USER_CONFIG_PRESERVED", "USER_CATALOG_PRESERVED", "OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED", "UPSTREAM_REFRESH_FAILED_PRESERVED", "TARGET_MULTIPLE_MATCHES", "TARGET_CHANGED_OR_EMBEDDED", "TARGET_ABSENT", "SOURCE_DOWNGRADE_PRESERVED", "VERSION_SUPPORT_UNKNOWN"}
+    allowed = {"PLANNED", "UPDATE_PLANNED", "MANAGED", "USER_CHANGED_PRESERVED", "USER_CONFIG_PRESERVED", "USER_CATALOG_PRESERVED", "OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED", "UPSTREAM_REFRESH_FAILED_PRESERVED", "TARGET_MULTIPLE_MATCHES", "TARGET_CHANGED_OR_EMBEDDED", "TARGET_ABSENT", "TEMPLATE_INCOMPATIBILITY_PRESERVED", "SOURCE_DOWNGRADE_PRESERVED", "VERSION_SUPPORT_UNKNOWN"}
     if selected not in allowed:
         raise ValueError("invalid model catalog planning status")
+    status_record = finish.get("model_catalog_status", {})
+    reclaimed = status_record.get("retained_backing_reclaimed") is True
+    restored = status_record.get("restored_field_reacquired") is True
     if selected in {"PLANNED", "UPDATE_PLANNED", "MANAGED"}:
+        if finish.get("model_catalog_status", {}).get("template_compatibility", {}).get("status") in {
+                "TARGET_ABSENT", "TARGET_ABSENT_UNEXPECTED", "KNOWN_ABSENT_MODEL_CHANGED",
+                "TARGET_MULTIPLE_MATCHES", "TARGET_CHANGED_OR_EMBEDDED", "MODEL_IDENTITY_UNSUPPORTED",
+                "MODEL_TEMPLATE_UNSUPPORTED", "DUPLICATE_MODEL_IDENTITY", "NO_COMPATIBLE_TARGETS",
+                "TARGET_LOCATION_CHANGED", "CATALOG_PROFILE_UNKNOWN",
+                "CATALOG_JSON_UNSUPPORTED", "CATALOG_SCHEMA_UNSUPPORTED", "MODEL_SCHEMA_UNSUPPORTED"}:
+            raise ValueError("incompatible model catalog template cannot be managed")
         if new is None or after.get(NAME) is None or digest(after[NAME]) != new["catalog_sha256"]:
             raise ValueError("model catalog transition lacks exact planned catalog")
-        if selected == "PLANNED" and (old is not None or before.get(NAME) is not None):
+        if reclaimed:
+            if (selected != "PLANNED" or restored or old is not None or before.get(NAME) is None or
+                    not _config_field_absent(before.get("config.toml", b""))):
+                raise ValueError("invalid retained model catalog reclaim")
+            from . import catalog_recovery
+            retained = catalog_recovery.retained_record(home, before[NAME])
+            if (retained is None or
+                    any(new[key] != retained[key] for key in ("path", "catalog_path", "prior", "fragment"))):
+                raise ValueError("retained model catalog archive does not prove the prior artifact")
+        elif selected == "PLANNED" and (old is not None or before.get(NAME) is not None):
             raise ValueError("model catalog transition cannot reacquire ownership")
+        if restored:
+            from . import catalog_recovery
+            policy = previous.get(catalog_recovery.POLICY_KEY)
+            if (selected != "UPDATE_PLANNED" or old is None or not isinstance(policy, dict) or
+                    policy.get("restored") is not True or
+                    before.get(NAME) is None or digest(before[NAME]) != old["catalog_sha256"] or
+                    any(new[key] != old[key] for key in ("path", "catalog_path", "prior", "fragment")) or
+                    not _config_field_absent(before.get("config.toml", b""))):
+                raise ValueError("restored model catalog field lacks exact recovery provenance")
+        if reclaimed and restored:
+            raise ValueError("conflicting retained catalog recovery markers")
         if selected == "UPDATE_PLANNED" and (old is None or before.get(NAME) is None or digest(before[NAME]) != old["catalog_sha256"] or new["fragment"] != old["fragment"]):
             raise ValueError("model catalog update lacks prior owned bytes")
         if selected == "MANAGED" and (old is None or before.get(NAME) != after.get(NAME) or new["fragment"] != old["fragment"]):
             raise ValueError("managed model catalog lacks unchanged owned generation")
-        if finish.get("model_catalog_status", {}).get("template_compatibility", {}).get("status") == "TARGET_ABSENT" and new["catalog_sha256"] != new["source"]["upstream_sha256"]:
-            raise ValueError("absent-target model catalog must equal fresh upstream bytes")
     elif before.get(NAME) != after.get(NAME):
         raise ValueError("preserved model catalog transition changes bytes")
     elif new != old:
         raise ValueError("preserved model catalog transition changes ownership")
-    if "model_catalog_phase" in finish and (selected != "PLANNED" or finish["model_catalog_phase"] not in {"ATTEMPTING", "APPLIED"}):
+    insert_planned = selected == "PLANNED" or reclaimed or restored
+    if "model_catalog_phase" in finish and (not insert_planned or finish["model_catalog_phase"] not in {"ATTEMPTING", "APPLIED"}):
         raise ValueError("invalid model catalog field write phase")
     if finish.get("model_catalog_phase") == "APPLIED" and (not isinstance(finish.get("model_catalog_result"), dict) or type(finish["model_catalog_result"].get("changed")) is not bool or finish["model_catalog_result"].get("status") not in {"MANAGED", "USER_CHANGED_PRESERVED", "CATALOG_CHANGED_PRESERVED", "STRUCTURE_UNSUPPORTED_PRESERVED"}):
         raise ValueError("invalid model catalog field write result")
+
+
+def _config_field_absent(raw: bytes) -> bool:
+    import tomllib
+    return KEY not in tomllib.loads(raw.decode("utf-8"))

@@ -42,6 +42,52 @@ generation handling. It requires no installed Hook, runner or project admission.
 It neither disables integration nor grants project authority. Unknown bytes stay
 rejected; preserve them for review rather than approving them through a new hash.
 
+## Project-loss catalog recovery at SessionStart
+
+`codex-maintenance-plan codex-install` proposes `--root` as the
+`catalog_recovery_project_root` by default. `--catalog-recovery-project-root`
+selects another absolute project root; `--catalog-recovery-source-root` may add a
+separately selected source root. These proposal fields authorize nothing until the
+human-approved install contract includes them in its intent. On an actual native `SessionStart`, the Host
+trampoline validates the installed manifest and runtime identity, then invokes the
+pinned installed package before project dispatch; it does not import source from a
+project checkout. Recovery proceeds only for a valid receipt policy and a normal
+actor. Known children, readonly or fenced actors, malformed payloads, identity
+conflicts and an unfinished Host transition do not authorize the catalog write.
+
+If the selected marker is absent or no longer exact, recovery removes only the
+receipt-owned `model_catalog_json` field after rechecking the current field and
+catalog digest. It restores the previously absent configuration field and retains
+the catalog file, reporting `backing_artifact_status: RETAINED_REFERENCE_SAFE`.
+A selected missing source root has the same effect. A detected field edit reports
+`USER_CHANGED_PRESERVED`; changed catalog bytes report `CATALOG_CHANGED_PRESERVED`.
+Absent legacy policy, a pending transition, malformed payload, or a damaged or
+unverifiable runtime or receipt yields an unknown or failed outcome without
+deleting data. A pending transition must be replayed with its original maintenance
+contract. When a project is still available, the catalog stays managed. The
+original native Hook payload bytes and ordinary Hook result are forwarded
+unchanged when a project marker is available for normal dispatch.
+
+Recovery records restoration provenance only after removing the exact owned
+field. An already-absent field without prior proof reports
+`RECOVERY_PROVENANCE_UNKNOWN` and cannot authorize reinstall reclaim; an existing
+completed proof permits one exact claim and successful reinstatement clears it.
+The field writer compares bytes again before atomic replacement,
+but a non-cooperating writer can still edit in the interval between the final
+comparison and replacement, so preservation of a simultaneous unobserved edit is
+not guaranteed. The human accepted this existing boundary: preserve changes
+already observed by the byte recheck, retain the backing file, and disclose the
+remaining writer interval. That decision is settled for this scope; it is not a
+pending approval.
+
+This is a check on the next Host SessionStart invocation; it is not immediate
+project-deletion detection, a filesystem watcher, or a project restore operation.
+Changing source files does not update an already running Codex process. Live Host
+activation and session behavior remain unknown until observed after authorized
+installation in a fresh native session. The
+[model-catalog maintenance report](model-catalog-maintenance-report.md) describes
+receipt migration, retained-file reclamation and compatibility outcomes.
+
 Before recovery, preserve original installation/configuration and failure evidence
 outside version control. After recovery, stop using the independent entry, run
 the ordinary pinned bootstrap, and verify native role routing. Host catalog and

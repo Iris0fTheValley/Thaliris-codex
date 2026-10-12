@@ -213,17 +213,36 @@ a normal CLI self-export as a newly fetched upstream catalog. An existing online
 is not silently downgraded to bundled data.
 
 The `native_model_catalog` receipt binds the managed path, prior-absence state, exact
-managed fragment, catalog hash and source evidence. Management deletes only the exact
-Thaliris-owned line from each model's `model_messages.instructions_template`; it inserts
-no replacement and preserves all neighboring content, other model metadata and future
-models' original instructions. Missing, repeated or embedded target text returns the
-declared compatibility status and leaves the prior catalog intact. A source refresh that
-produces identical catalog output writes no catalog, root configuration or receipt
-bytes. Source failure preserves the prior catalog, and customized configuration or
-catalog bytes are retained for receipt-backed recovery and uninstall. Changes use the
-existing version journal rather than a new lifecycle.
+managed fragment, catalog hash and source evidence. Catalog receipts use an explicit
+v2 capability marker; the current reader accepts valid legacy v1 receipts and an
+authorized install/upgrade migrates them, while an older reader rejects v2 instead of
+ignoring the managed field. Management removes only the exact full-line sentence in its
+source-specific model context. Missing, moved, rewritten, split/partial, embedded or
+repeated targets fail compatibility and preserve the prior catalog. A source refresh
+that produces identical output writes no catalog, configuration or receipt bytes.
+Online/source failures preserve the existing generation before transition writes; a
+user-owned catalog may be preserved while other authorized Host work proceeds, with
+`catalog_goal_met: false` and manual follow-up. Changes use the existing version journal.
 
-Catalog provenance, version admission, receipt and recovery details, and the distinction
+An install contract may explicitly bind project-loss recovery to a selected project
+root and optional source root. At a real Host `SessionStart`, the validated pinned
+runtime restores only the exact owned `model_catalog_json` field to its prior absent
+state after the selected activation marker/source is gone and the receipt field and
+catalog digest still match. The physical backing catalog is never deleted. Legacy
+receipts without a recovery policy and detected changed or unproven user bytes remain
+preserved. Uninstall archives exact ownership evidence; a later upgrade may reclaim a
+retained catalog only from a matching committed archive or a completed restoration
+receipt, with the configuration field absent. Recovery records restoration provenance
+only after it removes the exact owned field. If the field is already absent without
+prior proof, it reports `RECOVERY_PROVENANCE_UNKNOWN` and does not authorize reclaim.
+A successful restoration-backed upgrade clears that receipt marker. See the
+[model-catalog maintenance report](../../docs/model-catalog-maintenance-report.md).
+The accepted transaction boundary preserves user changes observed by the final
+byte comparison and keeps the backing catalog file. A non-cooperating writer can
+still race between that comparison and atomic replacement; this limit is disclosed
+and is not a pending decision.
+
+Catalog provenance, version admission, receipt/recovery details, and the distinction
 between disk writes, the running process, and sessions already in progress are recorded
 in the [model-catalog maintenance report](../../docs/model-catalog-maintenance-report.md).
 The current source gate accepts only `codex-cli 0.162.0-alpha.17.2`; its opt-in runtime

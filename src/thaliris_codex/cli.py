@@ -94,6 +94,8 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--source-pin", required=True)
     plan.add_argument("--human-instruction", required=True)
     plan.add_argument("--execution-constraint", choices=roles.EXECUTION_CONSTRAINTS)
+    plan.add_argument("--catalog-recovery-project-root", type=Path, help="propose SessionStart catalog restoration after loss of this project's activation marker; defaults to --root")
+    plan.add_argument("--catalog-recovery-source-root", type=Path, help="also propose restoration when this explicitly selected source directory disappears")
     q = sub.add_parser("codex-bootstrap", help="perform one-shot project-external Codex bootstrap")
     q.add_argument("--hook-attestation", help=argparse.SUPPRESS)
     q.add_argument("--controller-guidance-sha256", help="omit exact guidance already present in the current context")
@@ -330,6 +332,9 @@ def main(argv: list[str] | None = None) -> int:
                 "legacy_owned_bytes": {}}
             if args.operation == "codex-install":
                 intent.update(candidate=selected, execution_constraint=args.execution_constraint)
+                intent["catalog_recovery_project_root"] = str((args.catalog_recovery_project_root or root).resolve())
+                if args.catalog_recovery_source_root is not None:
+                    intent["catalog_recovery_source_root"] = str(args.catalog_recovery_source_root.resolve())
             out = {"ok": True, "maintenance_contract": intent,
                 "ownership_review_snapshot": snapshot, "ownership_approved": False,
                 "host_actor_assurance": "UNKNOWN", "project_files_touched": []}

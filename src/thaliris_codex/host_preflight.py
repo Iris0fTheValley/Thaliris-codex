@@ -261,6 +261,14 @@ try {
   }
   SafePath $manifest
   AssertRuntime ([IO.File]::ReadAllBytes($manifest)) $exe $identity
+  if ($env:THALIRIS_HOOK_EVENT -ceq 'SessionStart') {
+    # The verified installed package, never a project checkout, owns this
+    # narrow restoration policy. Read once and forward the exact native bytes
+    # to the original audit-hook pipeline after the actor-preserving check.
+    $python=Join-Path ([IO.Path]::GetDirectoryName($exe)) 'python.exe'
+    & $python -I -B -m thaliris_codex.catalog_recovery --home $hostHome --runtime-sha256 $identity --session-start --managed-hook-abi $env:THALIRIS_SESSION_START_ABI
+    if ($LASTEXITCODE -ne 0) { throw 'independent catalog recovery or native SessionStart dispatch failed' }
+  }
   exit 0
 } catch {
   $detail=$_.Exception.Message
@@ -269,6 +277,8 @@ try {
     # Degraded reads Console.In; supply the already consumed payload directly.
     $reader=[IO.StringReader]::new($raw); [Console]::SetIn($reader)
     Degraded $detail
+  } elseif ($env:THALIRIS_HOOK_EVENT -ceq 'SessionStart') {
+    [Console]::Error.WriteLine('THALIRIS_CATALOG_RECOVERY_UNKNOWN: '+$detail)
   } elseif (-not $env:THALIRIS_HOOK_EVENT) {
     @{ok=$false;status='THALIRIS_RUNTIME_IDENTITY_MISMATCH';execution_assurance='UNKNOWN';diagnostic=$detail;decision_required=$true}|ConvertTo-Json -Depth 32 -Compress|Write-Output
   }

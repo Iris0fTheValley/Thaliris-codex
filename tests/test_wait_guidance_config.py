@@ -7,9 +7,10 @@ import tomllib
 
 import pytest
 
-from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance
+from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, model_catalog_config as catalog
 from thaliris_codex import host_transition, wait_guidance_config as guidance
 from tests.test_host_maintenance_contract import intent
+from tests.model_catalog_fixtures import without_managed_fragment
 
 
 PRE_EVENT_FIRST_GUIDANCE = (
@@ -70,10 +71,10 @@ def test_install_upgrade_and_uninstall_preserve_config_bytes(tmp_path, target, o
     assert second["controller_wait_guidance_compatibility"]["status"] == "MANAGED"
     assert second["controller_wait_guidance_compatibility"]["changed"] is False
     assert (home / "config.toml").read_bytes() == managed_bytes
-
     result = uninstall(tmp_path, target)
     assert result["ok"], result
     assert result["controller_wait_guidance_compatibility"]["status"] == "RESTORED_ABSENT"
+    assert catalog.KEY not in tomllib.loads((home / "config.toml").read_text()), result["native_model_catalog_compatibility"]["status"]
     assert (home / "config.toml").read_bytes() == original
 
 
@@ -84,14 +85,15 @@ def test_existing_user_developer_instructions_are_never_claimed(tmp_path, target
     (home / "config.toml").write_bytes(original)
 
     result = install(tmp_path, target)
-    assert result["ok"], result
+    assert result["ok"], json.dumps(result, indent=2)
     expected = "USER_EMPTY_PRESERVED" if value == '""' else "USER_CONFIG_PRESERVED"
     assert result["controller_wait_guidance_compatibility"]["status"] == expected
     assert result["manual_action_required"] == []
     assert guidance.RECORD_KEY not in receipt(home)
     assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == tomllib.loads(original.decode())[guidance.KEY]
-    assert uninstall(tmp_path, target)["ok"]
-    assert (home / "config.toml").read_bytes() == original
+    removed = uninstall(tmp_path, target)
+    assert removed["ok"], removed
+    assert (home / "config.toml").read_bytes() == original, json.dumps(removed, indent=2)
 
 
 def test_user_edit_to_managed_guidance_survives_upgrade_and_uninstall(tmp_path, target):
@@ -108,10 +110,14 @@ def test_user_edit_to_managed_guidance_survives_upgrade_and_uninstall(tmp_path, 
     assert upgraded["ok"], upgraded
     assert upgraded["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
     assert (home / "config.toml").read_bytes() == edited
+    catalog_record = receipt(home).get(catalog.RECORD_KEY)
     removed = uninstall(tmp_path, target)
     assert removed["ok"], removed
     assert removed["controller_wait_guidance_compatibility"]["status"] == "USER_CHANGED_PRESERVED"
-    assert (home / "config.toml").read_bytes() == edited
+    assert catalog.KEY not in tomllib.loads((home / "config.toml").read_text())
+    # Uninstall removes the exact catalog fragment while preserving the edited
+    # guidance as user-owned bytes.
+    assert (home / "config.toml").read_bytes() == without_managed_fragment(edited, catalog_record)
 
 
 def test_empty_user_edit_to_managed_guidance_is_distinguished_and_preserved(tmp_path, target):
@@ -362,7 +368,7 @@ def test_migration_write_errors_preserve_field_and_unrelated_config(
 
     monkeypatch.setattr(adapter, "_atomic_host_write", fail_guidance_migration)
     result = install(tmp_path, target)
-    assert result["ok"], result
+    assert result["ok"], json.dumps(result, indent=2)
     assert result["host_integration_ready"] == "YES"
     assert result["transition_pending"] is False
     assert result["controller_wait_guidance_compatibility"]["status"] == expected
@@ -552,7 +558,11 @@ def test_optional_guidance_read_errors_do_not_fail_host_install(
     assert result["host_integration_ready"] == "YES"
     assert result["transition_pending"] is False
     assert result["controller_wait_guidance_compatibility"]["status"] == "OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"
-    assert (home / "config.toml").read_bytes() == (installed if preexisting_managed else original)
+    actual = (home / "config.toml").read_bytes()
+    if preexisting_managed:
+        assert actual == installed
+    else:
+        assert without_managed_fragment(actual, receipt(home).get(catalog.RECORD_KEY)) == original
 
     monkeypatch.setattr(guidance, "read", read)
     removed = uninstall(tmp_path, target)
@@ -585,7 +595,11 @@ def test_optional_guidance_planning_read_errors_preserve_install_and_ownership(
     assert result["host_integration_ready"] == "YES"
     assert result["transition_pending"] is False
     assert result["controller_wait_guidance_compatibility"]["status"] == "OPTIONAL_CONFIG_UNAVAILABLE_PRESERVED"
-    assert (home / "config.toml").read_bytes() == expected_config
+    actual = (home / "config.toml").read_bytes()
+    if preexisting_managed:
+        assert actual == expected_config
+    else:
+        assert without_managed_fragment(actual, receipt(home).get(catalog.RECORD_KEY)) == original
     updated_receipt = receipt(home)
     if prior_record is None:
         assert guidance.RECORD_KEY not in updated_receipt
@@ -641,7 +655,9 @@ def test_optional_guidance_write_errors_do_not_fail_host_install(
     write = adapter._atomic_host_write
 
     def fail_guidance_write(path, contents):
-        if path == home / "config.toml":
+        catalog_fragment = catalog.fragment(home, "\n").encode()
+        if (path == home / "config.toml" and guidance.GUIDANCE.encode() in contents and
+                catalog_fragment not in contents):
             if write_outcome == "after":
                 write(path, contents)
             elif write_outcome == "user_edit":
@@ -652,13 +668,14 @@ def test_optional_guidance_write_errors_do_not_fail_host_install(
     monkeypatch.setattr(adapter, "_atomic_host_write", fail_guidance_write)
     result = install(tmp_path, target)
 
-    assert result["ok"], result
+    assert result["ok"], json.dumps(result, indent=2)
     assert result["host_integration_ready"] == "YES"
     assert result["transition_pending"] is False
     assert result["controller_wait_guidance_compatibility"]["status"] == expected_status
     user_edit = b'developer_instructions = "user edit"\n' + original
     if write_outcome == "before":
-        assert (home / "config.toml").read_bytes() == original
+        assert without_managed_fragment((home / "config.toml").read_bytes(),
+                                        receipt(home).get(catalog.RECORD_KEY)) == original
     elif write_outcome == "after":
         assert tomllib.loads((home / "config.toml").read_text())[guidance.KEY] == guidance.GUIDANCE
     monkeypatch.setattr(adapter, "_atomic_host_write", write)

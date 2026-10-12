@@ -686,7 +686,9 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
         )
         if export.returncode != 0:
             raise VerificationError("installed CLI bundled catalog export failed: " + export.stderr.decode("utf-8", "replace")[-1200:])
-        patched, patch_status = model_catalog_config.patch_catalog(export.stdout)
+        patched, patch_status = model_catalog_config.patch_catalog(
+            export.stdout, cli_version=SUPPORTED_VERSION, source="bundled"
+        )
         _expect(patched is not None and patch_status.get("status") == "COMPATIBLE", "strict patch did not accept the installed CLI bundle")
         original_catalog, patched_catalog = _verify_catalog_patch(export.stdout, patched)
         catalog_path = home / model_catalog_config.NAME
