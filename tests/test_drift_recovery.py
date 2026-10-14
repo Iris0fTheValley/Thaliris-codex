@@ -11,7 +11,7 @@ import sys
 import pytest
 
 from thaliris import core
-from thaliris_codex import codex_adapter, codex_app_server, host_preflight, lifecycle, offline_recovery, runtime_identity
+from thaliris_codex import codex_adapter, codex_app_server, host_preflight, lifecycle, offline_recovery, roles, runtime_identity
 
 
 def _repo(tmp_path):
@@ -189,10 +189,16 @@ def test_actor_source_contract_does_not_mint_controller_authority(tmp_path):
         lifecycle.consume_task_start_attestation(root, "old-receipt")
 
 
-def test_unknown_actor_can_delegate_ordinary_fresh_work_without_managed_grant(tmp_path):
+def test_unknown_actor_can_delegate_ordinary_fresh_work_without_managed_grant(tmp_path, monkeypatch):
     root = tmp_path / "ordinary"
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    home = tmp_path / "codex-home"
+    profile = home / "agents" / "thaliris-implementer.toml"
+    profile.parent.mkdir(parents=True)
+    model, effort, role = roles.agent_profiles()[profile.name]
+    profile.write_bytes(codex_adapter._agent_profile(profile.stem, role, model, effort))
+    monkeypatch.setenv("CODEX_HOME", str(home))
     codex_adapter.init(root)
     payload = {"session_id": "ambiguous", "tool_name": "spawn_agent",
                "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "ordinary authorized source repair"}}
