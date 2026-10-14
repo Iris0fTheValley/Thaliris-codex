@@ -8,6 +8,27 @@ import pytest
 
 
 @pytest.fixture
+def managed_role_profile_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Give hook tests a private, known Host role catalog.
+
+    Managed dispatch now refuses an unknown target profile before reservation.
+    This fixture models the native canonical definitions in a fresh Codex home;
+    it leaves any profile bytes a test has already supplied untouched.
+    """
+    from thaliris_codex import codex_adapter, roles
+
+    home = tmp_path / "isolated-codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    agents = home / "agents"
+    for name, (model, effort, role) in roles.agent_profiles().items():
+        profile = agents / name
+        if not profile.exists():
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_bytes(codex_adapter._agent_profile(name[:-5], role, model, effort))
+    return home
+
+
+@pytest.fixture
 def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Supply a fake exact executable identity for Host installer unit tests."""
     from thaliris_codex import codex_adapter, codex_app_server, lifecycle, mode_hint_config, wait_guidance_config, model_catalog_config

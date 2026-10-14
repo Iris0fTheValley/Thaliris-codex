@@ -12,7 +12,7 @@ from thaliris_codex import cli, codex_adapter, lifecycle, roles
 
 
 @pytest.fixture(autouse=True)
-def hypothetical_controller_contract(monkeypatch):
+def hypothetical_controller_contract(monkeypatch, managed_role_profile_home):
     """Legacy recovery mechanics under a hypothetical certified Controller.
 
     This is a synthetic unit seam, not Host identity evidence. Uncertified Host

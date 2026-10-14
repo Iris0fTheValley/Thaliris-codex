@@ -981,7 +981,7 @@ def test_active_bootstrap_proves_owner_or_foreign_session_once(tmp_path: Path, m
             bootstrap.bootstrap(tmp_path, token)
 
 
-def test_active_owner_admission_and_unknown_owner_are_fail_closed(tmp_path: Path):
+def test_active_owner_admission_and_unknown_owner_are_fail_closed(tmp_path: Path, managed_role_profile_home: Path):
     import subprocess
 
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
