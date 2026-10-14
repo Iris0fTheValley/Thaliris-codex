@@ -51,10 +51,28 @@ The existing desktop baseline used Codex app 26.1007.2314.0 and the installed
 0.4.4 adapter, which did not contain these defaults. Its ordinary Reviewer
 default resolved to Sol/medium instead of the required Sol/high; an explicit
 Luna/max selection was preserved. The candidate has not been activated in the
-formal Host. Actual candidate Native `turn_context`, `agent_role`, and Hook
-diagnostics remain UNKNOWN until an isolated run on this exact runtime and
-Gitless workspace completes. The existing desktop baseline does not establish
-candidate behavior.
+formal desktop Host.
+
+The exact candidate was installed through the normal path into a separate
+capability-probe `CODEX_HOME` with no prior installed manifest; Hook trust
+reported `TRUSTED 7/7`. A fresh Native run then spawned a no-task Reviewer from
+the Gitless payload workspace without a model or effort selection and with
+`fork_turns: none`. The observed child `agent_role` was `thaliris-reviewer` and
+its actual `turn_context` reported `gpt-6.1-sol/high`. A second spawn for the
+same role with explicit `gpt-6-luna/max` retained Luna/max. Both child
+completion markers were observed. The workspace remained without `.git`,
+`.context`, `.codex`, `.agent-memory`, and `.milestones` before and after the
+run. Native CLI events recorded WebSocket/TLS EOF retries before successful
+fallback; the actual child contexts were still observed. No separate
+Hook-specific diagnostic appeared in those Native calls, so that diagnostic
+remains UNKNOWN.
+
+An earlier isolated update attempt was refused because its prior runtime had
+18 unmanifested `.pyc` files; it returned `changed: false` and `files: []`, and
+that runtime was left unchanged. The accepted candidate verification used the
+separate capability-probe home above. The desktop Host remains on its earlier
+adapter, and the isolated candidate result does not establish desktop
+activation.
 
 ## Verification and limits
 
@@ -67,5 +85,7 @@ preservation, and absence of new task-authority or reservation state. Wheel
 module hashes matched source and installed bytes, and public `runtime-check`
 reported `ok: true`.
 
-No formal Host write is evidenced by this candidate packaging work. Candidate
-Native behavior remains pending as described above.
+No formal desktop Host write is evidenced by this work. The isolated candidate
+Native run confirms the ordinary Reviewer default and explicit Luna/max
+preservation; Hook-specific Native diagnostics and formal desktop activation
+remain UNKNOWN.
