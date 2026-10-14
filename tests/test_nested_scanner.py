@@ -29,6 +29,12 @@ from thaliris_codex import codex_adapter, lifecycle, roles, task_authority
 @pytest.fixture
 def active(tmp_path: Path, monkeypatch) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    home = tmp_path / "test-host"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    agents = home / "agents"
+    agents.mkdir(parents=True)
+    for name, (model, effort, role) in roles.agent_profiles().items():
+        (agents / name).write_bytes(codex_adapter._agent_profile(name[:-5], role, model, effort))
     monkeypatch.setattr(task_authority, "directory", lambda: tmp_path.parent / "external-task-authority")
     codex_adapter.init(tmp_path)
     started = core.task_start(tmp_path, "bounded scanner", None, None)
@@ -490,20 +496,107 @@ def test_top_level_fallback_native_model_selection_is_authorized(active, field):
     assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == "thaliris-implementer"
 
 
-@pytest.mark.parametrize("role", ["investigator", "implementer"])
-@pytest.mark.parametrize("selection", [{}, {"model": "gpt-6-luna"}, {"reasoning_effort": "max"}])
-def test_top_level_fallback_spawn_without_model_pair_is_denied_without_reservation(active, role, selection):
-    request = event(
-        tool_name="spawn_agent",
-        agentType=f"thaliris-{role}",
-        fork_turns="none",
-        message="Selected facts only",
-        **selection,
-    )
+@pytest.mark.parametrize("role", list(roles.ROLE_MODEL_ROUTING_DEFAULTS))
+def test_managed_spawn_supplies_default_pair_in_updated_input(active, role):
+    request = spawn(role=role, use_route_defaults=False)
+    original = dict(request["tool_input"])
+    result = json.loads(lifecycle.handle_hook(active, "PreToolUse", request))
+    output = result["hookSpecificOutput"]
+    assert output["permissionDecision"] == "allow"
+    assert output["updatedInput"]["model"] == roles.ROLE_MODEL_ROUTING_DEFAULTS[role][0]
+    assert output["updatedInput"]["reasoning_effort"] == roles.ROLE_MODEL_ROUTING_DEFAULTS[role][1]
+    assert request["tool_input"] == original
+    assert state(active)["pending_authorized_spawn"]["role"] == role
+
+
+def test_partial_managed_model_selection_preserves_native_omission_semantics(active):
+    model_only = spawn(role="implementer", use_route_defaults=False, model="gpt-5.6-luna")
+    assert lifecycle.handle_hook(active, "PreToolUse", model_only) == ""
+    assert "reasoning_effort" not in model_only["tool_input"]
+    assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == "thaliris-implementer"
+
+    # Retire the pending reservation by binding its expected child before making
+    # the next independent dispatch.
+    assert lifecycle._record_subagent_start(active, identity())
+    effort_only = spawn(role="reviewer", use_route_defaults=False, reasoning_effort="medium")
+    output = json.loads(lifecycle.handle_hook(active, "PreToolUse", effort_only))["hookSpecificOutput"]
+    assert output["updatedInput"]["model"] == roles.ROLE_MODEL_ROUTING_DEFAULTS["reviewer"][0]
+    assert output["updatedInput"]["reasoning_effort"] == "medium"
+    assert effort_only["tool_input"]["reasoning_effort"] == "medium"
+
+
+def test_null_model_fields_are_native_omissions_and_bad_values_do_not_reserve(active):
+    omitted = spawn(role="investigator", use_route_defaults=False, model=None, reasoning_effort=None)
+    output = json.loads(lifecycle.handle_hook(active, "PreToolUse", omitted))["hookSpecificOutput"]
+    assert output["updatedInput"]["model"] == "gpt-6-luna"
+    assert output["updatedInput"]["reasoning_effort"] == "max"
+    assert lifecycle._record_subagent_start(active, identity("investigator", "investigator-child"))
+
+    for field, value in (("model", ""), ("model", 6), ("reasoning_effort", []), ("reasoning_effort", " ")):
+        request = spawn(role="implementer", use_route_defaults=False, **{field: value})
+        before = state(active)
+        denied = lifecycle.handle_hook(active, "PreToolUse", request)
+        assert "ROLE_MODEL_ARGUMENT_INVALID" in denied
+        assert state(active) == before
+
+
+def test_nested_scanner_uses_investigator_default_after_exact_parent_checks(active):
+    parent = start(active)
+    request = spawn(parent, "investigator", use_route_defaults=False)
+    output = json.loads(lifecycle.handle_hook(active, "PreToolUse", request))["hookSpecificOutput"]
+    assert output["updatedInput"]["model"] == "gpt-6-luna"
+    assert output["updatedInput"]["reasoning_effort"] == "max"
+    pending = state(active)["pending_authorized_spawn"]
+    assert pending["parent_agent_id_hash"] == lifecycle._identity_hash(parent["agent_id"])
+
+
+def test_denied_managed_spawn_does_not_return_defaults_or_reserve(active):
+    verifier = start(active, role="verifier", agent="verifier-child")
+    request = spawn(verifier, "investigator", use_route_defaults=False)
     before = state(active)
     denied = lifecycle.handle_hook(active, "PreToolUse", request)
-    assert "ROLE_MODEL_SELECTION_REQUIRED" in denied
+    assert "DELEGATION" in denied
     assert state(active) == before
+
+
+def test_readonly_actor_denial_precedes_model_default_and_reservation(active):
+    request = spawn(role="implementer", use_route_defaults=False)
+    request["readonly"] = True
+    before = state(active)
+    denied = lifecycle.handle_hook(active, "PreToolUse", request)
+    assert "READONLY_ACTOR" in denied
+    assert state(active) == before
+
+
+def test_generic_native_spawn_remains_unmanaged_and_gets_no_thaliris_default(active):
+    request = event(tool_name="spawn_agent", tool_input={
+        "agent_type": "explorer", "fork_turns": "none", "message": "ordinary native work",
+    })
+    before = state(active)
+    assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
+    assert state(active) == before
+    assert "model" not in request["tool_input"]
+    assert "reasoning_effort" not in request["tool_input"]
+
+
+def test_model_routing_does_not_edit_user_profile_or_host_config(active, tmp_path, monkeypatch):
+    home = tmp_path / "host"
+    agents = home / "agents"
+    agents.mkdir(parents=True)
+    profile = agents / "thaliris-implementer.toml"
+    profile_bytes = b'name = "thaliris-implementer"\ndescription = "user role"\ndeveloper_instructions = "user-owned"\n'
+    profile.write_bytes(profile_bytes)
+    config = home / "config.toml"
+    config_bytes = b"# user Host configuration\n[notice]\nlevel = 3\n"
+    config.write_bytes(config_bytes)
+    monkeypatch.setenv("CODEX_HOME", str(home))
+
+    request = spawn(role="implementer", use_route_defaults=False)
+    output = json.loads(lifecycle.handle_hook(active, "PreToolUse", request))["hookSpecificOutput"]
+    assert output["updatedInput"]["model"] == "gpt-6-luna"
+    assert roles.agent_profiles()["thaliris-implementer.toml"][:2] == (None, None)
+    assert profile.read_bytes() == profile_bytes
+    assert config.read_bytes() == config_bytes
 
 
 @pytest.mark.parametrize("role", ["investigator", "implementer"])

@@ -35,6 +35,15 @@ def hypothetical_controller_contract(monkeypatch, tmp_path):
 
 def repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    # Managed-spawn tests model a current Host session with the native role
+    # definitions already present. Keep these under the isolated test CODEX_HOME
+    # and preserve any profile bytes a case has supplied itself.
+    host_agents = codex_adapter._codex_home() / "agents"
+    for name, (model, effort, role) in roles.agent_profiles().items():
+        profile = host_agents / name
+        if not profile.exists():
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_bytes(codex_adapter._agent_profile(name[:-5], role, model, effort))
     codex_adapter.init(tmp_path)
     return tmp_path
 

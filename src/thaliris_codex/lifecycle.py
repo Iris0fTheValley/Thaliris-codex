@@ -2449,7 +2449,13 @@ def _turn_id_hash(payload: dict[str, Any]) -> str | None:
     return _identity_hash(value) if isinstance(value, str) and value else None
 
 
-def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id: str | None = None) -> str:
+def _reserve_managed_spawn(
+    root: Path,
+    payload: dict[str, Any],
+    expected_task_id: str | None = None,
+    *,
+    updated_input: list[dict[str, Any]] | None = None,
+) -> str:
     """Atomically reserve one unbound dispatch for the selected task."""
     task_id = expected_task_id or _active_task_id(root)
     if task_id is None:
@@ -2501,6 +2507,7 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exact bound depth-one Executor/Reviewer parent and Investigator target required.")
             if not nested and not roles.delegation_allowed("controller", role):
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: unsupported Controller target.")
+            routed_input: dict[str, Any] | None = None
             if (
                 (authority is None or authority["contract"].get("execution_constraint") != "luna-only")
                 and role in roles.ROLE_MODEL_ROUTING_DEFAULTS
@@ -2508,10 +2515,30 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
             ):
                 model = tool_input.get("model")
                 reasoning_effort = tool_input.get("reasoning_effort")
-                if not isinstance(model, str) or not model.strip() or not isinstance(reasoning_effort, str) or not reasoning_effort.strip():
+                invalid = any(
+                    value is not None and (not isinstance(value, str) or not value.strip())
+                    for value in (model, reasoning_effort)
+                )
+                if invalid:
                     return _permission_deny(
-                        "THALIRIS_ROLE_MODEL_SELECTION_REQUIRED: managed spawn for this role requires explicit non-empty model and reasoning_effort arguments."
+                        "THALIRIS_ROLE_MODEL_ARGUMENT_INVALID: model and reasoning_effort must be non-empty strings when supplied."
                     )
+                default_model, default_effort = roles.ROLE_MODEL_ROUTING_DEFAULTS[role]
+                if model is None and reasoning_effort is None:
+                    routed_input = dict(tool_input)
+                    routed_input["model"] = default_model
+                    routed_input["reasoning_effort"] = default_effort
+                elif model is None:
+                    routed_input = dict(tool_input)
+                    routed_input["model"] = default_model
+            if ordinary_native_profile and (authority is None or authority["contract"].get("execution_constraint") != "luna-only"):
+                from . import codex_adapter, profile_compatibility
+                profile_decision = profile_compatibility.check(
+                    root, codex_adapter._codex_home(), expected_agent_type,
+                    routed_input or tool_input, cwd=payload.get("cwd"),
+                )
+                if profile_decision:
+                    return _permission_deny(profile_decision)
             if state.get("identity_collisions") or any(isinstance(child, dict) and child.get("native_status_conflict") for child in state["children"]):
                 return _permission_deny("THALIRIS_NATIVE_IDENTITY_COLLISION: conflicting native spawn identities block new role-session authorization.")
             if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
@@ -2549,6 +2576,11 @@ def _reserve_managed_spawn(root: Path, payload: dict[str, Any], expected_task_id
             }
             _runtime_metadata(state, payload)
             _write_capture(path, state)
+            if updated_input is not None and routed_input is not None:
+                if isinstance(payload.get("tool_input"), dict):
+                    updated_input.append(routed_input)
+                elif isinstance(payload.get("input"), dict):
+                    updated_input.append(routed_input)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return _permission_deny("THALIRIS_MANAGED_SPAWN_UNAVAILABLE: managed authorization could not be reserved.")
     return ""
@@ -3837,7 +3869,13 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
         if normalized != "spawn_agent" or binding is None or not binding.allowed_delegation_targets:
             return _permission_deny(f"THALIRIS_ROLE_SESSION_DELEGATION: a managed {role_names} session may only use its explicit allowed fresh delegation targets.")
         if managed_task_state(root)[0] == "ACTIVE":
-            return _reserve_managed_spawn(root, payload)
+            updated_input: list[dict[str, Any]] = []
+            decision = _reserve_managed_spawn(root, payload, updated_input=updated_input)
+            if decision:
+                return decision
+            if updated_input:
+                return _pre_tool_updated_input_output(updated_input[0])
+            return ""
         target = _managed_spawn_role(payload)
         if target not in binding.allowed_delegation_targets:
             return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: only Investigator delegation is permitted.")
@@ -4503,7 +4541,13 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
                 return ""
             if not _explicit_fresh_spawn(tool_input):
                 return _permission_deny(f"THALIRIS_ISOLATION_REQUIRED: spawn a fresh {_native_role_names()} session explicitly with fork_turns=\"none\" (V2) or fork_context=false (V1).")
-            return _reserve_managed_spawn(root, payload, _task_id)
+            updated_input: list[dict[str, Any]] = []
+            decision = _reserve_managed_spawn(root, payload, _task_id, updated_input=updated_input)
+            if decision:
+                return decision
+            if updated_input:
+                return _pre_tool_updated_input_output(updated_input[0])
+            return ""
         if anchor is not None and anchor["contract"]["execution_mode"] in {"controller-direct", "single-agent"}:
             if operation in {"task-start", "init", "rollback", "task-recover-state"}:
                 return _permission_deny("THALIRIS_TASK_AUTHORITY_REPLACEMENT_REQUIRES_CONTROLLER_DECISION")
@@ -4532,6 +4576,15 @@ def _permission_deny(reason: str) -> str:
             "permissionDecisionReason": reason,
         }
     }, ensure_ascii=False, separators=(",", ":"))
+
+
+def _pre_tool_updated_input_output(updated: dict[str, Any]) -> str:
+    """Return the authorized native argument supplement for PreToolUse."""
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "updatedInput": updated,
+    }}, ensure_ascii=False, separators=(",", ":"))
 
 
 def _controller_actor_assurance(payload: dict[str, Any]) -> str:

@@ -81,6 +81,17 @@ def test_same_semantic_role_identity_is_admitted(constrained, role):
     assert ledger["pending_authorized_spawn"]["expected_agent_type"] == roles.get_codex_binding(role).native_profile
 
 
+def test_luna_constraint_keeps_frozen_profile_binding_without_pretool_rewrite(constrained):
+    root, _ = constrained
+    request = spawn("focused-implementer")
+    original = json.loads(json.dumps(request))
+    assert lifecycle.handle_hook(root, "PreToolUse", request) == ""
+    assert request == original
+    state = core._load_state(root)
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, state["task_id"]), state["task_id"])
+    assert ledger["pending_authorized_spawn"]["role"] == "focused-implementer"
+
+
 def test_luna_constraint_rejects_overrides_and_astra(constrained):
     root, _ = constrained
     for model in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"):

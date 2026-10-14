@@ -1,0 +1,27 @@
+{
+  "revision": "7e1c11d0577441e01a1e6c6efea11362739f4767",
+  "ref": "origin/main",
+  "description": "Exact profile bytes tracked by the published predecessor before the nested role-routing prompt update.",
+  "profiles": {
+    "thaliris-implementer.toml": {
+      "sha256": "065e20f35bd68e4de4b00e7658c62799faebe2745944e604155fc9ee7b7cc79e",
+      "git_blob": "2ecd3e03c1dbb8a13717639a1f08b81d429e7d22"
+    },
+    "thaliris-focused-implementer.toml": {
+      "sha256": "8dcaeaca7da475c0732aa1c3fe7d922850bbe085856611373a2d3c0f1b13ab12",
+      "git_blob": "9d6ff5b94343de6dfce11dd3a4e56cbad8485049"
+    },
+    "thaliris-focused-implementer-astra-medium.toml": {
+      "sha256": "c5d64c787a5fe9c70ffabb066e82e99170bd213c532073db924de6f8c56c0125",
+      "git_blob": "d9784e645f25a50368f64737368ea4d9deec8873"
+    },
+    "thaliris-focused-implementer-xhigh.toml": {
+      "sha256": "e859971fcdf713e7afbe97a6c000444a79f263377fba81a54fc64d4fd5341c36",
+      "git_blob": "9dc7b699eaecda517b47409d4beeb826be3d57aa"
+    },
+    "thaliris-reviewer.toml": {
+      "sha256": "0bf17c556edc9608612031c17886d72c9f786ea61a432ea31c236d643786620e",
+      "git_blob": "f83e6d14f2e18cb29f8ada7dc05fba0af1c58a41"
+    }
+  }
+}

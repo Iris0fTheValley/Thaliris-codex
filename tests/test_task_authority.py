@@ -20,6 +20,14 @@ def workspace(tmp_path, monkeypatch):
     observed = lifecycle.managed_executable_health()
     monkeypatch.setattr(lifecycle, "managed_executable_health", lambda: {**observed, "canonical_executable_available": "YES"})
     monkeypatch.setattr(codex_adapter, "selected_continuation_mode", lambda _: "BLOCKING_WAIT")
+    # Managed-spawn tests use a synthetic Host with the native role profiles
+    # already loaded; these files stay inside this test's isolated CODEX_HOME.
+    agents = Path(os.environ["CODEX_HOME"]) / "agents"
+    for name, (model, effort, role) in roles.agent_profiles().items():
+        profile = agents / name
+        if not profile.exists():
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_bytes(codex_adapter._agent_profile(name[:-5], role, model, effort))
     codex_adapter.init(root)
     return root
 

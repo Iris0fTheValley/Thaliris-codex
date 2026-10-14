@@ -75,8 +75,9 @@ def test_registry_is_authoritative_for_native_profiles_and_mechanical_facts() ->
         "reviewer": ("gpt-6.1-sol", "high"),
         "focused-implementer": ("gpt-6.1-sol", "high"),
         "reasoning-specialist": ("gpt-6.1-sol", "high"),
+        "verifier": ("gpt-6-luna", "max"),
     }
-    assert not set(roles.ROLE_MODEL_ROUTING_DEFAULTS) & {"verifier", "controller"}
+    assert not set(roles.ROLE_MODEL_ROUTING_DEFAULTS) & {"controller"}
     assert roles.native_agent_roles() == {
         profile: definition.id for definition in native
         for profile in (definition.native_profile, definition.astra_medium_native_profile, definition.exceptional_native_profile) if profile
@@ -767,6 +768,33 @@ def test_controller_acceptance_prompt_update_keeps_exact_predecessor_profile_own
         model, effort, role = current_profiles[name]
         current = codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort)
         assert hashlib.sha256(current).hexdigest() not in proof["profiles"].values()
+        assert codex_adapter._agent_profile_state(current, name) == "current"
+
+
+def test_role_model_routing_prompt_predecessor_profiles_have_exact_ownership() -> None:
+    base = Path(__file__).parent / "fixtures/role-model-routing-prompt-predecessor"
+    proof = json.loads((base / "provenance.json").read_text(encoding="utf-8"))
+    assert proof["revision"] == "7e1c11d0577441e01a1e6c6efea11362739f4767"
+    expected = {
+        name: entry["sha256"] for name, entry in proof["profiles"].items()
+    }
+    assert expected == codex_adapter._ROLE_MODEL_ROUTING_PROMPT_PREDECESSOR_PROFILE_HASHES
+
+    for name, digest in expected.items():
+        predecessor = (base / name).read_bytes()
+        published = subprocess.check_output(
+            ["git", "show", f"{proof['revision']}:.codex/agents/{name}"],
+            cwd=Path(__file__).parents[1],
+        )
+        assert published == predecessor
+        assert hashlib.sha256(predecessor).hexdigest() == digest
+        assert codex_adapter._agent_profile_state(predecessor, name) == "legacy"
+        assert codex_adapter._agent_profile_state(predecessor + b"\n# user edit\n", name) == "user"
+        other_name = next(candidate for candidate in expected if candidate != name)
+        assert codex_adapter._agent_profile_state(predecessor, other_name) == "user"
+        model, effort, role = roles.agent_profiles()[name]
+        current = codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort)
+        assert current != predecessor
         assert codex_adapter._agent_profile_state(current, name) == "current"
 
 

@@ -466,10 +466,13 @@ def test_controller_owned_product_completion_and_model_routing_reach_resident_co
              ("reviewer ready", "native completed", "mechanical done", "distinct", "none alone determines product completion",
               "core task-close", "mechanical record"),
              ("verifier", "optional compatibility check", "no verifier", "no reviewer", "required final stage"),
-             ("investigator", "implementer", "curator", "reviewer", "focused implementer", "reasoning specialist",
-              "explicit", "model", "reasoning_effort", "root model", "missing pair", "before making a reservation"),
+             ("investigator", "implementer", "curator", "reviewer", "focused implementer", "reasoning specialist", "verifier",
+              "every Thaliris auxiliary task", "including preparation", "registered Thaliris agent_type", "generic native profiles",
+              "managed PreToolUse", "null", "freshness", "isolation", "only reasoning_effort", "default model",
+              "only model", "default effort", "before a reservation", "unknown"),
              ("profiles remain model-free", "configured role model after spawn arguments", "task's explicit execution constraint",
-              "necessary verification exception", "verifier", "controller's own model remains unchanged", "permissions"),
+              "necessary verification exception", "controller's own model remains unchanged", "permissions",
+              "does not edit user profiles or Host configuration", "updatedInput"),
              ("astra", "current-task user authorization", "luna-only", "frozen constraint"))
     concepts(controller, ("same in delegated", "controller-direct", "single-agent"),
              ("test pass", "reviewer ready", "native completed", "mechanical done", "distinct"))
@@ -479,21 +482,22 @@ def test_controller_owned_product_completion_and_model_routing_reach_resident_co
     assert "Controller does not perform final acceptance itself" not in controller
     assert "final product acceptance uses a separate explicit closing handoff" not in controller
     assert "200 lines" not in controller and "4096" not in controller
-    for role in ("investigator", "implementer", "curator"):
+    for role in ("investigator", "implementer", "curator", "verifier"):
         assert f"| {role.title()} |" in controller
         assert "gpt-6-luna/max" in controller
     for role in ("reviewer", "focused-implementer", "reasoning-specialist"):
         assert f"| {role.replace('-', ' ').title()} |" in controller
         assert "gpt-6.1-sol/high" in controller
-    for role in ("investigator", "implementer", "curator", "reviewer", "focused-implementer", "reasoning-specialist"):
+    for role in ("investigator", "implementer", "curator", "reviewer", "focused-implementer", "reasoning-specialist", "verifier"):
         child = prompt(role)
         assert "gpt-6.1-sol/high" not in child
         assert "gpt-6-luna/max" not in child
     for role in ("implementer", "focused-implementer", "reviewer"):
-        assert 'model="gpt-6-luna"' in prompt(role)
-        assert 'reasoning_effort="max"' in prompt(role)
-        concepts(prompt(role), ("execution constraint", "verified necessary exception", "both fields explicitly",
-                                "frozen luna-only", "fixed role profile", "forbids per-spawn overrides"))
+        concepts(prompt(role), ("registered Thaliris Investigator", "agent_type", 'fork_turns="none"'))
+        assert 'model="gpt-6-luna"' not in prompt(role)
+        assert 'reasoning_effort="max"' not in prompt(role)
+    for role in ("implementer", "focused-implementer"):
+        concepts(prompt(role), ("generic native agent", "not a Thaliris role"))
     for role in ("implementer", "focused-implementer"):
         concepts(prompt(role), ("report the candidate", "criterion-linked evidence", "unknown for unverified behavior"),
                  ("controller integrates", "original objective", "acceptance criteria", "available evidence",

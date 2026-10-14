@@ -577,6 +577,21 @@ for _profile_name, _profile_hash in _PRE_ACCEPTANCE_UPDATE_PROFILE_HASHES.items(
         | frozenset({_profile_hash})
     )
 
+# Exact filename-bound profile bytes from immutable commit 7e1c11d before the
+# nested Scanner wording moved to role-only routing instructions.
+_ROLE_MODEL_ROUTING_PROMPT_PREDECESSOR_PROFILE_HASHES = {
+    "thaliris-implementer.toml": "065e20f35bd68e4de4b00e7658c62799faebe2745944e604155fc9ee7b7cc79e",
+    "thaliris-focused-implementer.toml": "8dcaeaca7da475c0732aa1c3fe7d922850bbe085856611373a2d3c0f1b13ab12",
+    "thaliris-focused-implementer-astra-medium.toml": "c5d64c787a5fe9c70ffabb066e82e99170bd213c532073db924de6f8c56c0125",
+    "thaliris-focused-implementer-xhigh.toml": "e859971fcdf713e7afbe97a6c000444a79f263377fba81a54fc64d4fd5341c36",
+    "thaliris-reviewer.toml": "0bf17c556edc9608612031c17886d72c9f786ea61a432ea31c236d643786620e",
+}
+for _profile_name, _profile_hash in _ROLE_MODEL_ROUTING_PROMPT_PREDECESSOR_PROFILE_HASHES.items():
+    _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = (
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset())
+        | frozenset({_profile_hash})
+    )
+
 
 def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
@@ -1035,14 +1050,25 @@ recovery/Host maintenance retrieved on demand. Full mechanical
 design belongs to [Codex protocol](../adapter/codex/README.md), not repeated prompts.
 
 {_native_profile_facts()}
-Ordinary profiles omit model and effort. Controller's resident routing table supplies
-the default model/effort pair, and managed native spawns must pass both fields
-explicitly. Codex applies a configured role model after spawn arguments, so keeping
-these profiles model-free preserves explicit task exceptions. Static Astra variants
-retain fixed bindings and require current-task human authorization. Dedicated
-luna-only policy freezes Luna/xhigh bindings and forbids model overrides; it changes
-execution, not role responsibilities. Source rendering does not prove that a running
-Host loaded these profiles.
+Ordinary profiles omit model and effort. Managed PreToolUse routing supplies omitted
+model/effort values from the Controller's resident table after the existing
+authorization checks pass. Codex applies a configured role model after spawn
+arguments, so keeping these profiles model-free preserves explicit task choices.
+Before reservation, a read-only compatibility check verifies only the selected
+ordinary target in personal/project scopes, using TOML name and legacy config_file
+identity. Fixed model/effort fields must agree with selected/routed fields; model-free
+user edits are allowed. Conflicts or unverifiable target bindings prevent reservation
+and preserve user bytes. Model-only selection keeps Native configured/default effort.
+Disk compatibility does not prove the running Host loaded those definitions.
+Static Astra variants retain fixed bindings and require current-task human
+authorization. Dedicated luna-only policy freezes Luna/xhigh bindings and forbids
+model overrides; it changes execution, not role responsibilities. A trusted isolated
+Native run confirmed the managed route contexts, nested binding,
+generic passthrough, and pre-reservation same-name profile denial on
+`codex-cli 0.162.0-alpha.17.2`. Its readonly child contexts and lifecycle
+observations apply only to this temporary candidate; production Hook and desktop
+Host activation remain `UNKNOWN`.
+Source rendering does not prove that a running Host loaded these profiles.
 
 {role_sections}
 """

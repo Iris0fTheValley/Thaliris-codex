@@ -189,26 +189,41 @@ Choose the minimum necessary fresh role for the Workstream's work shape:
 | Reasoning Specialist | Reasoning specialist | gpt-6.1-sol/high |
 | Implementer | Implementer | gpt-6-luna/max |
 | Focused Implementer | Focused implementer | gpt-6.1-sol/high |
-| Verifier | Verifier | Host/user/selected |
+| Verifier | Verifier | gpt-6-luna/max |
 | Reviewer | Reviewer | gpt-6.1-sol/high |
 
-For Investigator, Implementer, Curator, Reviewer, Focused Implementer and Reasoning
-Specialist, pass the table's model and effort as explicit `model` and
-`reasoning_effort` arguments on every native `spawn_agent` call. This avoids
-inheriting the root model when an argument is omitted. A task's explicit execution
-constraint or a necessary verification exception may select another pair; let Codex
-reject unsupported choices and do not retry with omitted fields. Verifier keeps its
-existing configuration and has no new explicit-pair requirement. Controller's own
-model remains unchanged.
+For every Thaliris auxiliary task, including preparation and discovery before the
+main Workstream, select an exact registered Thaliris `agent_type`. Generic native
+profiles such as `worker` or `explorer` remain ordinary native choices; they do not
+receive Thaliris role defaults. The managed `PreToolUse` route supplies an omitted
+(`null` included) `model` and `reasoning_effort` from this table after the existing
+freshness, isolation, authority, role and execution-constraint checks pass. If only
+`reasoning_effort` is supplied, it adds the role's default model. If only `model` is
+supplied, it preserves that model and preserves Native configured/default effort. Explicit
+non-empty selections are preserved. Empty or non-string values are denied before a
+reservation. A task's explicit execution constraint or a necessary verification
+exception may select another supported value; native choice validation remains with
+Codex.
 
 Generated role profiles remain model-free. Codex applies a configured role model
 after spawn arguments, so adding model fields to these profiles would override an
-explicit task selection. The managed spawn check rejects a missing pair for the six
-default-routed roles before making a reservation. The frozen `luna-only` constraint
-is the exception: it forbids per-spawn overrides and installs Luna/xhigh role
-profiles. Model choice does not change role responsibilities or permissions. The
-installed Host may still have historical profiles; source changes do not prove
-native activation.
+explicit task selection. Default routing changes only the managed spawn arguments;
+it does not edit user profiles or Host configuration. Before reserving any ordinary
+managed target, a read-only check resolves observed standalone TOML names and
+legacy config_file references in personal and project scopes. Fixed profile fields
+must agree with the selected/routed fields; model-free user edits are allowed.
+Unverifiable target definitions or conflicting same-name outcomes are denied as
+UNKNOWN without rewriting profiles or reserving a dispatch. Model-only selection
+keeps the Native configured/default effort. This disk compatibility check cannot
+prove the running Host loaded those definitions. The frozen `luna-only`
+constraint remains fixed to its Luna/xhigh role profiles and forbids per-spawn
+overrides. Model choice does not change role responsibilities or permissions. This
+path depends on the Host applying the hook's `updatedInput`. A trusted isolated
+Native run on `codex-cli 0.162.0-alpha.17.2` verified managed role contexts,
+nested binding, generic passthrough, and pre-reservation profile conflict refusal.
+Its readonly child contexts and lifecycle observations apply only to this temporary
+candidate. Production Hook and desktop Host activation remain `UNKNOWN`; installed
+Host profiles may also be historical.
 Investigator gathers broad facts, not architecture decisions. Reasoning Specialist
 independently challenges a decision basis when that could change direction.
 Scanner is a nested Investigator discovery working pattern. Executor is a category

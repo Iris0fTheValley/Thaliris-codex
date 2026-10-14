@@ -209,12 +209,9 @@ _EXECUTOR_INSTRUCTIONS = (
     "their corresponding tool capabilities. "
     "Reuse original failures and minimal local reproductions; distinguish failed boundaries "
     "from inferred root causes and preserve refusal/identity/ownership guarantees. "
-    "When delegating a Scanner, pass model=\"gpt-6-luna\" and reasoning_effort=\"max\", "
-    "unless frozen luna-only applies; that constraint uses its fixed role profile and "
-    "forbids per-spawn overrides. Another explicit execution constraint or verified "
-    "necessary exception may require a different supported pair; preserve it and pass "
-    "both fields explicitly. This model choice does not change selected scope or role "
-    "permissions. You may delegate an independent, "
+    "When delegating Scanner work, select the registered Thaliris Investigator "
+    "agent_type and a fresh context; a generic native agent is not a Thaliris role. "
+    "You may delegate an independent, "
     "genuinely uncovered discovery set to a fresh Investigator Scanner, fork_turns=\"none\" (V2) or fork_context=false (V1), "
     "under the selected task model constraints. Wait only while its needed result is unfinished; use its "
     "FINAL without another wait or repeated discovery. Only one Scanner may be active/pending "
@@ -326,14 +323,9 @@ def _instructions(role: str) -> str:
             'invariant, scope, acceptance, or decision basis requires Controller reopen. Return the '
             'finding, invariant, affected surface, and needed validation without private review '
             'history. Treat unrelated workspace anomalies as observations. Historical/generated '
-            'ownership requires independent historical evidence, not current HEAD. When delegating '
-            'a Scanner, pass model="gpt-6-luna" and reasoning_effort="max", unless frozen '
-            'luna-only applies; that constraint uses its fixed role profile and forbids per-spawn '
-            'overrides. Another explicit execution constraint or verified necessary exception may '
-            'require a different supported pair; preserve it and pass both fields explicitly. This '
-            'model choice does not change '
-            'selected scope or role permissions. Delegate '
-            'independent broad discovery to a fresh Investigator doing Scanner work, '
+            'ownership requires independent historical evidence, not current HEAD. Delegate '
+            'independent broad discovery to a fresh registered Thaliris Investigator '
+            'agent_type doing Scanner work, '
             'fork_turns="none" (V2) or fork_context=false (V1), under selected task model constraints; retain independent semantic judgment '
             'and wait only while its needed result is unfinished. Only one Scanner may be '
             'active/pending at once; after proved terminal completion the slot can serve '
@@ -650,9 +642,9 @@ EXECUTION_CONSTRAINTS = ("luna-only",)
 
 # Controller routing defaults are deliberately separate from native profile
 # model fields. Codex applies a selected role's configured model after the
-# spawn call's model arguments, so profiles stay model-free and Controller
-# dispatch must send these values explicitly. This mapping carries no role
-# permission or delegation semantics.
+# spawn call's model arguments, so profiles stay model-free. Managed PreToolUse
+# routing supplies omitted values after its existing authorization checks. This
+# mapping carries no role permission or delegation semantics.
 ROLE_MODEL_ROUTING_DEFAULTS: dict[str, tuple[str, str]] = {
     "investigator": ("gpt-6-luna", "max"),
     "implementer": ("gpt-6-luna", "max"),
@@ -660,6 +652,7 @@ ROLE_MODEL_ROUTING_DEFAULTS: dict[str, tuple[str, str]] = {
     "reviewer": ("gpt-6.1-sol", "high"),
     "focused-implementer": ("gpt-6.1-sol", "high"),
     "reasoning-specialist": ("gpt-6.1-sol", "high"),
+    "verifier": ("gpt-6-luna", "max"),
 }
 
 
