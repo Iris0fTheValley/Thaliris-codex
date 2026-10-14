@@ -9,11 +9,14 @@ recovery/Host maintenance retrieved on demand. Full mechanical
 design belongs to [Codex protocol](../adapter/codex/README.md), not repeated prompts.
 
 The native child profiles are Investigator (`(host/task)`, `(host/task)`), Curator (`(host/task)`, `(host/task)`), Reasoning Specialist (`(host/task)`, `(host/task)`), Implementer (`(host/task)`, `(host/task)`), Focused Implementer (`(host/task)`, `(host/task)`), Verifier (`(host/task)`, `(host/task)`), and Reviewer (`(host/task)`, `(host/task)`).
-Ordinary profiles omit model and effort. Managed PreToolUse routing supplies omitted
-model/effort values from the Controller's resident table after the existing
-authorization checks pass. Codex applies a configured role model after spawn
-arguments, so keeping these profiles model-free preserves explicit task choices.
-Before reservation, a read-only compatibility check verifies only the selected
+Ordinary profiles omit model and effort. PreToolUse routing supplies omitted
+model/effort values from the Controller's resident table for exact ordinary role
+profiles after applicable guards. During an ACTIVE task, existing managed
+freshness, owner, delegation and authority checks still precede routing and
+reservation. In NO_TASK or inactive state, routing updates native arguments only;
+it creates no reservation or lifecycle binding. Codex applies a configured role
+model after spawn arguments, so keeping these profiles model-free preserves
+explicit task choices. A read-only compatibility check verifies only the selected
 ordinary target in personal/project scopes, using TOML name and legacy config_file
 identity. Fixed model/effort fields must agree with selected/routed fields; model-free
 user edits are allowed. Conflicts or unverifiable target bindings prevent reservation

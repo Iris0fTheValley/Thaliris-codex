@@ -61,6 +61,40 @@ def test_other_custom_and_managed_profile_conflicts_do_not_block_target(active):
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(role="implementer")) == ""
 
 
+def test_invalid_agents_section_does_not_hide_a_valid_target_in_another_layer(active):
+    home = codex_adapter._codex_home()
+    target = "thaliris-implementer"
+    (home / "agents" / f"{target}.toml").unlink()
+    project_target = profile(active / ".codex" / "agents", target, filename="project-role.toml")
+    config = home / "config.toml"
+    config.write_text('agents = "invalid section type"\n', encoding="utf-8")
+    config_bytes = config.read_bytes()
+    profile_bytes = project_target.read_bytes()
+
+    output = json.loads(lifecycle.handle_hook(active, "PreToolUse", spawn(role="implementer", use_route_defaults=False)))
+    assert output["hookSpecificOutput"]["updatedInput"]["model"] == "gpt-6-luna"
+    assert output["hookSpecificOutput"]["updatedInput"]["reasoning_effort"] == "max"
+    assert config.read_bytes() == config_bytes
+    assert project_target.read_bytes() == profile_bytes
+
+
+def test_invalid_agents_section_does_not_hide_missing_target(active):
+    home = codex_adapter._codex_home()
+    target = home / "agents" / "thaliris-implementer.toml"
+    target.unlink()
+    config = home / "config.toml"
+    config.write_text('agents = "invalid section type"\n', encoding="utf-8")
+    deny_without_reservation(active, spawn(role="implementer"), "ROLE_PROFILE_BINDING_UNKNOWN")
+
+
+def test_invalid_agents_section_does_not_hide_target_conflict(active):
+    home = codex_adapter._codex_home()
+    profile(home / "agents", model="gpt-6.1-sol", filename="thaliris-implementer.toml")
+    config = home / "config.toml"
+    config.write_text('agents = "invalid section type"\n', encoding="utf-8")
+    deny_without_reservation(active, spawn(role="implementer"), "ROLE_PROFILE_BINDING_CONFLICT")
+
+
 @pytest.mark.parametrize("name", ["thaliris-implementer", None])
 def test_legacy_config_file_identity_and_relative_path_are_checked(active, name):
     home = codex_adapter._codex_home()

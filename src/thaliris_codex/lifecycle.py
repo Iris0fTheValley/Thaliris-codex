@@ -2507,38 +2507,13 @@ def _reserve_managed_spawn(
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: exact bound depth-one Executor/Reviewer parent and Investigator target required.")
             if not nested and not roles.delegation_allowed("controller", role):
                 return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: unsupported Controller target.")
-            routed_input: dict[str, Any] | None = None
-            if (
-                (authority is None or authority["contract"].get("execution_constraint") != "luna-only")
-                and role in roles.ROLE_MODEL_ROUTING_DEFAULTS
-                and ordinary_native_profile
-            ):
-                model = tool_input.get("model")
-                reasoning_effort = tool_input.get("reasoning_effort")
-                invalid = any(
-                    value is not None and (not isinstance(value, str) or not value.strip())
-                    for value in (model, reasoning_effort)
-                )
-                if invalid:
-                    return _permission_deny(
-                        "THALIRIS_ROLE_MODEL_ARGUMENT_INVALID: model and reasoning_effort must be non-empty strings when supplied."
-                    )
-                default_model, default_effort = roles.ROLE_MODEL_ROUTING_DEFAULTS[role]
-                if model is None and reasoning_effort is None:
-                    routed_input = dict(tool_input)
-                    routed_input["model"] = default_model
-                    routed_input["reasoning_effort"] = default_effort
-                elif model is None:
-                    routed_input = dict(tool_input)
-                    routed_input["model"] = default_model
-            if ordinary_native_profile and (authority is None or authority["contract"].get("execution_constraint") != "luna-only"):
-                from . import codex_adapter, profile_compatibility
-                profile_decision = profile_compatibility.check(
-                    root, codex_adapter._codex_home(), expected_agent_type,
-                    routed_input or tool_input, cwd=payload.get("cwd"),
-                )
-                if profile_decision:
-                    return _permission_deny(profile_decision)
+            route_decision, routed_input = _ordinary_native_role_routing(
+                root,
+                payload,
+                enabled=(authority is None or authority["contract"].get("execution_constraint") != "luna-only"),
+            )
+            if route_decision:
+                return route_decision
             if state.get("identity_collisions") or any(isinstance(child, dict) and child.get("native_status_conflict") for child in state["children"]):
                 return _permission_deny("THALIRIS_NATIVE_IDENTITY_COLLISION: conflicting native spawn identities block new role-session authorization.")
             if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
@@ -3879,6 +3854,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
         target = _managed_spawn_role(payload)
         if target not in binding.allowed_delegation_targets:
             return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: only Investigator delegation is permitted.")
+        return _pre_admission_role_route(root, payload)
     operation, context_targets = _context_call(payload)
     if operation in _CHILD_CONTEXT_MUTATIONS:
         target = f"thaliris {operation}"
@@ -4468,6 +4444,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
                 return _permission_deny("THALIRIS_ISOLATION_REQUIRED: named Thaliris work requires a fresh context even without managed admission.")
             # Ordinary degraded delegation: no reservation, owner, or managed
             # child binding is created from this ambiguous actor.
+            return _pre_admission_role_route(root, payload)
         return ""
 
     if state_status == "INVALID_STATE":
@@ -4565,6 +4542,8 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
 
     # NO_TASK is transparent: ordinary Codex workflows are not managed and
     # therefore do not inherit Thaliris spawn isolation requirements.
+    if normalized == "spawn_agent":
+        return _pre_admission_role_route(root, payload)
     return ""
 
 
@@ -4585,6 +4564,77 @@ def _pre_tool_updated_input_output(updated: dict[str, Any]) -> str:
         "permissionDecision": "allow",
         "updatedInput": updated,
     }}, ensure_ascii=False, separators=(",", ":"))
+
+
+def _ordinary_native_role_routing(
+    root: Path,
+    payload: dict[str, Any],
+    *,
+    enabled: bool = True,
+) -> tuple[str, dict[str, Any] | None]:
+    """Select defaults for an exact ordinary Thaliris profile without admission.
+
+    The result only describes a native argument update or a target compatibility
+    refusal. Callers remain responsible for running their existing isolation,
+    readonly, fence, role, task-control, and authority guards first. In
+    particular, this helper never creates a reservation or lifecycle binding.
+    """
+    native_type = _native_spawn_agent_type(payload)
+    role = _native_agent_roles().get(native_type) if native_type is not None else None
+    binding = roles.get_codex_binding(role) if role is not None else None
+    if (
+        not enabled
+        or role not in roles.ROLE_MODEL_ROUTING_DEFAULTS
+        or binding is None
+        or native_type != binding.native_profile
+    ):
+        return "", None
+
+    tool_input = _delegation_input(payload)
+    model = tool_input.get("model")
+    reasoning_effort = tool_input.get("reasoning_effort")
+    if any(
+        value is not None and (not isinstance(value, str) or not value.strip())
+        for value in (model, reasoning_effort)
+    ):
+        return _permission_deny(
+            "THALIRIS_ROLE_MODEL_ARGUMENT_INVALID: model and reasoning_effort must be non-empty strings when supplied."
+        ), None
+
+    routed_input = None
+    default_model, default_effort = roles.ROLE_MODEL_ROUTING_DEFAULTS[role]
+    if model is None and reasoning_effort is None:
+        routed_input = dict(tool_input)
+        routed_input["model"] = default_model
+        routed_input["reasoning_effort"] = default_effort
+    elif model is None:
+        routed_input = dict(tool_input)
+        routed_input["model"] = default_model
+
+    from . import codex_adapter, profile_compatibility
+
+    profile_decision = profile_compatibility.check(
+        root,
+        codex_adapter._codex_home(),
+        native_type,
+        routed_input or tool_input,
+        cwd=payload.get("cwd"),
+    )
+    if profile_decision:
+        return _permission_deny(profile_decision), None
+    return "", routed_input
+
+
+def _pre_admission_role_route(root: Path, payload: dict[str, Any]) -> str:
+    """Apply native role defaults where no managed reservation is created."""
+    decision, routed_input = _ordinary_native_role_routing(root, payload)
+    if decision:
+        return decision
+    if routed_input is not None and (
+        isinstance(payload.get("tool_input"), dict) or isinstance(payload.get("input"), dict)
+    ):
+        return _pre_tool_updated_input_output(routed_input)
+    return ""
 
 
 def _controller_actor_assurance(payload: dict[str, Any]) -> str:

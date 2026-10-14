@@ -642,9 +642,9 @@ EXECUTION_CONSTRAINTS = ("luna-only",)
 
 # Controller routing defaults are deliberately separate from native profile
 # model fields. Codex applies a selected role's configured model after the
-# spawn call's model arguments, so profiles stay model-free. Managed PreToolUse
-# routing supplies omitted values after its existing authorization checks. This
-# mapping carries no role permission or delegation semantics.
+# spawn call's model arguments, so profiles stay model-free. PreToolUse routing
+# supplies omitted values after applicable guards; it carries no role permission,
+# delegation, reservation, or lifecycle semantics.
 ROLE_MODEL_ROUTING_DEFAULTS: dict[str, tuple[str, str]] = {
     "investigator": ("gpt-6-luna", "max"),
     "implementer": ("gpt-6-luna", "max"),

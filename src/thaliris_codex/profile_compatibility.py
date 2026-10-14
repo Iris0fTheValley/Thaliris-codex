@@ -61,9 +61,10 @@ def check(root: Path, home: Path, target: str, selection: dict, *, cwd: str | No
             config_path = folder / "config.toml"
             if config_path.exists():
                 agents = _read(config_path).get("agents", {})
-                if not isinstance(agents, dict):
-                    raise ProfileUnknown(f"unsupported agents configuration in {config_path}")
-                for hint, entry in agents.items():
+                # Native warns and skips an invalid agents section for this
+                # layer, then still discovers files in its agents/ directory
+                # and continues through other layers.
+                for hint, entry in (agents.items() if isinstance(agents, dict) else ()):
                     if not isinstance(entry, dict):
                         continue  # Native agents settings are not role declarations.
                     file = entry.get("config_file")

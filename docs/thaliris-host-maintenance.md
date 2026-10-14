@@ -1,5 +1,8 @@
 # Host maintenance and project admission
 
+The 2026-10-14 ordinary-role routing candidate and read-only maintenance
+evidence are recorded in [this dated report](thaliris-host-routing-candidate-20261014.md).
+
 Host maintenance has its own explicit intent. It does not borrow a project's
 task authority, initialize a project, approve its unknown AGENTS control block,
 change a task boundary, or unfence an actor. An arbitrary workspace is sufficient.

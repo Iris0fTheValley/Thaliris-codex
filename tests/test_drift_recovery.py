@@ -196,7 +196,10 @@ def test_unknown_actor_can_delegate_ordinary_fresh_work_without_managed_grant(tm
     codex_adapter.init(root)
     payload = {"session_id": "ambiguous", "tool_name": "spawn_agent",
                "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "ordinary authorized source repair"}}
-    assert lifecycle.handle_hook(root, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI) == ""
+    routed = json.loads(lifecycle.handle_hook(root, "PreToolUse", payload, lifecycle.MANAGED_HOOK_ABI))
+    assert routed["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert routed["hookSpecificOutput"]["updatedInput"]["model"] == "gpt-6-luna"
+    assert routed["hookSpecificOutput"]["updatedInput"]["reasoning_effort"] == "max"
     assert not core._state_path(root).exists()
     assert not list((root / ".context/audit/lifecycle").glob("*.json"))
     payload["tool_input"]["fork_turns"] = "all"

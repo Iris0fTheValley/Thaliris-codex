@@ -189,26 +189,29 @@ Choose the minimum necessary fresh role for the Workstream's work shape:
 For every Thaliris auxiliary task, including preparation and discovery before the
 main Workstream, select an exact registered Thaliris `agent_type`. Generic native
 profiles such as `worker` or `explorer` remain ordinary native choices; they do not
-receive Thaliris role defaults. The managed `PreToolUse` route supplies an omitted
-(`null` included) `model` and `reasoning_effort` from this table after the existing
-freshness, isolation, authority, role and execution-constraint checks pass. If only
-`reasoning_effort` is supplied, it adds the role's default model. If only `model` is
-supplied, it preserves that model and preserves Native configured/default effort. Explicit
-non-empty selections are preserved. Empty or non-string values are denied before a
-reservation. A task's explicit execution constraint or a necessary verification
-exception may select another supported value; native choice validation remains with
-Codex.
+receive Thaliris role defaults. PreToolUse supplies omitted (`null` included)
+`model` and `reasoning_effort` values from this table for exact ordinary role
+profiles after applicable isolation, readonly, fence, Astra, task-control, role and
+execution-constraint guards. In an ACTIVE task, the existing managed freshness,
+owner, delegation and authority checks still precede routing and reservation. In
+NO_TASK or inactive state, routing only updates native spawn arguments; it creates
+no reservation or lifecycle binding. If only `reasoning_effort` is supplied, the
+route adds the role's default model. If only `model` is supplied, it preserves that
+model and Native configured/default effort. Explicit non-empty selections are
+preserved. Empty or non-string values are denied before a reservation. A task's
+explicit execution constraint or a necessary verification exception may select
+another supported value; native choice validation remains with Codex.
 
 Generated role profiles remain model-free. Codex applies a configured role model
 after spawn arguments, so adding model fields to these profiles would override an
-explicit task selection. Default routing changes only the managed spawn arguments;
-it does not edit user profiles or Host configuration. Before reserving any ordinary
-managed target, a read-only check resolves observed standalone TOML names and
+explicit task selection. Default routing changes only native spawn arguments; it
+does not edit user profiles, Host configuration, or task state. Before routing an
+ordinary target, a read-only check resolves observed standalone TOML names and
 legacy config_file references in personal and project scopes. Fixed profile fields
 must agree with the selected/routed fields; model-free user edits are allowed.
 Unverifiable target definitions or conflicting same-name outcomes are denied as
-UNKNOWN without rewriting profiles or reserving a dispatch. Model-only selection
-keeps the Native configured/default effort. This disk compatibility check cannot
+UNKNOWN without rewriting profiles; managed dispatch also remains unreserved.
+Model-only selection keeps the Native configured/default effort. This disk compatibility check cannot
 prove the running Host loaded those definitions. The frozen `luna-only`
 constraint remains fixed to its Luna/xhigh role profiles and forbids per-spawn
 overrides. Model choice does not change role responsibilities or permissions. This
