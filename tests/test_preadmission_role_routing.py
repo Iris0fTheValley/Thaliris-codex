@@ -1,4 +1,5 @@
 """Default native model selection without task admission or reservation."""
+import hashlib
 import json
 import subprocess
 
@@ -158,17 +159,124 @@ def test_restricted_pre_admission_actor_is_denied_before_default_selection(proje
     assert_no_task_authority(root)
 
 
-def test_public_hook_routes_in_gitless_cwd_without_task_state(project, tmp_path, monkeypatch):
-    _root, _home = project
+@pytest.mark.parametrize("launch", ["same", "gitless", "git"])
+def test_public_hook_routes_in_gitless_cwd_without_task_state(project, tmp_path, monkeypatch, launch):
+    root, _home = project
     projectless = tmp_path / "projectless"
     projectless.mkdir()
-    monkeypatch.chdir(projectless)
+    launch_root = projectless if launch == "same" else root
+    if launch == "gitless":
+        launch_root = tmp_path / "launch"
+        launch_root.mkdir()
+    monkeypatch.chdir(launch_root)
     request = spawn(projectless)
-    result = lifecycle.handle_hook(projectless, "PreToolUse", request)
+    original = dict(request["tool_input"])
+    result = lifecycle.handle_hook(launch_root, "PreToolUse", request)
     output = json.loads(result)["hookSpecificOutput"]
+    assert output["permissionDecision"] == "allow"
     assert output["updatedInput"]["model"] == "gpt-6-luna"
     assert output["updatedInput"]["reasoning_effort"] == "max"
+    assert request["tool_input"] == original
     assert not (projectless / ".git").exists()
     assert not core._state_path(projectless).exists()
-    assert not (projectless / ".context" / "audit" / "lifecycle").exists()
-    assert_no_task_authority(projectless)
+    for scope in (projectless, launch_root):
+        assert_no_reservation(scope)
+        assert_no_task_authority(scope)
+
+
+@pytest.mark.parametrize(
+    ("guard", "reason"),
+    [("readonly", "READONLY_ACTOR"), ("fenced", "FENCED_ACTOR"),
+     ("isolation", "ISOLATION_REQUIRED"), ("missing-profile", "ROLE_PROFILE_BINDING_UNKNOWN"),
+     ("conflicting-profile", "ROLE_PROFILE_BINDING_CONFLICT")],
+)
+def test_gitless_payload_cwd_keeps_public_hook_guards(project, tmp_path, monkeypatch, guard, reason):
+    launch_root, home = project
+    projectless = tmp_path / "projectless"
+    projectless.mkdir()
+    monkeypatch.chdir(launch_root)
+    request = spawn(projectless)
+    if guard in {"readonly", "fenced"}:
+        request[guard] = True
+    elif guard == "isolation":
+        request["tool_input"]["fork_turns"] = "all"
+    elif guard == "missing-profile":
+        (home / "agents" / "thaliris-implementer.toml").unlink()
+    else:
+        agents = projectless / ".codex" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "custom.toml").write_text(
+            'name = "thaliris-implementer"\nmodel = "gpt-6.1-sol"\n', encoding="utf-8",
+        )
+    original = dict(request["tool_input"])
+    result = lifecycle.handle_hook(launch_root, "PreToolUse", request)
+    assert reason in result
+    assert "updatedInput" not in result
+    assert request["tool_input"] == original
+    for scope in (projectless, launch_root):
+        assert_no_reservation(scope)
+        assert_no_task_authority(scope)
+        assert not core._state_path(scope).exists()
+
+
+@pytest.mark.parametrize("cwd", [None, "", 42, "missing", "file"])
+def test_hook_root_keeps_launch_fallback_for_missing_or_invalid_cwd(tmp_path, cwd):
+    launch_root = tmp_path / "launch"
+    launch_root.mkdir()
+    if cwd == "missing":
+        cwd = str(tmp_path / "missing")
+    elif cwd == "file":
+        path = tmp_path / "file"
+        path.write_text("not a directory", encoding="utf-8")
+        cwd = str(path)
+    assert lifecycle._hook_repository_root(launch_root, {"cwd": cwd}) == launch_root.resolve()
+
+
+def test_hook_root_preserves_git_discovery_from_payload_subdirectory(project, tmp_path):
+    root, _home = project
+    cwd = root / "subdir"
+    cwd.mkdir()
+    assert lifecycle._hook_repository_root(tmp_path, {"cwd": str(cwd)}) == root.resolve()
+
+
+@pytest.mark.parametrize(
+    ("guard", "reason"),
+    [("single-agent", "SINGLE_AGENT_TASK"), ("controller-direct", "CONTROLLER_DIRECT_TASK"),
+     ("fenced-session", "ABANDONED_ACTOR")],
+)
+def test_gitless_payload_cwd_keeps_its_active_authority(project, tmp_path, monkeypatch, guard, reason):
+    launch_root, _home = project
+    projectless = tmp_path / "active-projectless"
+    projectless.mkdir()
+    subprocess.run(["git", "init", "-q", str(projectless)], check=True)
+    codex_adapter.init(projectless)
+    started = core.task_start(projectless, "Isolated active fixture", None, None)
+    session_hash = hashlib.sha256(b"root-session").hexdigest()
+    task_authority.establish(projectless, core._load_state(projectless), {
+        "human_instruction": "Exercise payload workspace authority",
+        "boundary": "Isolated test fixture",
+        "invariants": "Preserve task mode and fences",
+        "acceptance": "Spawn is denied without a reservation",
+        "execution_mode": "delegated" if guard == "fenced-session" else guard,
+    }, session_hash)
+    lifecycle.record_task_start_owner(projectless, started["task_id"], session_hash)
+    if guard == "fenced-session":
+        record = task_authority.read(projectless)
+        record["fenced_sessions"] = [session_hash]
+        task_authority.write(projectless, record)
+    state_path = core._state_path(projectless, started["task_id"])
+    authority_path = task_authority.path(projectless)
+    ledger_path = lifecycle._lifecycle_path(projectless, started["task_id"])
+    snapshots = {path: path.read_bytes() for path in (state_path, authority_path, ledger_path)}
+    # Model unavailable Git discovery after admission without altering authority.
+    (projectless / ".git").rename(tmp_path / "fixture-git-metadata")
+    monkeypatch.chdir(launch_root)
+    request = spawn(projectless)
+    result = lifecycle.handle_hook(launch_root, "PreToolUse", request)
+    assert reason in result
+    assert "updatedInput" not in result
+    assert {path: path.read_bytes() for path in snapshots} == snapshots
+    assert not (projectless / ".git").exists()
+    assert_no_reservation(launch_root)
+    assert_no_task_authority(launch_root)
+    assert not core._state_path(launch_root).exists()

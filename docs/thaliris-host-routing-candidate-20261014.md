@@ -22,45 +22,50 @@ the layer's `agents/` directory and later layers. Missing targets, same-name
 model conflicts, and unresolved working-directory evidence still refuse model
 routing. Profile files and configuration bytes remain unchanged.
 
-Source SHA-256 values are `0a6d98e9c8e66235f8845e27759799c3e42b4657b232ce9b3ad594a34ce42f02`
+Hook root selection now honors a valid payload `cwd` directory when Git cannot
+discover a repository there. A Git repository discovered from that directory
+still selects its repository root; missing, invalid, or non-directory `cwd`
+evidence retains the launch-root fallback. This keeps routing and existing
+readonly, fence, isolation, and task-authority checks attached to a Gitless
+payload workspace without creating reservations or task state.
+
+Source SHA-256 values are `688e806c38588c5a33e8655aafad9309ebed865454c1320c6da66bca2863869f`
 for `lifecycle.py` and
 `7d820cdd3f12de47d0143f12c9f7eeceaca085e9501d7226329bf649a1ce36d7` for
 `profile_compatibility.py`.
 
 ## Candidate and Host evidence
 
-The candidate wheel is version 0.4.4 with SHA-256
-`136aad11fa7b7109166da55e522163a255970d579a7e43e29085f446ee3772a9`. Its two
-changed modules match the source hashes above, and the isolated runtime records
-that wheel digest as its direct installation provenance. The standard runtime
-setup and public `runtime-check` passed. A read-only `codex-maintenance-plan`
-also passed with `ownership_approved: false` and no project files touched. Its
-review-only contract states that formal Host installation, upgrade, and removal
-are not authorized.
+The final candidate wheel is version 0.4.4 with SHA-256
+`33cf99897dae177bcb07bb4038d0ded09cdb70d6b61f1958cba18736a092f359`. All 23
+Python modules in the wheel and installed runtime match the current source, and
+the installed direct URL records that wheel digest. Normal `runtime_setup.create`
+used the reviewed Core 0.4.4 wheel (`a7261b57a911de85ca5c5ca577645c6f984ce4d827a39e883562b32e3857cead`)
+and produced candidate runtime digest
+`8812f8219ce95f4b0eb2ecb3aa462ba90c09e9cb3eb1764e5c44aea8d1e39227`.
+The setup console smoke and public `runtime-check` both passed. The exact
+runtime manifest digest remained stable after `runtime-check`, with bytecode
+disabled and no generated `.pyc` files.
 
 The existing desktop baseline used Codex app 26.1007.2314.0 and the installed
 0.4.4 adapter, which did not contain these defaults. Its ordinary Reviewer
 default resolved to Sol/medium instead of the required Sol/high; an explicit
 Luna/max selection was preserved. The candidate has not been activated in the
-formal Host. Candidate `runtime-check` is PASS; actual candidate Native
-`turn_context`, `agent_role`, and Hook diagnostics remain UNKNOWN because the
-available child-spawn interface does not select the prepared Gitless workspace
-and its temporary `CODEX_HOME`. No substitute run was used.
-
-The exact candidate Native probe is still needed before claiming that a fresh
-default Reviewer receives Sol/high and an explicit Luna/max Reviewer receives
-Luna/max. The current desktop baseline does not establish candidate behavior.
+formal Host. Actual candidate Native `turn_context`, `agent_role`, and Hook
+diagnostics remain UNKNOWN until an isolated run on this exact runtime and
+Gitless workspace completes. The existing desktop baseline does not establish
+candidate behavior.
 
 ## Verification and limits
 
-The full source suite passed: 1,404 passed, 10 skipped, and 1 xfailed. Focused
-tests against the installed candidate wheel passed: 173 passed and 3 skipped.
-The suite includes pre-admission defaults for NO_TASK and inactive state,
-sparse and explicit selections, generic-role passthrough, Gitless public Hook
-routing, readonly/fenced precedence, and absence of new task-authority or
-reservation state.
+The source suite passed with 617 passed and 1 xfailed; focused source tests
+passed with 84 passed. The focused pre-admission route suite also passed against
+the installed final wheel. Those tests cover NO_TASK and inactive defaults,
+sparse and explicit selections, generic-role passthrough, Gitless payload cwd,
+invalid-cwd fallback, readonly/fenced/isolation guards, active authority
+preservation, and absence of new task-authority or reservation state. Wheel
+module hashes matched source and installed bytes, and public `runtime-check`
+reported `ok: true`.
 
-No formal Host write was attempted. The previous temporary authentication
-staging cleanup remains blocked by environment policy; its contents were not
-read or hashed, and no cleanup workaround was attempted. This staging is not
-part of the repository.
+No formal Host write is evidenced by this candidate packaging work. Candidate
+Native behavior remains pending as described above.

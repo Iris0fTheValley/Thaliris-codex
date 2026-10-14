@@ -1673,6 +1673,10 @@ def _hook_repository_root(root: Path, payload: dict[str, Any]) -> Path:
             return Path(proc.stdout.strip()).resolve()
     except (OSError, subprocess.SubprocessError):
         pass
+    # A valid payload directory remains the selected workspace without Git.
+    # Missing/non-directory cwd evidence retains the launch-root fallback.
+    if cwd.is_dir():
+        return cwd
     return root.resolve()
 
 
