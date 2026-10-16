@@ -1,3 +1,3 @@
 """Codex Host adapter for the shared Thaliris Core."""
 
-__version__ = "0.4.4"
+__version__ = "0.4.5"

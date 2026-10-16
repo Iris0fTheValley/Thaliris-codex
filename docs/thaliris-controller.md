@@ -244,9 +244,59 @@ The dedicated luna-only installation requires `execution_constraint: luna-only`
 in the authority contract; it retains semantic roles, restricts ordinary profiles
 to Luna/xhigh, and forbids Astra. Children cannot alter the frozen constraint.
 
+Controller owns the full user requirements and global acceptance; children receive only
+selected local goals, acceptance, facts and source pointers. Carry opaque related requirement
+refs and handoff/workchain provenance without projecting global task history into children.
+When an already discovered fact changes a child's local conclusion, local acceptance or a
+critical UNKNOWN, the child records it with source refs and selected handoff/requirement provenance.
+This creates no additional search duty or global-importance judgment, model call or acceptance gate.
+
+Keep critical observations globally visible across later handoffs until Controller explicitly
+reassesses each related USER REQUIREMENT for the current candidate: satisfied, unknown,
+repair, or a reason it no longer affects that candidate. Reading, retrieving, acknowledging,
+or forwarding evidence is not disposition. Neither test PASS, Reviewer READY, native
+Completed nor mechanical DONE substitutes for this requirement judgment. Incorporated
+unknown/repair judgments remain visible as unresolved requirements; an incorporation record
+alone does not mean satisfaction. Preserve previous observations and judgments as history;
+an old handoff observation is not automatically current truth. An observation keeps its immutable
+observed candidate (for example C1); Controller may assess it against a different current candidate
+(C2), explicitly recording that candidate and reasoning for its present applicability.
+
+Core stores opaque requirements, handoff links, observations and model-authored judgments.
+It does not classify semantic importance, infer acceptance, route work, require approval,
+or prescribe a role, model call, stage or polling loop. Register selected requirement and
+handoff refs with `task-evidence-register`; record selected local evidence with `task-observe`;
+Controller records candidate, requirement, exact observation refs, outcome and reasoning
+with `task-judge`. Use bounded `task-status` visibility and explicit `task-get` retrieval.
+Controller commands use `--role controller --base-revision N --input FILE`.
+A selected child records `task-observe --role ROLE --observation-json '<JSON>'`; the existing
+Hook binding supplies its exact Task ID, `--handoff-id ID --agent-id-hash HASH` without an
+extra Agent call or payload file write. `--input FILE` remains available for existing files.
+The minimal body is `{"id":"O1","text":"local fact","source_refs":["S1"]}`; include
+`sources: [{"id":"S1","kind":"local","locator":"tests/result.txt","summary":"exact output"}]`
+when the source is not already registered. Source refs must be nonempty and resolve to sources.
+The adapter fills candidate, handoff and nonempty requirement refs from the selected association;
+conflicting explicit fields are rejected. For new work, register related requirement refs before
+the Controller spawn and include their selected association in an own-line handoff marker:
+`thaliris-evidence: {"candidate":"C1","requirement_refs":["R1"],"durable_paths":[".agent-memory/selected.md"]}`.
+Select `durable_paths` only for Curator. Nested Scanner inherits the parent's Core association;
+its marker cannot rewrite it. Legacy handoffs without a marker may still spawn, but cannot
+persist an unlinked observation. Such refusal means no durable observation was recorded.
+Return the observation and source pointers to Controller for exact association when selected
+provenance is unavailable; preserve the fact in FINAL for Controller historical import.
+Use `task-status --evidence-offset N` for bounded evidence pages and `task-get` for exact records.
+Controller state-operation results retain this bounded evidence packet alongside success,
+revision conflicts and mechanical closure. Its presence keeps requirement judgments visible;
+it is not an automatic failure, approval or semantic closure gate.
+For selected historical child results, Controller uses `task-observe --role controller
+--handoff-id ID --observation-json '<JSON>'`. The adapter preserves the original native producer
+and marks Controller as submitter; importing history neither reactivates a child nor establishes
+current truth or native execution completion. Register an exact missing association first.
+
+
 ## Handoff and operational acceptance
 
-Provide a decision-complete handoff: goal and original acceptance, confirmed facts,
+Provide a decision-complete handoff: selected local goal and acceptance, confirmed facts,
 hard invariants and decided boundaries, authoritative source/derived relationships,
 affected surfaces, usable verification entry, and decision-changing unknowns.
 Include current source locations and covered/uncovered scope from selected discovery.
@@ -342,6 +392,15 @@ get names up to eight paths. Reread navigation after a material change, missing 
 invalid freshness or resumed compaction. An optional INDEX update is authored as a
 complete file replacement; Core checks the expected digest, allowed path and links, but
 does not generate or choose semantic entries.
+
+Curator maintains only selected durable knowledge and linked INDEX entries using exact
+supplied material. It may edit, merge, split, replace, supersede or delete existing entries
+when justified. `document-maintain` applies selected Markdown writes/deletes and optional
+INDEX replacement atomically with expected file digests and task revision CAS; Core validates
+paths, links and bytes, while the model chooses semantic reconciliation. No corpus scan,
+delegation, architecture/product acceptance or real-time evidence continuity belongs to Curator.
+Keep concise future decision value in memory; raw details remain in canonical Artifacts, Git
+or rollout records. This responsibility is independent of current-task observation continuity.
 
 Promote only Controller-selected, reusable Markdown records under `.agent-memory/`.
 Each task-promote record requires `id`, `path` and `text`; `title` defaults to the ID

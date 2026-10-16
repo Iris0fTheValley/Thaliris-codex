@@ -1,0 +1,20 @@
+{
+  "revision": "96b6f0a214e35a13fcb889482c5f5c0277d3f036",
+  "sources": {
+    "roles.py.blob": {
+      "path": "src/thaliris_codex/roles.py",
+      "sha256": "bca93015061e3936b064436e126c537e563e71e816c71234743ebdf6f5e8a60c",
+      "git_blob": "659fd8d42036328cb9cccc1a5ef52c5a27a0a510"
+    },
+    "codex_adapter.py.blob": {
+      "path": "src/thaliris_codex/codex_adapter.py",
+      "sha256": "9e687d3f7bbb77aee7b88fc4f8c2bfaa373a4572088c8808d742e4e2b1ff4da6",
+      "git_blob": "c943bd1a5084cf68413e19a29fc14b16512efdb7"
+    },
+    "role-packs.md": {
+      "path": "docs/thaliris-role-packs.md",
+      "sha256": "28c21dbecccdac55b72219ba12ea234cf2d2c0bdcaf13688aeac349f1022af20",
+      "git_blob": "337047ed4d5bd2b8dbc80e01043bcd4934423136"
+    }
+  }
+}

@@ -593,6 +593,25 @@ for _profile_name, _profile_hash in _ROLE_MODEL_ROUTING_PROMPT_PREDECESSOR_PROFI
     )
 
 
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'28c21dbecccdac55b72219ba12ea234cf2d2c0bdcaf13688aeac349f1022af20'})
+
+# Immutable renderer/profile ownership before selected-evidence semantics: 96b6f0a214e35a13fcb889482c5f5c0277d3f036.
+_EVIDENCE_CONTINUITY_PREDECESSOR_PROFILE_HASHES = {'thaliris-investigator.toml': '4ca30ad65b15457e3daa75be7ce44d9ce076cafb410d9de8540036a144e1ff50', 'thaliris-curator.toml': '5329a73de60a85dda0c070352ca13314dad519d636764b15076d704254080618', 'thaliris-reasoning-specialist.toml': '8be2723eee2c1c318e98476b450d88845afe4b2fb42795498ff10bf801f1b285', 'thaliris-implementer.toml': 'e54f1b1432879ae564f0cbdc308c08dfdf2438d18c38d7cab675f691f400acff', 'thaliris-focused-implementer.toml': 'c0812215dd1f92e0215e13863f9d9aa8b43ca4b442a82a18425d87df014ce98d', 'thaliris-verifier.toml': '504451792183f0c6f3d98486764abcab7db11c303afc72770ed9b13c7e6d57dd', 'thaliris-reviewer.toml': 'efe04f24cbd59cd9cfdcaae413d10dbd1dc08463a83f8dd7bc29336ba32ab2c7', 'thaliris-reasoning-specialist-astra-medium.toml': 'ed0b89e0145444191179170628eb582015ff56acbc83e817f3fb8fa66795a341', 'thaliris-reasoning-specialist-xhigh.toml': '5ad7d68effca5fb34947e028e465701b2a271f3b1c708adfd84366622857fde0', 'thaliris-focused-implementer-astra-medium.toml': '557f12e7a964ca5d44bae36795d23da8771388196502bd0addda59890cabdb81', 'thaliris-focused-implementer-xhigh.toml': '3ab871ac05e4bd57bee7e629931b43a0e0e4aa53bcbc629bea35a6669969bfec'}
+for _profile_name, _profile_hash in _EVIDENCE_CONTINUITY_PREDECESSOR_PROFILE_HASHES.items():
+    _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = (
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset())
+        | frozenset({_profile_hash})
+    )
+
+
+_EVIDENCE_CONTINUITY_PREDECESSOR_LUNA_PROFILE_HASHES = {'thaliris-investigator.toml': 'f5f08a2c27f29e6895c2c7a642fc5fb7641c9b782b708bdc5e054c8d29d06bd2', 'thaliris-curator.toml': '2914bee9f8a9eab031c4249825379d3e63a811d7c80c89d290fbaf0d1c55e9c7', 'thaliris-reasoning-specialist.toml': '4f8bdfd57111d742728c2420b0585e9106ae6d01e55d123c3a62b9ec467206a7', 'thaliris-implementer.toml': '50093753205cfd3e7eecab8db26712075b6b27741f05aab7dc89f8716dd773f8', 'thaliris-focused-implementer.toml': '686a542e6a5791fe7d50406348509249c5822d8813cb9aa6fe4053231a96cf2f', 'thaliris-verifier.toml': 'e7bcd0f460e20faf61a5e339796b2bdf0cc5a010770022acf93043585353be36', 'thaliris-reviewer.toml': '743bdb2204d70c1d94977d255d6d33c0aa0bef9437c6cd6e0c0ee7b64a6091f4', 'thaliris-reasoning-specialist-astra-medium.toml': 'ed0b89e0145444191179170628eb582015ff56acbc83e817f3fb8fa66795a341', 'thaliris-reasoning-specialist-xhigh.toml': '5ad7d68effca5fb34947e028e465701b2a271f3b1c708adfd84366622857fde0', 'thaliris-focused-implementer-astra-medium.toml': '557f12e7a964ca5d44bae36795d23da8771388196502bd0addda59890cabdb81', 'thaliris-focused-implementer-xhigh.toml': '3ab871ac05e4bd57bee7e629931b43a0e0e4aa53bcbc629bea35a6669969bfec'}
+for _profile_name, _profile_hash in _EVIDENCE_CONTINUITY_PREDECESSOR_LUNA_PROFILE_HASHES.items():
+    _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = (
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset())
+        | frozenset({_profile_hash})
+    )
+
+
 def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
     # isolation instructions contain quotes that must not terminate the value.
@@ -2091,6 +2110,104 @@ def bootstrap_check(root: Path) -> dict[str, object]:
         else "INIT_REQUIRED"
     )
     return {"ok": True, **facts, "definition_recovery_status": definition_recovery_status, **_controller_bridge(), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI, "executable_adapter_protocol_version": lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION, "session_restart_required": False}
+
+
+def _selected_handoff(root: Path, handoff_id: str) -> dict:
+    state = core._load_state(root, active=True)
+    matches = [item for item in state.get("evidence_continuity", {}).get("handoffs", []) if item["id"] == handoff_id]
+    if len(matches) != 1:
+        raise ValueError("selected handoff has no evidence association; return the observation and sources to Controller to register its exact opaque requirement/candidate association")
+    return matches[0]
+
+
+def task_observe(root: Path, role: str, handoff_id: str | None, agent_id_hash: str | None,
+                 input_file: str | None = None, observation_json: str | None = None) -> dict:
+    """Persist one selected observation without rewriting caller-owned input."""
+    actor = semantic_role(role)
+    if (input_file is None) == (observation_json is None):
+        raise ValueError("task-observe requires exactly one of --input or --observation-json")
+    if observation_json is not None:
+        body = json.loads(observation_json)
+        if not isinstance(body, dict):
+            raise ValueError("observation JSON must be an object")
+    else:
+        body = core._read_input(input_file)
+    if not isinstance(body, dict):
+        raise ValueError("observation must be an object")
+    body = dict(body)
+    if {"native_status", "native_status_conflict"} & set(body):
+        raise ValueError("observation native execution status is assigned by the adapter")
+    task = core._load_state(root, active=True)
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task["task_id"]), task["task_id"])
+    matches = [child for child in ledger["children"] if isinstance(child, dict)
+               and child.get("handoff_id") == handoff_id and child.get("managed") is True
+               and child.get("handoff_bound") is True]
+    if actor == "controller":
+        if agent_id_hash is not None or handoff_id is None or len(matches) != 1:
+            raise ValueError("Controller import requires one exact historical native handoff")
+        child = matches[0]
+        if (not isinstance(child.get("agent_id_hash"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", child["agent_id_hash"])):
+            raise ValueError("Controller import requires the exact native handoff identity")
+        agent_id_hash = child["agent_id_hash"]
+        submitted_by = "controller"
+        native_status = child.get("native_terminal_status")
+        body["native_status"] = native_status if isinstance(native_status, str) and native_status else "UNKNOWN"
+        body["native_status_conflict"] = child.get("native_status_conflict") is True
+    else:
+        matches = [child for child in matches if child.get("agent_id_hash") == agent_id_hash and child.get("role") == actor
+                   and child.get("management_disposition") != "ABANDONED_DEPENDENCY"
+                   and not child.get("native_status_conflict")
+                   and not lifecycle._native_execution_terminal(child)]
+        if len(matches) != 1 or not isinstance(agent_id_hash, str):
+            raise ValueError("observation requires exact live native handoff producer")
+        child = matches[0]
+        submitted_by = None
+    handoff = _selected_handoff(root, handoff_id)
+    if handoff.get("producer") != "handoff:" + handoff_id:
+        raise ValueError("registered handoff producer must preserve the exact native handoff")
+    for key, selected in (("handoff_id", handoff_id), ("candidate", handoff["candidate"]), ("requirement_refs", handoff["requirement_refs"])):
+        if key in body and body[key] != selected:
+            raise ValueError("observation differs from selected native handoff: " + key)
+        body[key] = selected
+    if "native_actor" in body and body["native_actor"] != agent_id_hash:
+        raise ValueError("observation native actor conflict")
+    if "submitted_by" in body:
+        raise ValueError("observation submitter is assigned by the adapter")
+    body["native_actor"] = agent_id_hash
+    if submitted_by is not None:
+        body["submitted_by"] = submitted_by
+    return core.task_observe(root, handoff["producer"], body)
+
+
+def document_maintain(root: Path, role: str, base_revision: int, input_file: str, handoff_id: str | None = None) -> dict:
+    actor = semantic_role(role)
+    if actor == "controller":
+        return core.document_maintain(root, actor, base_revision, input_file)
+    if actor != "curator" or handoff_id is None:
+        raise ValueError("durable maintenance requires Controller or exactly selected Curator handoff")
+    handoff = _selected_handoff(root, handoff_id)
+    body = core._read_input(input_file)
+    paths = []
+    for key in ("writes", "deletes"):
+        entries = body.get(key, [])
+        if not isinstance(entries, list):
+            raise ValueError("Curator maintenance entries must be lists")
+        for item in entries:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                raise ValueError("Curator maintenance requires explicit selected document paths")
+            paths.append(item["path"])
+    index_update = body.get("index_update")
+    if index_update is not None:
+        if not isinstance(index_update, dict) or not isinstance(index_update.get("path"), str):
+            raise ValueError("Curator INDEX replacement requires an explicit selected path")
+        paths.append(index_update["path"])
+    if not paths or not set(paths) <= set(handoff.get("durable_paths", [])):
+        raise ValueError("Curator maintenance exceeds Controller-selected durable paths")
+    with tempfile.TemporaryDirectory(prefix="thaliris-maintenance-") as directory:
+        snapshot = Path(directory) / "maintenance.json"
+        snapshot.write_text(json.dumps(body), encoding="utf-8")
+        return core.document_maintain(root, actor, base_revision, str(snapshot))
 
 
 def task_close(root: Path, base_revision: int) -> dict[str, object]:

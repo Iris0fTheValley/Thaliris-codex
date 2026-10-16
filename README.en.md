@@ -71,6 +71,23 @@ The long-lived Controller retains the user objective, scope, hard invariants, ac
 
 A Fresh Child is a new native role session receiving the facts, constraints, sources and acceptance needed for its work through a selective Handoff. Isolating history does not discard evidence: necessary originals can be reopened at their source locations, while established inventories and facts should be reused. A working set is not a handoff set. Recording or retaining information does not automatically pass it to every role.
 
+Controller keeps global user requirements and acceptance. A child receives selected local goals,
+acceptance and source pointers. When an already discovered local fact changes its conclusion,
+local acceptance or critical UNKNOWN, the child records it with source refs, handoff provenance
+and opaque requirement refs. This adds no search duty, global-importance judgment, model call or gate. Critical evidence stays visible
+across handoffs until Controller explicitly reassesses the related user requirement for the current
+candidate as satisfied, unknown or repair, or explains why it no longer affects the candidate.
+Reading or acknowledgement is not disposition; PASS, READY, Completed and DONE cannot substitute.
+Prior observations and judgments stay in history without becoming automatic current truth.
+An observation retains its observed candidate C1; Controller may assess it against current candidate
+C2 with explicit reasoning about its present applicability.
+
+Curator maintains exact selected durable knowledge and INDEX entries, including editing, merging,
+splitting, replacing or deleting existing entries. Core provides CAS document maintenance and
+provenance storage; the model chooses semantic reconciliation. Curator does not scan the corpus,
+delegate, decide product acceptance or own real-time evidence continuity. Concise future decision
+value stays in memory; raw detail stays in canonical Artifacts, Git or rollout records.
+
 | Role | Work it handles | Why separate it |
 | --- | --- | --- |
 | Investigator | Facts within the selected scope, exact sources, coverage, contradictions and unknowns | Keeps exploration history in the investigation context without deciding architecture for the Controller |
@@ -120,7 +137,7 @@ The Codex model catalog is Host-wide configuration (`model_catalog_json`), separ
 
 ## Installation and local development
 
-pyproject.toml declares Python >=3.11 and thaliris>=0.4.4,<0.5.
+pyproject.toml declares Python >=3.11 and thaliris>=0.4.5,<0.5.
 
 On Windows with Python 3.11+, create a disposable bootstrap environment and use
 the packaged runtime installer. Select the independently reviewed full adapter
@@ -136,7 +153,7 @@ $bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
 $adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
 & $bootstrap -m pip install --no-deps $adapterSource
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@56e48ac299dd2c5c4b16c992db732a55b7790893' --adapter-source $adapterSource | ConvertFrom-Json)
+$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@31f8e6212adbd27be2f8af1f21811811b0882695' --adapter-source $adapterSource | ConvertFrom-Json)
 if (-not $runtime.ok) { throw $runtime.error }
 $exe = $runtime.executable
 & $exe version
@@ -264,11 +281,11 @@ Semantic roles, responsibilities, routing, and readonly limits remain separate f
 
 Core stores this optional non-empty string as immutable intent. The adapter accepts only luna-only and validates each execution binding. The external anchor freezes validated profile and configuration hashes; children and mutable configuration cannot expand or remove the constraint. A fresh Host session is required after installation. Admission compares role-profile and public-config snapshots recorded at SessionStart; those disk observations do not prove the effective Host role map or CLI -c overrides. SubagentStart checks the Host-reported model for a constrained child. Missing or mismatched values leave the handoff unbound and deny later child tools, but the Hook cannot prevent the model invocation. The constraint forbids Astra profiles and per-spawn model overrides; this mode uses fixed Luna/xhigh role profiles. Outside this constraint, managed `PreToolUse` supplies omitted model/effort fields for the seven default-routed semantic roles; when only one is supplied, the other follows native omission semantics, and explicit values remain unchanged. An execution constraint or verified necessary exception may select another supported value. See the [execution-constraint port notes](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md).
 
-This feature requires thaliris>=0.4.4. Development tests must install the Core checkout used for this fix; the older monolithic wheel does not satisfy the split-package boundary.
+This feature requires thaliris>=0.4.5. Development tests must install the Core checkout used for this fix; the older monolithic wheel does not satisfy the split-package boundary.
 
 ## CI and platform compatibility
 
-The CI matrix covers Ubuntu and Windows with Python 3.11, 3.12, and 3.13. It uses Core revision `56e48ac299dd2c5c4b16c992db732a55b7790893` by default; only a manually dispatched workflow may select another `core_ref`. POSIX runtime-identity checks accept only the exact virtual-environment alias `lib64 -> lib` and verify that target drift is rejected. Hook transport treats only one document-leading UTF-8 BOM as transport syntax; repeated or misplaced BOMs and invalid UTF-8/JSON remain denied. Hook diagnostics emit bounded JSON boundary labels without payload or inferred deeper causes. CI and source tests do not prove that a currently installed Codex process loaded these contents.
+The CI matrix covers Ubuntu and Windows with Python 3.11, 3.12, and 3.13. It uses Core revision `31f8e6212adbd27be2f8af1f21811811b0882695` by default; only a manually dispatched workflow may select another `core_ref`. POSIX runtime-identity checks accept only the exact virtual-environment alias `lib64 -> lib` and verify that target drift is rejected. Hook transport treats only one document-leading UTF-8 BOM as transport syntax; repeated or misplaced BOMs and invalid UTF-8/JSON remain denied. Hook diagnostics emit bounded JSON boundary labels without payload or inferred deeper causes. CI and source tests do not prove that a currently installed Codex process loaded these contents.
 
 ## Runtime prompt layers
 

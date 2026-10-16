@@ -73,6 +73,53 @@ whether to route repair, request useful extra verification or record mechanical 
 Reviewer is an optional independent read-only challenge. No closing handoff or new Agent is
 required. Test `PASS`, Reviewer `READY`, native `Completed` and mechanical `DONE` remain distinct.
 
+Evidence continuity uses Core append-only records, not a lifecycle or approval state machine.
+Controller registers opaque requirements and selected handoff edges using
+`task-evidence-register --role controller --base-revision N --input FILE`.
+The input contains `requirements: [{id, workchain_ref}]` and
+`handoffs: [{id, parent_handoff_id, candidate, producer, requirement_refs}]`.
+For new work, Controller registers related requirement refs and includes an own-line spawn marker
+`thaliris-evidence: {"candidate":"C1","requirement_refs":["R1"]}`;
+Curator may also receive exact `durable_paths`. The adapter binds provenance from existing
+lifecycle/native association. Nested Scanner inherits its parent's selection and cannot
+rewrite it through a marker. Register nonempty requirement refs before spawn. Legacy handoffs
+without a marker may still spawn, but their observation persistence refuses missing provenance;
+return the fact and its sources to Controller for exact association instead of storing unlinked evidence.
+
+When an already discovered fact changes local conclusion, local acceptance or critical UNKNOWN,
+record it with source refs and selected provenance. This adds no search duty, global-importance
+judgment, model call or acceptance gate. `task-observe --role ROLE --observation-json '<JSON>'`
+uses the existing Hook binding to supply its exact Task ID, `--handoff-id ID --agent-id-hash HASH`.
+Readonly children need no payload file write; `--input FILE` also accepts an existing file. Its minimal body is
+`{"id":"O1","text":"local fact","source_refs":["S1"]}`. If S1 is not already registered, add
+`sources: [{"id":"S1","kind":"local","locator":"tests/result.txt","summary":"exact output"}]`.
+Source refs must be nonempty and resolve to sources. The adapter fills candidate, handoff and
+nonempty requirement refs from the selected binding; conflicting explicit fields are rejected.
+No Controller revision CAS is required. `task-status --evidence-offset N` pages pending evidence
+and judgments; `task-get` retrieves exact records. Existing Controller state-operation outputs
+also include bounded evidence visibility, including revision conflicts and successful closure.
+Child observation acknowledgements do not receive unrelated global evidence bodies.
+`task-judge --role controller --base-revision N --input FILE` records `id`, `candidate`,
+`requirement_ref`, exact `observation_refs`, `outcome` and `reasoning`. Outcomes are
+`satisfied`, `unknown`, `repair` and `no-current-impact`. An observation retains its immutable
+observed candidate C1; a judgment may assess it against current candidate C2 with reasoning
+about its present applicability. Read/ack is not incorporation; incorporated unknown/repair
+remains unresolved. Prior records survive handoff, update and close as history; mechanical
+DONE does not decide current requirement satisfaction.
+
+Controller may import selected historical child results with `task-observe --role controller
+--handoff-id ID --observation-json '<JSON>'`, registering a missing exact association first.
+The observation retains original native provenance and records Controller as `submitted_by`.
+History import grants no child permissions, reactivation, execution completion or current truth.
+
+`document-maintain --role controller|curator --base-revision N --input FILE` atomically
+maintains exact selected Markdown documents and INDEX links. Curator also selects its
+`--handoff-id ID` from the existing Hook binding. Input contains `writes: [{path, base_sha256, content}]`,
+`deletes: [{path, base_sha256}]`, and optional `index_update: {path, base_sha256, content}`.
+The digest is null only for a new file. Core validates path ownership, links and CAS; the
+model decides whether to edit, merge, split, replace or delete selected entries. Curator
+has no corpus scan, delegation, architecture/product acceptance or real-time evidence duty.
+
 Core `task-promote` stores only Controller-selected Markdown records under `.agent-memory/`.
 Records require `id`, `path` and `text`; `title` defaults to the ID and `source_refs` defaults
 to an empty list. They create new non-INDEX Markdown files; Core refuses to overwrite an existing

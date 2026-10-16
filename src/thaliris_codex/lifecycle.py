@@ -117,13 +117,14 @@ _CONTEXT_OPERATIONS = frozenset({
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
     "task-status", "task-get", "artifact-get", "catalog", "document-get",
     "task-artifact", "task-close", "task-promote", "rollback", "version",
+    "task-evidence-register", "task-observe", "task-judge", "document-maintain",
 })
 _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "controller-instructions",
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
-    "task-abandon", "version",
+    "task-abandon", "version", "task-evidence-register", "task-observe", "task-judge", "document-maintain",
 })
 _CHILD_CONTEXT_READS = frozenset({
     "controller-instructions",
@@ -135,6 +136,7 @@ _CHILD_CONTEXT_MUTATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
     "rollback", "init", "uninstall", "codex-uninstall",
+    "task-evidence-register", "task-observe", "task-judge", "document-maintain",
 })
 _CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
@@ -1414,6 +1416,8 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
             return _permission_deny("THALIRIS_FENCED_ACTOR: fenced management cannot regain grants through missing task evidence")
         role = _native_agent_roles().get(_native_spawn_agent_type({"tool_input": payload}), "unknown")
         binding = roles.get_codex_binding(role)
+        if _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload):
+            mutating = False
         if mutating and (payload.get("readonly") is True or binding is not None and not binding.repo_write_allowed):
             return _permission_deny("THALIRIS_READONLY_ACTOR: this known role remains readonly even when task association or authority is unavailable")
     root = _hook_repository_root(root, payload)
@@ -1561,7 +1565,9 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 return _permission_deny("THALIRIS_FENCED_ACTOR")
             tool = payload.get("tool_name") or payload.get("tool")
             normalized = _tool_basename(tool) if isinstance(tool, str) else ""
-            if payload.get("readonly") is True and (
+            if payload.get("readonly") is True and not (
+                _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload)
+            ) and (
                 _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
                 or _context_operation(payload) in _CHILD_CONTEXT_MUTATIONS
                 or normalized in _DELEGATION_TOOL_NAMES
@@ -2453,6 +2459,39 @@ def _turn_id_hash(payload: dict[str, Any]) -> str | None:
     return _identity_hash(value) if isinstance(value, str) and value else None
 
 
+def _register_spawn_evidence(task_state: dict[str, Any], handoff_id: str, role: str,
+                             handoff_text: str, parent: dict[str, Any] | None) -> bool:
+    """Carry opaque selected references, never requirements or global context."""
+    candidate, refs, durable_paths = "UNKNOWN", [], []
+    parent_id = parent["handoff_id"] if parent else None
+    if parent is not None:
+        matches = [item for item in task_state.get("evidence_continuity", {}).get("handoffs", [])
+                   if item["id"] == parent_id]
+        if len(matches) != 1:
+            return False
+        candidate, refs = matches[0]["candidate"], matches[0]["requirement_refs"]
+    else:
+        markers = re.findall(r"(?m)^thaliris-evidence: (.+)$", handoff_text)
+        if len(markers) > 1:
+            raise ValueError("ambiguous evidence selection")
+        if not markers:
+            return False
+        if markers:
+            metadata = json.loads(markers[0])
+            if not isinstance(metadata, dict) or set(metadata) - {"candidate", "requirement_refs", "durable_paths"}:
+                raise ValueError("invalid selected evidence metadata")
+            candidate, refs = metadata.get("candidate", "UNKNOWN"), metadata.get("requirement_refs", [])
+            durable_paths = metadata.get("durable_paths", [])
+    record = {"id": handoff_id, "parent_handoff_id": parent_id, "candidate": candidate,
+              "producer": "handoff:" + handoff_id, "requirement_refs": list(refs)}
+    if durable_paths:
+        if role != "curator":
+            raise ValueError("durable paths require Curator")
+        record["durable_paths"] = durable_paths
+    core._register_evidence_handoff(task_state, record)
+    return True
+
+
 def _reserve_managed_spawn(
     root: Path,
     payload: dict[str, Any],
@@ -2534,6 +2573,14 @@ def _reserve_managed_spawn(
             payload_hash = hashlib.sha256(handoff_text.encode("utf-8")).hexdigest()
             handoff_material = f"{task_id}\0{task_state['revision']}\0{session_id_hash}\0{state['sequence']}\0{payload_hash}"
             handoff_id = f"handoff-{hashlib.sha256(handoff_material.encode('utf-8')).hexdigest()[:32]}"
+            evidence_registered = _register_spawn_evidence(task_state, handoff_id, role, handoff_text, parent)
+            if evidence_registered:
+                task_state["revision"] += 1
+                core._write_state(root, task_state)
+                # The lifecycle capture validates the authority's selected task
+                # digest before it writes. Checkpoint the already-validated Core
+                # append first so the two-file handoff reservation can proceed.
+                task_authority.checkpoint(root)
             state["pending_authorized_spawn"] = {
                 "role": role,
                 "expected_agent_type": expected_agent_type,
@@ -3860,6 +3907,33 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: only Investigator delegation is permitted.")
         return _pre_admission_role_route(root, payload)
     operation, context_targets = _context_call(payload)
+    if operation in {"task-observe", "document-maintain"}:
+        task_id = _active_task_id(root)
+        if task_id is None:
+            return _permission_deny("THALIRIS_EVIDENCE_TASK_UNAVAILABLE: selected evidence operations require an active task")
+        ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
+        child = _bound_child_record(ledger, payload)
+        selected_handoff = _direct_context_option(payload, {"--handoff-id"}, digest_only=False)
+        selected_role = _direct_context_option(payload, {"--role"}, digest_only=False)
+        selected_task = _direct_context_option(payload, {"--task-id"}, digest_only=False)
+        if child is None or selected_handoff is not None and selected_handoff != child["handoff_id"] or child is not None and selected_role != child["role"]:
+            return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: exact live role and handoff required")
+        if selected_task is not None and selected_task != task_id:
+            return _permission_deny("THALIRIS_EVIDENCE_TASK_CONFLICT: selected task differs from the native handoff")
+        if operation == "task-observe":
+            actor = _direct_context_option(payload, {"--agent-id-hash"})
+            if actor is not None and actor != child["agent_id_hash"]:
+                return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: observation native producer differs")
+        elif child["role"] != "curator":
+            return _permission_deny("THALIRIS_CURATOR_SELECTION_REQUIRED")
+        additions = []
+        if selected_task is None:
+            additions.append("--task-id " + task_id)
+        if selected_handoff is None:
+            additions.append("--handoff-id " + child["handoff_id"])
+        if operation == "task-observe" and actor is None:
+            additions.append("--agent-id-hash " + child["agent_id_hash"])
+        return _updated_command_output(payload, " ".join(additions)) if additions else ""
     if operation in _CHILD_CONTEXT_MUTATIONS:
         target = f"thaliris {operation}"
         _best_effort_record(_record_protocol_deviation, root, payload, operation=operation, target=target, blocked=True)

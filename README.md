@@ -68,6 +68,19 @@ Thaliris 由 Thalamus（丘脑） 与 Iris（虹膜） 组合而来。
 
 Fresh Child 是新的原生角色会话，通过选择性 Handoff 接收完成当前工作所需的事实、约束、来源与验收条件。隔离历史不是删除证据：必要的原始文件仍可按位置重新读取，已完成调查的清单和事实应复用。工作集不等于交接集；被记录或保留的信息，不会因此自动传递给每个角色。
 
+Controller 保留全局用户需求与验收条件；Child 只接收所选局部目标、局部验收与来源指针。
+当已发现的事实改变局部结论、局部验收或关键 UNKNOWN 时，Child 应记录该事实，保留来源、
+handoff 链路与不透明 requirement refs；这不增加搜索义务、全局重要性判断、模型调用或验收 gate。
+关键证据跨后续 Handoff 保持可见，直到 Controller 明确重评当前候选所关联的用户需求：
+satisfied、unknown、repair，或说明为何已不影响当前候选。读取或确认收到不算处置，
+PASS、READY、Completed、DONE 不能替代需求判断。旧观察与判断保留为历史，不自动成为当前真相。
+观察保留其原候选 C1；Controller 可针对当前候选 C2 判断其适用性，并明确记录当前候选与理由。
+
+Curator 只维护精确选定的持久知识与 INDEX，可编辑、合并、拆分、替换或删除已有条目。
+Core 提供带 CAS 的文档维护与来源记录，模型决定语义协调。Curator 不扫描知识库、不委派、
+不决定产品验收，也不负责实时证据连续性。记忆保留简洁的未来决策价值；原始细节留在
+canonical Artifact、Git 或 rollout 记录中。
+
 | 角色 | 承担的工作 | 为什么区分 |
 | --- | --- | --- |
 | Investigator | 在选定范围内调查事实，给出准确来源、覆盖范围、矛盾与未知项 | 将探索历史留在调查上下文中，不替 Controller 决定架构 |
@@ -117,7 +130,7 @@ Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目
 
 ## 安装与本地开发
 
-pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.4,<0.5。
+pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.5,<0.5。
 
 Windows Python 3.11+ 的正常安装先创建临时 bootstrap 环境，再使用包内的
 runtime installer。请独立选择已审阅的 adapter 完整 commit。省略 `--runtime` 时，
@@ -131,7 +144,7 @@ $bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
 $adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
 & $bootstrap -m pip install --no-deps $adapterSource
 $env:PYTHONDONTWRITEBYTECODE = '1'
-$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@56e48ac299dd2c5c4b16c992db732a55b7790893' --adapter-source $adapterSource | ConvertFrom-Json)
+$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@31f8e6212adbd27be2f8af1f21811811b0882695' --adapter-source $adapterSource | ConvertFrom-Json)
 if (-not $runtime.ok) { throw $runtime.error }
 $exe = $runtime.executable
 & $exe version
@@ -251,11 +264,11 @@ Authority 恢复必须通过显式 Task ID，或已经关联到该任务的 sess
 
 Core 将该可选非空字符串作为不可变 intent 保存；适配器只接受 luna-only，并验证每个执行绑定。外部 anchor 固定已校验的 profile/config hashes，子角色与可变配置不能扩展或解除约束。安装后需要新的 Host session。Admission 比较 SessionStart 时记录的 role profile 和公开 config 文件快照；磁盘快照不能证明 Host 实际加载的 role map 或 CLI -c 覆盖。SubagentStart 核对受约束子角色的 Host model；缺失或不匹配时 handoff 不绑定，之后该子角色的工具会被拒绝，但 hook 无法阻止模型调用。约束禁止 Astra profile 和每次 spawn 的模型覆盖；该模式使用固定的 Luna/xhigh role profile。未启用约束时，七个默认路由的语义角色由 managed `PreToolUse` 补齐省略的 model/effort；只提供一个字段时按原生默认语义处理另一个，显式值不改写。执行约束或经验证的必要例外仍可选择其他受支持值。详细迁移说明见 [执行约束移植说明](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md)。
 
-该功能需要 thaliris>=0.4.4。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
+该功能需要 thaliris>=0.4.5。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
 
 ## CI 与平台兼容范围
 
-CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使用 Core 固定 revision `56e48ac299dd2c5c4b16c992db732a55b7790893`，仅手动 workflow 可显式改选 `core_ref`。POSIX runtime identity 检查仅接受 `lib64 -> lib` 的精确虚拟环境别名，并验证目标漂移会被拒绝。Hook transport 只把一个文档起始 UTF-8 BOM 当作传输标记；重复/错位 BOM 与无效 UTF-8/JSON 仍拒绝。Hook 诊断只输出有界 JSON boundary label，不输出 payload，也不推断更深根因。CI 和源测试不证明某个当前安装的 Codex 进程已经加载这些内容。
+CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使用 Core 固定 revision `31f8e6212adbd27be2f8af1f21811811b0882695`，仅手动 workflow 可显式改选 `core_ref`。POSIX runtime identity 检查仅接受 `lib64 -> lib` 的精确虚拟环境别名，并验证目标漂移会被拒绝。Hook transport 只把一个文档起始 UTF-8 BOM 当作传输标记；重复/错位 BOM 与无效 UTF-8/JSON 仍拒绝。Hook 诊断只输出有界 JSON boundary label，不输出 payload，也不推断更深根因。CI 和源测试不证明某个当前安装的 Codex 进程已经加载这些内容。
 
 ## 运行时提示词层
 

@@ -1027,3 +1027,57 @@ def test_managed_renderer_matches_working_artifact_and_derives_added_role(monkey
     assert "Formal Sentinel" in controller_instructions.render()
     assert "formal sentinel instructions" in codex_adapter.render_role_packs()
     assert "selected spawn handoff without parent conversation history" in codex_adapter.render_managed()
+
+
+def test_selected_local_observation_and_global_requirement_judgment_contract():
+    from thaliris_codex import controller_instructions
+    for role in roles.role_choices():
+        if role == "controller":
+            continue
+        prompt = roles.get_role(role).instructions
+        assert "selected local acceptance" in prompt
+        assert "When an already discovered local fact changes" in prompt
+        assert "record it with source refs and provenance" in prompt
+        assert "You may record an already discovered" not in prompt
+        assert "no search obligation or global-importance classification" in prompt
+        assert "do not reconstruct global requirements" in prompt
+    controller = controller_instructions.render()
+    assert "related USER REQUIREMENT for the current candidate" in controller
+    assert "forwarding evidence is not disposition" in controller
+    assert "unknown/repair judgments remain visible as unresolved requirements" in controller
+    assert "old handoff observation is not automatically current truth" in controller
+    curator = roles.get_role("curator").instructions
+    assert "edit, merge, split, replace, supersede or delete" in curator
+    assert "document-maintain" in curator
+    assert "Do not delegate." in curator
+    assert "Do not scan the corpus" in curator and "decide architecture" in curator
+    assert "or product acceptance, or own real-time evidence continuity" in curator
+
+
+def test_evidence_continuity_predecessor_ownership_from_immutable_renderer():
+    base = Path(__file__).parent / "fixtures/evidence-continuity-predecessor"
+    proof = json.loads((base / "provenance.json").read_text(encoding="utf-8"))
+    sources = {}
+    for name, item in proof["sources"].items():
+        raw = (base / name).read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == item["sha256"]
+        assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == item["git_blob"]
+        sources[name] = raw
+    assert codex_adapter._role_pack_state(sources["role-packs.md"]) == "legacy"
+    assert codex_adapter._role_pack_state(sources["role-packs.md"] + b"\nuser edit") == "user"
+    module = types.ModuleType("evidence_continuity_predecessor")
+    sys.modules[module.__name__] = module
+    exec(compile(sources["roles.py.blob"], "predecessor_roles.py", "exec"), module.__dict__)
+    function = next(node for node in ast.parse(sources["codex_adapter.py.blob"]).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "_agent_profile")
+    namespace = {"json": json, "roles": module}
+    exec(compile(ast.Module([function], type_ignores=[]), "predecessor_renderer.py", "exec"), namespace)
+    for constraint, hashes in ((None, codex_adapter._EVIDENCE_CONTINUITY_PREDECESSOR_PROFILE_HASHES),
+                               ("luna-only", codex_adapter._EVIDENCE_CONTINUITY_PREDECESSOR_LUNA_PROFILE_HASHES)):
+        for name, (model, effort, role) in module.agent_profiles(constraint).items():
+            raw = namespace["_agent_profile"](name.removesuffix(".toml"), role, model, effort)
+            assert hashlib.sha256(raw).hexdigest() == hashes[name]
+            assert codex_adapter._agent_profile_state(raw, name) == "legacy"
+            assert codex_adapter._agent_profile_state(raw + b"\n# user edit\n", name) == "user"
+            other = next(value for value in module.agent_profiles() if value != name)
+            assert codex_adapter._agent_profile_state(raw, other) == "user"

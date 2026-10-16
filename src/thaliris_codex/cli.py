@@ -19,7 +19,7 @@ class _Parser(argparse.ArgumentParser):
         raise ValueError(message)
 
 
-def _task_status(root: Path, *, suppress_protocol_notice: bool) -> dict[str, object]:
+def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset: int = 0) -> dict[str, object]:
     """Attach the one-shot lifecycle notice at the Codex CLI boundary."""
     anchor = task_authority.read(root)
     if anchor is not None:
@@ -32,7 +32,7 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool) -> dict[str, obj
             return {"ok": False, "status": "TASK_AUTHORITY_CONFLICT", "task_id": anchor["task_id"],
                     "authority_sha256": task_authority.digest(task_authority.path(root)),
                     "recovery_action": "task-recover-authority --expected-authority-sha256 <authority_sha256> --reason <reason>"}
-    out = task_status(root)
+    out = task_status(root, evidence_offset=evidence_offset)
     if anchor is not None:
         out["Task Authority"] = {"status": anchor["status"], "provenance": anchor["provenance"],
                                  "execution_mode": anchor["contract"]["execution_mode"],
@@ -41,6 +41,23 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool) -> dict[str, obj
         notice = lifecycle.consume_protocol_deviation_notice(root, str(out["Task"]["id"]))
         if notice is not None:
             out["Protocol deviation"] = notice
+    return out
+
+
+def _controller_evidence_output(root: Path, args: argparse.Namespace, out: dict) -> dict:
+    """Retain decision evidence beside existing Controller operation results."""
+    if args.command not in {
+        "task-update", "task-artifact", "task-promote", "task-evidence-register",
+        "task-judge", "task-close", "task-mode", "task-dispose-dependency",
+        "task-observe", "document-maintain",
+    } or getattr(args, "role", "controller") != "controller":
+        return out
+    try:
+        state = core._load_state(root)
+        if state.get("evidence_continuity"):
+            return {**out, "Evidence Continuity": core._continuity_status(state)}
+    except (ValueError, OSError, RuntimeError):
+        return {**out, "Evidence Continuity": {"status": "UNKNOWN"}}
     return out
 
 
@@ -142,8 +159,25 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
     q.add_argument("--base-revision", required=True, type=int)
     q.add_argument("--input", required=True)
+    for name in ("task-evidence-register", "task-judge", "document-maintain"):
+        q = sub.add_parser(name)
+        q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
+        q.add_argument("--base-revision", required=True, type=int)
+        q.add_argument("--input", required=True)
+        if name == "document-maintain":
+            q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
+            q.add_argument("--handoff-id")
+    q = sub.add_parser("task-observe", help="append own selected local observation without task revision CAS")
+    q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
+    q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
+    q.add_argument("--handoff-id")
+    q.add_argument("--agent-id-hash")
+    observation = q.add_mutually_exclusive_group(required=True)
+    observation.add_argument("--input")
+    observation.add_argument("--observation-json", help="one inline JSON observation; useful to readonly native roles")
     sub.add_parser("task-show")
     q = sub.add_parser("task-status", help="bounded Controller routing packet")
+    q.add_argument("--evidence-offset", type=int, default=0)
     q.add_argument("--suppress-protocol-notice", action="store_true", help=argparse.SUPPRESS)
     q = sub.add_parser("task-get", help="retrieve one current-task object by ID")
     q.add_argument("id")
@@ -225,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     # normalization so the probe and real parser see identical input.
     bootstrap_requested = _requested_command(argv) == "codex-bootstrap"
     args = None
+    root = None
     try:
         args = _parser().parse_args(argv)
         if args.command == "runtime-check":
@@ -239,11 +274,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(out, sort_keys=True, separators=(",", ":")))
             return 0
         root = args.root.resolve()
-        selected = args.selected_task_id or (getattr(args, "task_id", None) if args.command == "task-abandon" else None)
+        command_task_id = getattr(args, "task_id", None) if args.command in {"task-abandon", "task-observe", "document-maintain"} else None
+        if args.selected_task_id and command_task_id and args.selected_task_id != command_task_id:
+            raise ValueError("conflicting selected task IDs")
+        selected = args.selected_task_id or command_task_id
         if selected is None and args.session_id:
             selected = lifecycle._associated_task(root, {"session_id": args.session_id})
         core.select_task(root, selected)
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state"} and selected is None:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state", "task-evidence-register", "task-observe", "task-judge", "document-maintain"} and selected is None:
             raise ValueError("explicit --task-id or associated --session-id required for managed control")
         if args.command == "controller-instructions":
             from . import controller_instructions
@@ -264,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
             raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency"}:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-evidence-register", "task-observe", "task-judge", "document-maintain"}:
             task_authority.check(root)
         if args.command == "audit-hook":
             stage = "receive"
@@ -375,8 +413,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "task-associate": out = lifecycle.associate_task(root, str(core.selected_task(root)), lifecycle._identity_hash(args.session_id), args.expected_authority_sha256)
         elif args.command == "task-mode": out = task_authority.switch_mode(root, args.expected_authority_sha256, args.base_revision, args.mode, args.human_instruction)
         elif args.command == "task-update": out = task_update(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
+        elif args.command == "task-evidence-register": out = core.task_evidence_register(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
+        elif args.command == "task-judge": out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
+        elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
+        elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
         elif args.command == "task-show": out = task_show(root)
-        elif args.command == "task-status": out = _task_status(root, suppress_protocol_notice=args.suppress_protocol_notice)
+        elif args.command == "task-status": out = _task_status(root, suppress_protocol_notice=args.suppress_protocol_notice, evidence_offset=args.evidence_offset)
         elif args.command == "task-get": out = task_get(root, args.id)
         elif args.command == "artifact-get": out = artifact_get(root, args.id)
         elif args.command == "task-artifact": out = task_artifact(root, args.base_revision, args.id, args.path, args.summary, producer=(codex_adapter.semantic_role(args.producer_role) if getattr(args, "producer_role", None) else None), registered_by=codex_adapter.controller_actor(args.role), evidence_refs=args.source_ref or None, supersedes=args.supersedes or None)
@@ -385,8 +427,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "rollback": out = rollback(root, args.backup)
         elif args.command == "uninstall": out = codex_adapter.uninstall(root)
         else: out = {"ok": True, "version": __version__}
-        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote"}:
+        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-evidence-register", "task-observe", "task-judge"}:
             task_authority.checkpoint(root)
+        out = _controller_evidence_output(root, args, out)
         if args.command == "codex-bootstrap":
             out = codex_bootstrap.ordered_response(out)
             print(json.dumps(out, ensure_ascii=False, indent=2 if args.pretty else None,
@@ -410,6 +453,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"ok": False, "error": "HOOK_DISPATCH_FAILED"}, separators=(",", ":")))
             return 2
         result = {"ok": False, "error": str(exc)}
+        if args is not None and root is not None:
+            result = _controller_evidence_output(root, args, result)
         if bootstrap_requested or (args is not None and args.command == "codex-bootstrap"):
             result["session_restart_required"] = False
         if args is not None and args.command == "codex-bootstrap":

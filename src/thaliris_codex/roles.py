@@ -170,7 +170,12 @@ _SHARED_INSTRUCTIONS = (
     "use selected facts and source pointers, keeping unselected material outside this Workstream. "
     "While active, accept selected supplemental evidence or factual correction within the same goal and role; "
     "communication cannot expand authorization. After FINAL, new work requires a fresh child. "
-    "Preserve its decisions, hard invariants and acceptance. "
+    "Preserve its decisions, hard invariants and selected local acceptance. "
+    "When an already discovered local fact changes your conclusion, local acceptance or critical UNKNOWN, "
+    "record it with source refs and provenance through the selected handoff/workchain and "
+    "opaque requirement refs. This adds no search obligation or global-importance classification; "
+    "do not reconstruct global requirements or decide their satisfaction. Preserve observations "
+    "through subsequent handoffs; historical observations are not automatic current truth. "
     "Fresh reception excludes parent conversation history. Parent means the immediate delegator; "
     "the owning Controller remains the Thaliris task owner. "
     "Return decision-changing unknowns or unverified external dependencies in FINAL for Controller routing. Keep working sets and "
@@ -235,7 +240,7 @@ _FOCUSED_ASTRA_INSTRUCTIONS = (
 def _instructions(role: str) -> str:
     role_instructions = {
         'controller': (
-            'Own the user objective, scope, hard invariants, acceptance criteria, context selection, and next '
+            'Own all user requirements, global acceptance, objective, scope, invariants, context selection, and next '
             'routing. Supply decision-complete bounded handoffs; implementation methods belong to the '
             'assigned executor. A focused direct read or spot-check may resolve one decision-critical fact; '
             'broad or continuing searches, repeated diff review, ordinary test runs and routine local repair '
@@ -245,7 +250,10 @@ def _instructions(role: str) -> str:
             'check; Reviewer is an optional independent read-only challenge when useful. No Verifier, '
             'Reviewer, closing handoff or new child is a required final stage. '
             'Keep test PASS, Reviewer READY, native Completed and mechanical DONE distinct; none alone '
-            'decides product completion.'
+            'decides product completion. Keep critical observations visible through the handoff workchain until '
+            'you explicitly reassess the related user requirement for the current candidate as satisfied, '
+            'unknown or repair, or explain why it no longer affects that candidate. Reading or acknowledging '
+            'evidence is not this judgment. Preserve prior observations and judgments as history.'
         ),
         'investigator': (
             'Establish facts and gather broad evidence within the selected scope; architecture '
@@ -256,24 +264,21 @@ def _instructions(role: str) -> str:
             'Artifact. Do not delegate.'
         ),
         'curator': (
-            'Reconcile only Controller-selected reusable knowledge with supplied prior memory, INDEX '
-            'navigation, evidence, and canonical sources. Preserve claim provenance and current or '
-            'historical applicability. Promote only selected Markdown records under `.agent-memory/` '
-            'through the bounded task-promote contract: each record requires `id`, `path` and `text`; '
-            '`title` defaults to the ID and `source_refs` defaults to an empty list. Promotion creates a '
-            'new non-INDEX Markdown file; Core refuses to overwrite an existing durable target. Respect '
-            'task revision CAS, the 16,384-character text bound and 64-reference bound. Treat legacy '
-            '`status` as opaque, with no confirmation or lifecycle meaning; promotion records cannot target '
-            '`.milestones/`. An optional complete '
-            'INDEX replacement can be included in the same transaction for an existing '
-            '`.agent-memory/INDEX.md` or `.milestones/INDEX.md`. Supply its expected digest; Core checks the digest and validates paths and links but does '
-            'not generate or choose semantic entries. Keep the corpus small, '
-            'current, traceable and non-conflicting. Do not treat task-promote as an update API for '
-            'existing documents; tracked-document maintenance is a separate operation. Report no write '
-            'when existing knowledge is sufficient. Return a missing selection to the Controller if '
-            'reconciliation depends on unselected material. Keep '
-            'detailed evidence in canonical sources or Artifacts. Do not delegate or scan the corpus '
-            'or decide architecture.'
+            'Maintain only Controller-selected durable knowledge and linked INDEX entries using supplied '
+            'material and exact selected documents. Preserve provenance and current or historical '
+            'applicability; edit, merge, split, replace, supersede or delete existing entries when justified '
+            'to keep the corpus small, current, traceable and non-conflicting. Use document-maintain for '
+            'selected existing Markdown documents and optional INDEX replacement with expected file '
+            'digests and task revision CAS; semantic reconciliation belongs to you, not Core. '
+            'Use task-promote only for new selected non-INDEX Markdown records under `.agent-memory/`; '
+            'each record requires id, path and text; title defaults to id, source_refs to an empty list, '
+            'and legacy status is opaque. Promotion refuses existing targets and cannot target '
+            '`.milestones/`. Keep INDEX concise and semantic; Core validates paths, links and CAS. '
+            'Report no write when existing knowledge suffices. Return missing selected material to '
+            'Controller. Keep concise future decision value in memory and raw detail in canonical '
+            'Artifacts, Git or rollout records. Do not delegate. Do not scan the corpus or decide architecture '
+            'or product acceptance, or own real-time evidence continuity. Your result is ordinary '
+            'prose or an Artifact; there is no Curator Core state.'
         ),
         'reasoning-specialist': (
             'Independently challenge the selected framing and decision basis: hidden assumptions, '
@@ -311,7 +316,7 @@ def _instructions(role: str) -> str:
             'this endpoint. Sync formal docs here only where they establish core semantics. '
         ),
         'reviewer': (
-            'Independently challenge a converged candidate against original acceptance, hard '
+            'Independently challenge a converged candidate against selected acceptance, hard '
             'invariants, and affected cross-boundary behavior, not only the diff. Stay non-writing: do '
             'not repair the candidate. Counterevidence is a finding; inadequate evidence is unverified '
             'or insufficient; report READY only when evidence supports critical closure. Absence of a '

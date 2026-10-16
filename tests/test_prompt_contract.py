@@ -235,7 +235,7 @@ def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
 
 def test_reviewer_critical_evidence_and_correction_boundary():
     reviewer = prompt("reviewer")
-    concepts(reviewer, ("converged candidate", "original acceptance", "hard invariants", "cross-boundary"),
+    concepts(reviewer, ("converged candidate", "selected acceptance", "hard invariants", "cross-boundary"),
              ("reviewer is optional", "ready reports the selected review", "controller integrates",
               "objective", "criteria", "available evidence", "deciding product completion"),
              ("non-writing",),
@@ -260,8 +260,8 @@ def test_discovery_challenge_knowledge_and_delegation_capabilities():
     concepts(prompt("reasoning-specialist"), ("independently challenge", "framing", "decision basis"),
              ("hidden assumptions", "causal model", "premature convergence", "alternatives"),
              ("coherent", "unexpected", "critical missing facts"))
-    concepts(prompt("curator"), ("controller-selected", "prior memory", "index", "canonical sources"),
-             ("provenance", "historical", "traceable"), ("no write", "sufficient"))
+    concepts(prompt("curator"), ("controller-selected", "supplied material", "exact selected documents", "index", "canonical"),
+             ("provenance", "historical", "traceable"), ("no write", "suffices"))
     for role in ("investigator", "curator", "reasoning-specialist", "verifier"):
         assert not roles.get_codex_binding(role).allowed_delegation_targets
         assert "fork_turns" not in prompt(role)
@@ -511,7 +511,7 @@ def test_controller_owned_product_completion_and_model_routing_reach_resident_co
 def test_controller_memory_contract_matches_bounded_core_surface():
     controller = controller_instructions.render()
     curator = prompt("curator")
-    for text in (controller, curator):
+    for text in (controller,):
         concepts(text, ("task-promote", "record requires id path and text", "title defaults to the id",
                         "source_refs defaults to an empty list"),
                  ("legacy status", "opaque", "no confirmation or lifecycle meaning"),
@@ -520,6 +520,10 @@ def test_controller_memory_contract_matches_bounded_core_surface():
                  ("promotion records cannot target .milestones", "optional", "complete index replacement",
                   ".milestones/index.md"),
                  ("expected digest", "core checks", "paths", "links", "does not generate or choose semantic entries"))
+    concepts(curator, ("document-maintain", "existing markdown", "optional index replacement", "expected file digests", "task revision cas"),
+             ("edit merge split replace supersede delete", "semantic reconciliation"),
+             ("task-promote", "new", "non-index markdown", "promotion refuses existing targets"),
+             ("do not scan", "delegate", "product acceptance", "real-time evidence continuity"))
     concepts(controller, ("before task-start", ".agent-memory/index.md", ".milestones/index.md",
                           "create minimal thin navigation if absent"),
              ("bounded get", "up to eight paths"))
