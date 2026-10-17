@@ -9,6 +9,21 @@ Isolation and readonly boundaries hold in every mode; damaged management grants 
 additional authority. Effective live Host maintenance needs separate human authority.
 Changed disk files do not prove native activation. Preserve unknown user-owned bytes.
 
+Controller retains the full original goal, scope, acceptance,
+global facts, hard invariants, distilled findings, UNKNOWN, contradictions, current
+candidate judgments and routing reasons. Controller selects and judges evidence,
+integrates the original objective, acceptance criteria and available evidence, and
+decides product acceptance;
+the child owns its delegated investigation, implementation and verification working
+set. Legal tool capability does not transfer cognitive ownership. Normal Controller
+routing, precise immediate-decision spot-checks and native waiting follow its resident
+guidance; they have no numeric/tool-permission gate.
+
+No fixed closing handoff, extra lifecycle stage or new Agent is required. `PASS`
+describes checks run, `READY` describes the selected review, native child `Completed`
+describes execution termination, and Core `DONE` records mechanical closure; none
+alone decides product acceptance.
+
 Assigned children use current-role native instructions and their authorized parent's
 selected spawn handoff without parent conversation history; unselected material stays
 outside the Workstream. Parent means the immediate delegator, not necessarily the

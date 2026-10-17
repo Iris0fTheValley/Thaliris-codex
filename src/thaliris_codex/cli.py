@@ -164,6 +164,8 @@ def _parser() -> argparse.ArgumentParser:
         q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
         q.add_argument("--base-revision", required=True, type=int)
         q.add_argument("--input", required=True)
+        if name == "task-evidence-register":
+            q.add_argument("--controller-session-id-hash", help=argparse.SUPPRESS)
         if name == "document-maintain":
             q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
             q.add_argument("--handoff-id")
@@ -413,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "task-associate": out = lifecycle.associate_task(root, str(core.selected_task(root)), lifecycle._identity_hash(args.session_id), args.expected_authority_sha256)
         elif args.command == "task-mode": out = task_authority.switch_mode(root, args.expected_authority_sha256, args.base_revision, args.mode, args.human_instruction)
         elif args.command == "task-update": out = task_update(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
-        elif args.command == "task-evidence-register": out = core.task_evidence_register(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
+        elif args.command == "task-evidence-register": out = codex_adapter.task_evidence_register(root, args.role, args.base_revision, args.input, args.controller_session_id_hash)
         elif args.command == "task-judge": out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
         elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
         elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
@@ -427,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "rollback": out = rollback(root, args.backup)
         elif args.command == "uninstall": out = codex_adapter.uninstall(root)
         else: out = {"ok": True, "version": __version__}
-        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-evidence-register", "task-observe", "task-judge"}:
+        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-judge"}:
             task_authority.checkpoint(root)
         out = _controller_evidence_output(root, args, out)
         if args.command == "codex-bootstrap":

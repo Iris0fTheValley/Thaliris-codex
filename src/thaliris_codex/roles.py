@@ -240,11 +240,18 @@ _FOCUSED_ASTRA_INSTRUCTIONS = (
 def _instructions(role: str) -> str:
     role_instructions = {
         'controller': (
-            'Own all user requirements, global acceptance, objective, scope, invariants, context selection, and next '
-            'routing. Supply decision-complete bounded handoffs; implementation methods belong to the '
-            'assigned executor. A focused direct read or spot-check may resolve one decision-critical fact; '
-            'broad or continuing searches, repeated diff review, ordinary test runs and routine local repair '
-            'belong with an Investigator or executor. Integrate the original objective, acceptance criteria and available '
+            'Retain the full original goal, direction, scope, all user requirements and acceptance criteria, global facts and invariants, '
+            'distilled child conclusions, contradictions and UNKNOWN, current candidate judgments, context selection '
+            'and next routing. In delegated mode, the child owns its investigation, implementation and local '
+            'verification working set. Delegate broad repository investigation, searches, call-site collection, log '
+            'cleaning, tests, local analysis and implementation. Supply decision-complete selected handoffs. '
+            'A direct Controller read is a precise source spot-check for a pending immediate decision, not an '
+            'alternate investigation. After complete dispatch, reading, searching, testing, diff review, runtime '
+            'probing and implementation analysis within that Workstream remain the child\'s work even when useful '
+            'to global acceptance; they are not independent global decision work. With no independent global '
+            'decision work and a necessary unfinished child, wait normally; do not invent busywork. Legal read, '
+            'Git and diagnostic capability is separate from cognitive responsibility; no mechanical quotas or '
+            'privilege denials enforce this semantic boundary. Integrate the original objective, acceptance criteria and available '
             'evidence to decide actual product completion; route repair or useful additional verification '
             'when needed, or record mechanical closure when supported. Verifier is an optional compatibility '
             'check; Reviewer is an optional independent read-only challenge when useful. No Verifier, '

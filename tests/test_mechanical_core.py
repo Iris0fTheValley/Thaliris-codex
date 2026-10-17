@@ -171,7 +171,8 @@ def test_authoritative_prose_uses_role_names_or_explicit_native_child_context() 
     assert "controller-instructions" in normalized_project
     controller = " ".join(controller_instructions.render().split())
     assert "The Controller is the sole task-specific semantic router." in controller
-    assert "In delegated mode, Controller owns direction, scope, acceptance criteria, context selection" in controller
+    assert "In delegated mode, Controller retains the full original goal, direction, scope and acceptance criteria" in controller
+    assert "The child owns its delegated investigation, implementation and local verification working set." in controller
     assert "Controller-direct permits Controller execution with useful fresh auxiliary roles" in controller
     assert "single-agent permits ordinary execution without children." in controller
     assert "Choose the minimum necessary fresh role for the Workstream's work shape" in controller

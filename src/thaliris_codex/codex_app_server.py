@@ -44,7 +44,11 @@ def _same_path(left: object, right: Path) -> bool:
 
 
 class CodexAppServer:
-    """Run a short-lived official ``codex app-server --stdio`` session."""
+    """Run a separate short-lived ``codex app-server --stdio`` session.
+
+    Maintenance callers own this process and its stdout. This connection does
+    not establish a subscription to Desktop's managed-child turn notifications.
+    """
 
     def __init__(self, codex_home: Path, timeout_seconds: float = 45.0) -> None:
         self.codex_home = codex_home.resolve(strict=True)

@@ -15,7 +15,7 @@ import tomllib
 
 from thaliris import core
 
-from . import codex_app_server, lifecycle, roles, runtime_identity, host_preflight
+from . import codex_app_server, lifecycle, roles, runtime_identity, host_preflight, task_authority
 from .lifecycle import (
     MANAGED_HOOKS_DESCRIPTION,
     MANAGED_HOOK_ABI,
@@ -519,6 +519,9 @@ for _profile_set in _ROLE_MODEL_PREDECESSOR_PROFILE_HASHES.values():
     for _profile_name, _profile_hash in _profile_set.items():
         _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash})
 _KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'0fc5f465d6543b0ab4a2087b4de41511991a20683902fe8e5fc48b971b8f0692'})
+# Exact canonical managed span from immutable adapter 1551e29fb69af971ee51478184b2ced3bd1b76e9.
+# Controller-only shared ownership guidance changed; native child profiles did not.
+_KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'42c93d3705db662650025949921530d68caccbc071404f63be413d53217a5e70'})
 _KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'e6b28d06d39de22f9a7fc5d80e07eaf044caf45a328551834dbcb2336123360b'})
 _KNOWN_GENERATED_ROLE_REGISTRY_DOC_HASHES |= frozenset({'ffecc599a0e593d7634d837a9b32150c1782602f4bdd0ec3941673de3efe5dc6'})
 
@@ -1025,6 +1028,21 @@ Isolation and readonly boundaries hold in every mode; damaged management grants 
 additional authority. Effective live Host maintenance needs separate human authority.
 Changed disk files do not prove native activation. Preserve unknown user-owned bytes.
 
+Controller retains the full original goal, scope, acceptance,
+global facts, hard invariants, distilled findings, UNKNOWN, contradictions, current
+candidate judgments and routing reasons. Controller selects and judges evidence,
+integrates the original objective, acceptance criteria and available evidence, and
+decides product acceptance;
+the child owns its delegated investigation, implementation and verification working
+set. Legal tool capability does not transfer cognitive ownership. Normal Controller
+routing, precise immediate-decision spot-checks and native waiting follow its resident
+guidance; they have no numeric/tool-permission gate.
+
+No fixed closing handoff, extra lifecycle stage or new Agent is required. `PASS`
+describes checks run, `READY` describes the selected review, native child `Completed`
+describes execution termination, and Core `DONE` records mechanical closure; none
+alone decides product acceptance.
+
 Assigned children use current-role native instructions and their authorized parent's
 selected spawn handoff without parent conversation history; unselected material stays
 outside the Workstream. Parent means the immediate delegator, not necessarily the
@@ -1399,7 +1417,7 @@ def init(
     new_profile_names: list[str] = []
     backup = None
     # Apply the generated files under one lock so the mutation is atomic.
-    with core._lock(root):
+    with task_authority._lock(root):
         backup = core._apply_with_backup(root, files, [], "init") if files else None
         hooks = lifecycle.hooks_health(root)
     facts = _project_definition_facts(root)
@@ -1791,7 +1809,7 @@ def uninstall(root: Path) -> dict[str, object]:
     generic_writes, generic_deletes, generic_kept, generic_manual = core._uninstall_plan(root)
     writes = generic_writes | adapter[0]
     deletes = sorted(set(generic_deletes) | set(adapter[1]))
-    with core._lock(root):
+    with task_authority._lock(root):
         backup = core._apply_with_backup(root, writes, deletes, "uninstall") if writes or deletes else None
     return {"ok": True, "changed": bool(writes or deletes), "backup": backup, "kept": sorted(set(generic_kept) | set(adapter[2])), "manual_action_required": sorted(set(generic_manual) | set(adapter[3]))}
 
@@ -2001,7 +2019,7 @@ def task_recover_state(
     state_name = core._state_path(root).relative_to(root).as_posix()
     core._safe_without_final_symlink(root, state_name)
 
-    with core._lock(root):
+    with task_authority._lock(root):
         state_path = core._state_path(root)
         if not state_path.is_file():
             return {"ok": False, "status": "NO_INCOMPATIBLE_TASK_STATE", "recoverable": False}
@@ -2112,6 +2130,72 @@ def bootstrap_check(root: Path) -> dict[str, object]:
     return {"ok": True, **facts, "definition_recovery_status": definition_recovery_status, **_controller_bridge(), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI, "executable_adapter_protocol_version": lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION, "session_restart_required": False}
 
 
+def task_evidence_register(root: Path, role: str, base_revision: int, input_file: str,
+                           controller_session_id_hash: str | None = None) -> dict:
+    """Extend ordinary registration with one Controller-selected next dispatch."""
+    from . import task_authority
+    actor = controller_actor(role)
+    payload = core._read_input(input_file)
+    if set(payload) - {"requirements", "handoffs", "next_dispatch"}:
+        raise ValueError("invalid evidence registration")
+    selection = payload.get("next_dispatch")
+    if "next_dispatch" in payload and (not isinstance(selection, dict)
+            or set(selection) - {"role", "expected_agent_type", "candidate", "requirement_refs", "durable_paths"}
+            or not {"role", "expected_agent_type", "candidate", "requirement_refs"} <= set(selection)
+            or not isinstance(selection["expected_agent_type"], str)
+            or not isinstance(selection["role"], str)
+            or lifecycle._native_agent_roles().get(selection["expected_agent_type"]) != selection["role"]
+            or not roles.delegation_allowed("controller", selection["role"])):
+        raise ValueError("invalid next dispatch evidence selection")
+    with task_authority._lock(root):
+        if task_authority.check(root) is None and selection is not None:
+            raise ValueError("dispatch selection requires current task authority")
+        state = core._load_state(root, active=True)
+        if state["revision"] != base_revision:
+            raise ValueError("task revision conflict")
+        task_id = state["task_id"]
+        path = lifecycle._lifecycle_path(root, task_id)
+        ledger = lifecycle._load_lifecycle(path, task_id)
+        if selection is None:
+            core._append_continuity_state(state, actor, payload, "register")
+            lifecycle._write_evidence_reservation(root, state, path, None)
+            return core._task_ack(state, ["evidence_continuity"])
+        owner = lifecycle.active_controller_owner(root, task_id)
+        if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
+            raise ValueError("dispatch selection requires an unfenced owning Controller")
+        if ledger.get("next_evidence_dispatch") is not None or ledger["pending_authorized_spawn"] is not None:
+            raise ValueError("dispatch selection or reservation already pending")
+        data = core._continuity(state)
+        for field in ("requirements", "handoffs"):
+            if field in payload:
+                values = payload[field]
+                if not isinstance(values, list) or not values:
+                    raise ValueError("registration requires append-only additions")
+                data[field].extend(values)
+        core._validate_continuity(state)
+        # Validate using the same Core handoff contract without persisting a
+        # provisional handoff. The real ID is assigned at reservation.
+        identifier = "selection-validation"
+        known = {item["id"] for values in data.values() for item in values}
+        known.update(item["id"] for field in ("records", "evidence_refs", "artifact_refs", "verification_results")
+                     for item in state[field])
+        while identifier in known:
+            identifier += "-next"
+        prototype = {"id": identifier, "parent_handoff_id": None,
+            "producer": "handoff:" + identifier, "candidate": selection["candidate"],
+            "requirement_refs": selection["requirement_refs"]}
+        if "durable_paths" in selection:
+            if selection["role"] != "curator":
+                raise ValueError("durable paths require Curator")
+            prototype["durable_paths"] = selection["durable_paths"]
+        core._register_evidence_handoff(state, prototype)
+        data["handoffs"].pop()
+        state["revision"] += 1
+        ledger["next_evidence_dispatch"] = {**selection, "owner_session_id_hash": owner}
+        lifecycle._write_evidence_reservation(root, state, path, ledger)
+        return {**core._task_ack(state, ["evidence_continuity"]), "next_dispatch": selection}
+
+
 def _selected_handoff(root: Path, handoff_id: str) -> dict:
     state = core._load_state(root, active=True)
     matches = [item for item in state.get("evidence_continuity", {}).get("handoffs", []) if item["id"] == handoff_id]
@@ -2123,11 +2207,20 @@ def _selected_handoff(root: Path, handoff_id: str) -> dict:
 def task_observe(root: Path, role: str, handoff_id: str | None, agent_id_hash: str | None,
                  input_file: str | None = None, observation_json: str | None = None) -> dict:
     """Persist one selected observation without rewriting caller-owned input."""
+    from . import task_authority
+    with task_authority._lock(root):
+        task_authority.check(root)
+        return _task_observe_locked(root, role, handoff_id, agent_id_hash, input_file, observation_json)
+
+
+def _task_observe_locked(root: Path, role: str, handoff_id: str | None, agent_id_hash: str | None,
+                          input_file: str | None, observation_json: str | None) -> dict:
     actor = semantic_role(role)
     if (input_file is None) == (observation_json is None):
         raise ValueError("task-observe requires exactly one of --input or --observation-json")
     if observation_json is not None:
-        body = json.loads(observation_json)
+        from . import observation_transport
+        body = observation_transport.decode(observation_json)
         if not isinstance(body, dict):
             raise ValueError("observation JSON must be an object")
     else:
@@ -2177,7 +2270,10 @@ def task_observe(root: Path, role: str, handoff_id: str | None, agent_id_hash: s
     body["native_actor"] = agent_id_hash
     if submitted_by is not None:
         body["submitted_by"] = submitted_by
-    return core.task_observe(root, handoff["producer"], body)
+    core._append_continuity_state(task, handoff["producer"], body, "observations")
+    lifecycle._write_evidence_reservation(root, task,
+        lifecycle._lifecycle_path(root, task["task_id"]), None)
+    return core._task_ack(task, ["evidence_continuity"])
 
 
 def document_maintain(root: Path, role: str, base_revision: int, input_file: str, handoff_id: str | None = None) -> dict:
@@ -2413,6 +2509,8 @@ def doctor(root: Path) -> dict[str, object]:
     posttool_schema = "PASS" if host_wait_mode().get("status") == "PASS" else "UNKNOWN"
     result["lifecycle_reconciliation"] = {
         "subagent_stop_path": "PASS" if lifecycle_stop else "UNKNOWN",
+        "managed_child_turn_notification_ingress": "UNKNOWN",
+        "native_status_identity_scope": "legacy_thread_snapshot",
         # The pinned source supplies these shapes, but a
         # Host hook must observe a real payload before this is a live PASS.
         "native_terminal_reconciliation": "PASS" if lifecycle_reconciled else ("LIVE_NOT_OBSERVED" if posttool_schema == "PASS" else "UNKNOWN"),

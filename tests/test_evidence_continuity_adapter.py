@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import shlex
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+import threading
 
 import pytest
 
@@ -163,7 +166,8 @@ def test_nested_handoff_inherits_opaque_lineage_without_global_text(evidence_tas
     first = next(item for item in state["handoffs"] if item["id"] == parent_handoff)
     second = next(item for item in state["handoffs"] if item["id"] == nested_handoff)
     assert first["candidate"] == second["candidate"] == "candidate-parent"
-    assert first["requirement_refs"] == second["requirement_refs"] == ["R1"]
+    assert first["requirement_refs"] == ["R1"]
+    assert second["requirement_refs"] == []
     assert second["parent_handoff_id"] == parent_handoff
     assert nested["turn_id"] == "evidence-scanner-turn"
     assert "text" not in first and "text" not in second
@@ -288,6 +292,47 @@ def test_controller_results_keep_unincorporated_evidence_visible(evidence_task, 
     assert core.task_status(root)["Task"]["status"] == "DONE"
 
 
+def test_controller_context_skips_empty_evidence_packet(evidence_task) -> None:
+    root, _task_id = evidence_task
+    _register_requirement(root)
+    _spawn(root, "investigator", "empty-evidence-child", marker=_selected_message())
+    raw = lifecycle.handle_hook(root, "PostToolUse", _event(
+        tool_name="list_agents", tool_response={"agents": []}))
+    assert raw == ""
+
+
+def test_controller_context_keeps_unresolved_judgment_visible(evidence_task) -> None:
+    root, _task_id = evidence_task
+    _register_requirement(root)
+    handoff_id = "H-controller"
+    registration = root / "controller-handoff.json"
+    registration.write_text(json.dumps({"handoffs": [{
+        "id": handoff_id, "parent_handoff_id": None, "candidate": "C1",
+        "producer": "controller", "requirement_refs": ["R1"],
+    }]}), encoding="utf-8")
+    revision = core.task_show(root)["state"]["revision"]
+    core.task_evidence_register(root, "controller", revision, str(registration))
+    core.task_observe(root, "controller", {
+        **_observation("O-judged", handoff_id=handoff_id, candidate="C1", requirement_refs=["R1"]),
+    })
+    judgment = root / "judgment.json"
+    judgment.write_text(json.dumps({
+        "id": "J-unresolved", "candidate": "C1", "requirement_ref": "R1",
+        "observation_refs": ["O-judged"], "outcome": "unknown",
+        "reasoning": "The selected evidence does not resolve this requirement.",
+    }), encoding="utf-8")
+    revision = core.task_show(root)["state"]["revision"]
+    core.task_judge(root, "controller", revision, str(judgment))
+    task_authority.checkpoint(root)
+    raw = lifecycle.handle_hook(root, "PostToolUse", _event(
+        tool_name="list_agents", tool_response={"agents": []}))
+    context = json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+    packet = json.loads(context.splitlines()[-1])
+    assert packet["unresolved_judgments"] == [{
+        "id": "J-unresolved", "candidate": "C1", "requirement_ref": "R1", "outcome": "unknown",
+    }]
+
+
 def test_curator_maintenance_is_limited_to_exact_selected_paths(evidence_task, capsys) -> None:
     root, task_id = evidence_task
     _register_requirement(root)
@@ -333,3 +378,416 @@ def test_unmarked_legacy_handoff_stays_compatible_but_cannot_auto_record(evidenc
         codex_adapter.task_observe(root, "implementer", handoff_id,
                                    lifecycle._identity_hash("legacy-unmarked-child"),
                                    observation_json=json.dumps(_observation("O-unregistered"), separators=(",", ":")))
+
+
+def test_opaque_native_spawn_reports_gap_then_exact_controller_association_supports_child(evidence_task, capsys):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    # Real Native acceptance supplied gAAAA... messages to Hooks; lifecycle
+    # payload_hash matched those opaque strings, not the intended plaintext.
+    # This real-shaped input must stay opaque. The explicit association path
+    # preserves native provenance without pretending marker extraction worked.
+    child, handoff_id = _spawn(root, "implementer", "opaque-native-parent", marker="gAAAAABopaqueHostMessage")
+    raw = lifecycle.handle_hook(root, "PostToolUse", _event(tool_name="list_agents", tool_response={"agents": []}))
+    context = json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+    packet = json.loads(context.splitlines()[-1])
+    assert packet["unassociated_handoffs"] == [{"handoff_id": handoff_id,
+        "role": "implementer", "parent_handoff_id": None}]
+    assert packet["unassociated_handoffs_total"] == 1
+    assert "task-evidence-register" in context
+    with pytest.raises(ValueError, match="selected handoff has no evidence association"):
+        codex_adapter.task_observe(root, "implementer", handoff_id, lifecycle._identity_hash("opaque-native-parent"),
+                                   observation_json=json.dumps(_observation("O-opaque")))
+    source = root / "exact-association.json"
+    source.write_text(json.dumps({"handoffs": [{"id": handoff_id, "parent_handoff_id": None,
+        "candidate": "opaque-candidate", "producer": "handoff:" + handoff_id, "requirement_refs": ["R1"]}]}), encoding="utf-8")
+    assert cli.main(["--root", str(root), "--task-id", task_id, "task-evidence-register", "--role", "controller",
+                     "--base-revision", str(core.task_show(root)["state"]["revision"]), "--input", str(source)]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+    codex_adapter.task_observe(root, "implementer", handoff_id, lifecycle._identity_hash("opaque-native-parent"),
+                               observation_json=json.dumps(_observation("O-opaque")))
+    task_authority.checkpoint(root)
+    stored = core.task_get(root, "O-opaque")["object"]
+    assert stored["handoff_id"] == handoff_id and stored["candidate"] == "opaque-candidate"
+    assert stored["native_actor"] == lifecycle._identity_hash("opaque-native-parent")
+    assert stored["requirement_refs"] == ["R1"] and "submitted_by" not in stored
+    scanner, nested_id = _spawn(root, "investigator", "opaque-native-scanner", parent=child,
+                                marker="gAAAAABopaqueNestedHostMessage")
+    nested = core.task_get(root, nested_id)["object"]
+    assert nested["parent_handoff_id"] == handoff_id
+    assert nested["candidate"] == "opaque-candidate" and nested["requirement_refs"] == []
+    codex_adapter.task_observe(root, "investigator", nested_id, lifecycle._identity_hash("opaque-native-scanner"),
+                               observation_json=json.dumps(_observation("O-opaque-nested")))
+    task_authority.checkpoint(root)
+    raw = lifecycle.handle_hook(root, "PostToolUse", _event(tool_name="Bash", tool_response={"exit_code": 0}))
+    context = json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+    assert json.loads(context.splitlines()[-1])["unassociated_handoffs_total"] == 0
+    assert "O-opaque-nested" in context and core.selected_task(root) == task_id
+    assert task_authority.check(root) is not None
+
+
+@pytest.mark.parametrize("tool,result", [("Bash", {"exit_code": 0, "output": "PASS"}),
+    ("wait_agent", {"status": {"child": {"completed": "READY"}}}),
+    ("list_agents", {"agents": []})])
+def test_ordinary_positive_result_reenters_evidence_before_completion_decision(evidence_task, tool, result):
+    root, _ = evidence_task
+    _register_requirement(root)
+    child, handoff = _spawn(root, "investigator", "evidence-timing", marker=_selected_message())
+    codex_adapter.task_observe(root, "investigator", handoff, lifecycle._identity_hash("evidence-timing"),
+        observation_json=json.dumps(_observation("O-decision-changing")))
+    task_authority.checkpoint(root)
+    raw = lifecycle.handle_hook(root.parent, "PostToolUse", _event(cwd=str(root.parent), tool_name=tool, tool_response=result))
+    context = json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+    assert "O-decision-changing" in context
+    assert "before your next" in context and "Models decide applicability" in context
+    assert core.task_show(root)["state"]["status"] == "ACTIVE"
+    assert lifecycle.handle_hook(root.parent, "PostToolUse", {**child, "cwd": str(root.parent), "tool_name": tool, "tool_response": result}) == ""
+
+
+def test_two_dispatched_regions_keep_local_provenance_and_controller_global_judgment(evidence_task):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    authority_before = task_authority.check(root)["contract"]
+    goal_before = core.task_show(root)["state"]["goal"]
+    handoffs = []
+    for region in ("navigation", "evidence"):
+        child, handoff = _spawn(root, "investigator", f"region-{region}", marker=_selected_message())
+        handoffs.append(handoff)
+        codex_adapter.task_observe(root, "investigator", handoff, lifecycle._identity_hash(f"region-{region}"),
+                                   observation_json=json.dumps(_observation(f"O-{region}")))
+        task_authority.checkpoint(root)
+    # The prompt assigns this investigation to the children. Hooks still allow
+    # legal reads/Git/diagnostics while they run: no tool quota or privilege gate
+    # can prove whether the Controller is cognitively repeating their work.
+    for command in ("rg --files src", "rg -n association src", "git diff", "python -m pytest tests"):
+        assert lifecycle.handle_hook(root, "PreToolUse", _event(tool_name="Bash", tool_input={"command": command})) == ""
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    assert {item["handoff_id"] for item in ledger["children"]} == set(handoffs)
+    assert all(not lifecycle._native_execution_terminal(item) for item in ledger["children"])
+    raw = lifecycle.handle_hook(root, "PostToolUse", _event(tool_name="list_agents", tool_response={"agents": [
+        {"agent_name": f"/root/region-{region}", "agent_status": {"completed": f"distilled {region} conclusion"}}
+        for region in ("navigation", "evidence")]}))
+    context = json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+    assert "O-navigation" in context and "O-evidence" in context
+    # One precise post-result read is equally legal. The model determines its
+    # immediate decision purpose; native completion cannot judge acceptance.
+    assert lifecycle.handle_hook(root, "PreToolUse", _event(tool_name="Bash",
+        tool_input={"command": "Get-Content src/thaliris_codex/repository_association.py -TotalCount 20"})) == ""
+    state = core.task_show(root)["state"]
+    assert state["status"] == "ACTIVE" and state["goal"] == goal_before
+    assert state["evidence_continuity"]["judgments"] == []
+    assert task_authority.check(root)["contract"] == authority_before
+
+
+def test_auxiliary_handoff_diagnostic_failure_keeps_selected_evidence_visible(evidence_task, monkeypatch):
+    root, _ = evidence_task
+    _register_requirement(root)
+    child, handoff = _spawn(root, "investigator", "diagnostic-failure", marker=_selected_message())
+    codex_adapter.task_observe(root, "investigator", handoff, lifecycle._identity_hash("diagnostic-failure"),
+                               observation_json=json.dumps(_observation("O-must-remain-visible")))
+    task_authority.checkpoint(root)
+    original = lifecycle._load_lifecycle
+    reads = []
+    def unavailable(*args):
+        reads.append(args)
+        if len(reads) > 1:
+            raise ValueError("auxiliary lifecycle read unavailable")
+        return original(*args)
+    monkeypatch.setattr(lifecycle, "_load_lifecycle", unavailable)
+    raw = lifecycle._controller_evidence_context(root, _event(tool_name="Bash", tool_response={"exit_code": 0}))
+    context = json.loads(raw)["hookSpecificOutput"]["additionalContext"]
+    assert "O-must-remain-visible" in context
+    packet = json.loads(context.splitlines()[-1])
+    assert packet["unassociated_handoffs_status"] == "UNKNOWN"
+    assert packet["unassociated_handoffs_total"] is None
+
+
+def _preselect(root, role="implementer", **changes):
+    selection = {"role": role, "expected_agent_type": "thaliris-" + role,
+                 "candidate": "C4", "requirement_refs": ["R1"], **changes}
+    source = root / "preselection.json"
+    source.write_text(json.dumps({"next_dispatch": selection}), encoding="utf-8")
+    return codex_adapter.task_evidence_register(root, "controller",
+        core.task_show(root)["state"]["revision"], str(source), lifecycle._identity_hash("evidence-controller-session"))
+
+
+def _opaque_request(role="implementer", **values):
+    return _event(tool_name="spawn_agent", tool_input={
+        "agent_type": "thaliris-" + role, "fork_turns": "none",
+        "message": "gAAAAABopaqueNativeHandoff", **values})
+
+
+def _protected_evidence_bytes(root, task_id):
+    paths = (core._state_path(root), lifecycle._lifecycle_path(root, task_id), task_authority.path(root))
+    return {path: path.read_bytes() if path.exists() else None for path in paths}
+
+
+def test_preselection_cli_registers_requirements_and_opaque_first_observation_before_ack(evidence_task, capsys):
+    root, task_id = evidence_task
+    selection = {"role": "implementer", "expected_agent_type": "thaliris-implementer",
+                 "candidate": "C4", "requirement_refs": ["R1"]}
+    source = root / "preselection.json"
+    source.write_text(json.dumps({"requirements": [{"id": "R1", "workchain_ref": "opaque"}],
+                                  "next_dispatch": selection}), encoding="utf-8")
+    command = f'thaliris --root "{root}" --task-id {task_id} task-evidence-register --role controller --base-revision 1 --input "{source}"'
+    raw, _ = _invoke_hook_command(root, _event(), command)
+    updated = json.loads(raw)["hookSpecificOutput"]["updatedInput"]["command"]
+    assert "--controller-session-id-hash " + lifecycle._identity_hash("evidence-controller-session") in updated
+    tokens = [token.strip("\"'") for token in shlex.split(updated, posix=False)]
+    assert cli.main(tokens[1:]) == 0
+    assert json.loads(capsys.readouterr().out)["next_dispatch"] == selection
+    request = _opaque_request()
+    assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", request)
+    pending = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    handoff_id = pending["pending_authorized_spawn"]["handoff_id"]
+    assert "next_evidence_dispatch" not in pending
+    assert core.task_get(root, handoff_id)["object"]["candidate"] == "C4"
+    child = _identity("implementer", "opaque-before-ack")
+    assert lifecycle._record_subagent_start(root, child)
+    codex_adapter.task_observe(root, "implementer", handoff_id, lifecycle._identity_hash(child["agent_id"]),
+        observation_json=json.dumps(_observation("O-before-ack")))
+    assert core.task_get(root, "O-before-ack")["object"]["requirement_refs"] == ["R1"]
+    assert task_authority.check(root) is not None
+    # Parent PostToolUse acknowledgement has not happened; the bound child can
+    # already dispatch its Scanner, which inherits exact lineage and empty refs.
+    scanner_request = {**_opaque_request("investigator"), **child}
+    assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", scanner_request)
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    scanner_handoff = ledger["pending_authorized_spawn"]["handoff_id"]
+    scanner = _identity("investigator", "opaque-scanner-before-ack")
+    assert lifecycle._record_subagent_start(root, scanner)
+    command = f'thaliris --root "{root}" task-observe --role investigator --observation-json ' + "'" + json.dumps(_observation("O-scanner-first"), separators=(",", ":")) + "'"
+    raw, _ = _invoke_hook_command(root, scanner, command, readonly=True)
+    updated = json.loads(raw)["hookSpecificOutput"]["updatedInput"]["command"]
+    assert "--task-id " + task_id in updated and "--handoff-id " + scanner_handoff in updated
+    tokens = [token.strip("\"'") for token in shlex.split(updated, posix=False)]
+    assert cli.main(tokens[1:]) == 0
+    capsys.readouterr()
+    observation = core.task_get(root, "O-scanner-first")["object"]
+    assert observation["requirement_refs"] == [] and observation["candidate"] == "C4"
+    assert core.task_get(root, scanner_handoff)["object"]["parent_handoff_id"] == handoff_id
+    assert observation["native_actor"] == lifecycle._identity_hash(scanner["agent_id"])
+    raw = lifecycle.handle_hook(root, "PostToolUse", _event(tool_name="list_agents", tool_response={"agents": []}))
+    assert "O-before-ack" in raw and "O-scanner-first" in raw
+
+
+def test_preselection_consumes_once_and_nested_never_consumes_root_selection(evidence_task):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    _preselect(root)
+    parent, handoff_id = _spawn(root, "implementer", "selected-parent", marker="gAAAAABopaque")
+    _preselect(root, "reviewer")
+    scanner, scanner_id = _spawn(root, "investigator", "selected-scanner", parent=parent, marker="gAAAAABnested")
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    assert ledger["next_evidence_dispatch"]["role"] == "reviewer"
+    assert core.task_get(root, scanner_id)["object"]["parent_handoff_id"] == handoff_id
+    _spawn(root, "reviewer", "selected-reviewer", marker="gAAAAABopaqueReview")
+    assert "next_evidence_dispatch" not in lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    _child, legacy_id = _spawn(root, "investigator", "unselected-later", marker="gAAAAABunselected")
+    with pytest.raises(ValueError, match="not found"):
+        core.task_get(root, legacy_id)
+
+
+@pytest.mark.parametrize("kind", ["profile", "role", "owner", "readonly", "fenced", "marker"])
+def test_preselection_refusals_preserve_selection_and_no_reservation(evidence_task, kind):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    _preselect(root)
+    if kind == "owner":
+        lifecycle._write_session_association(root, task_id, lifecycle._identity_hash("different-controller"))
+    before = _protected_evidence_bytes(root, task_id)
+    request = _opaque_request()
+    if kind == "profile":
+        request["tool_input"]["agent_type"] = "thaliris-focused-implementer-astra-medium"
+    elif kind == "role":
+        request["tool_input"]["agent_type"] = "thaliris-reviewer"
+    elif kind == "owner":
+        request["session_id"] = "different-controller"
+    elif kind in {"readonly", "fenced"}:
+        request[kind] = True
+    elif kind == "marker":
+        request["tool_input"]["message"] = _selected_message("conflicting-candidate")
+    assert "deny" in lifecycle.handle_hook(root, "PreToolUse", request)
+    assert _protected_evidence_bytes(root, task_id) == before
+
+
+@pytest.mark.parametrize("operation,failure_stage", [
+    (operation, stage) for operation in ("register", "reserve", "observe")
+    for stage in ("state", "checkpoint", "capture") if (operation, stage) != ("observe", "capture")])
+def test_evidence_transaction_failures_restore_exact_state_authority_and_selection(evidence_task, monkeypatch, failure_stage, operation):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    if operation in {"reserve", "observe"}:
+        _preselect(root)
+    if operation == "observe":
+        child, handoff_id = _spawn(root, "implementer", "transaction-observer", marker="gAAAAABopaque")
+    before = _protected_evidence_bytes(root, task_id)
+    module, name = {"state": (core, "_write_state"), "checkpoint": (task_authority, "checkpoint"),
+                    "capture": (task_authority, "capture")}[failure_stage]
+    original = getattr(module, name)
+    def write_then_fail(*args, **kwargs):
+        original(*args, **kwargs)
+        raise OSError("injected after existing writer")
+    monkeypatch.setattr(module, name, write_then_fail)
+    if operation == "reserve":
+        assert "deny" in lifecycle._reserve_managed_spawn(root, _opaque_request())
+    else:
+        with pytest.raises(OSError, match="injected"):
+            if operation == "register":
+                _preselect(root)
+            else:
+                codex_adapter.task_observe(root, "implementer", handoff_id, lifecycle._identity_hash(child["agent_id"]),
+                    observation_json=json.dumps(_observation("O-rolled-back")))
+    assert _protected_evidence_bytes(root, task_id) == before
+    assert task_authority.check(root) is not None
+
+
+def test_preselection_validation_and_revision_conflict_do_not_mutate(evidence_task):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    before = _protected_evidence_bytes(root, task_id)
+    for changes in ({"requirement_refs": ["missing"]}, {"durable_paths": [".agent-memory/no.md"]},
+                    {"expected_agent_type": "worker"}, {"candidate": ""}, {"requirement_refs": []}):
+        with pytest.raises(ValueError):
+            _preselect(root, **changes)
+        assert _protected_evidence_bytes(root, task_id) == before
+    _preselect(root)
+    selected = _protected_evidence_bytes(root, task_id)
+    with pytest.raises(ValueError, match="revision conflict"):
+        codex_adapter.task_evidence_register(root, "controller", 1, str(root / "preselection.json"))
+    with pytest.raises(ValueError, match="already pending"):
+        _preselect(root)
+    assert _protected_evidence_bytes(root, task_id) == selected
+
+
+def test_child_and_wrong_owner_cannot_register_root_preselection(evidence_task):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    child, _handoff = _spawn(root, "implementer", "selection-forger", marker=_selected_message())
+    lifecycle._write_session_association(root, task_id, lifecycle._identity_hash("wrong-owner"))
+    command = f'thaliris --root "{root}" task-evidence-register --role controller --base-revision 3 --input forged.json'
+    before = _protected_evidence_bytes(root, task_id)
+    raw, _ = _invoke_hook_command(root, child, command)
+    assert "deny" in raw
+    raw = lifecycle.handle_hook(root, "PreToolUse", _event(session_id="wrong-owner", tool_name="Bash", tool_input={"command": command}))
+    assert "--controller-session-id-hash " + lifecycle._identity_hash("wrong-owner") in raw
+    source = root / "forged.json"
+    source.write_text(json.dumps({"next_dispatch": {"role": "implementer", "expected_agent_type": "thaliris-implementer",
+        "candidate": "forged", "requirement_refs": ["R1"]}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="owning Controller"):
+        codex_adapter.task_evidence_register(root, "controller", core.task_show(root)["state"]["revision"],
+            str(source), lifecycle._identity_hash("wrong-owner"))
+    assert core._state_path(root).read_bytes() == before[core._state_path(root)]
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    assert ledger["pending_authorized_spawn"] is None and "next_evidence_dispatch" not in ledger
+    assert task_authority.check(root) is not None
+
+
+def test_reassociated_controller_keeps_legacy_registration_but_cannot_forge_selection_actor(evidence_task):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    lifecycle.associate_task(root, task_id, lifecycle._identity_hash("reassociated"), task_authority.digest(task_authority.path(root)))
+    source = root / "legacy-registration.json"
+    source.write_text(json.dumps({"requirements": [{"id": "R2", "workchain_ref": "legacy"}]}), encoding="utf-8")
+    command = f'thaliris --root "{root}" --task-id {task_id} task-evidence-register --role controller --base-revision 2 --input "{source}"'
+    event = _event(session_id="reassociated", tool_name="Bash", tool_input={"command": command})
+    assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", event)
+    codex_adapter.task_evidence_register(root, "controller", 2, str(source), lifecycle._identity_hash("reassociated"))
+    assert core.task_get(root, "R2")["object"]["workchain_ref"] == "legacy"
+    event["tool_input"]["command"] += " --controller-session-id-hash " + lifecycle._identity_hash("evidence-controller-session")
+    assert "deny" in lifecycle.handle_hook(root, "PreToolUse", event)
+
+
+def test_preselection_malformed_registration_and_exact_same_role_profile_refuse(evidence_task):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    before = _protected_evidence_bytes(root, task_id)
+    source = root / "invalid-selection.json"
+    source.write_text(json.dumps({"requirements": [{"broken": "shape"}], "next_dispatch": {
+        "role": "implementer", "expected_agent_type": "thaliris-implementer", "candidate": "C4", "requirement_refs": ["R1"]}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="continuity object"):
+        codex_adapter.task_evidence_register(root, "controller", 2, str(source), lifecycle._identity_hash("evidence-controller-session"))
+    assert _protected_evidence_bytes(root, task_id) == before
+    _preselect(root, "focused-implementer", expected_agent_type="thaliris-focused-implementer-xhigh")
+    raw = lifecycle.handle_hook(root, "PreToolUse", _opaque_request("focused-implementer"))
+    assert "THALIRIS_EVIDENCE_DISPATCH_CONFLICT" in raw
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    assert ledger["next_evidence_dispatch"]["expected_agent_type"] == "thaliris-focused-implementer-xhigh"
+    assert ledger["pending_authorized_spawn"] is None
+
+
+@pytest.mark.parametrize("role", ["investigator", "curator"])
+def test_preselection_matching_readable_marker_and_curator_paths_remain_exact(evidence_task, role):
+    root, _ = evidence_task
+    _register_requirement(root)
+    paths = [".agent-memory/selected.md"] if role == "curator" else None
+    _preselect(root, role, **({"durable_paths": paths} if paths else {}))
+    _child, handoff = _spawn(root, role, "selected-readable", marker=_selected_message("C4", durable_paths=paths))
+    assert core.task_get(root, handoff)["object"].get("durable_paths") == paths
+
+
+@pytest.mark.parametrize("overrides", [{}, {"model": "gpt-6-luna", "reasoning_effort": "max"},
+                                      {"model": "gpt-6.1-sol", "reasoning_effort": "high"}])
+def test_preselection_preserves_native_defaults_overrides_and_generic_passthrough(evidence_task, overrides):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    _preselect(root, "investigator")
+    before = _protected_evidence_bytes(root, task_id)
+    generic = _opaque_request()
+    generic["tool_input"]["agent_type"] = "default"
+    assert lifecycle.handle_hook(root, "PreToolUse", generic) == ""
+    assert _protected_evidence_bytes(root, task_id) == before
+    request = _opaque_request("investigator", **overrides)
+    raw = lifecycle.handle_hook(root, "PreToolUse", request)
+    assert "deny" not in raw
+    if overrides:
+        routed = json.loads(raw)["hookSpecificOutput"]["updatedInput"] if raw else request["tool_input"]
+        assert all(routed[key] == value for key, value in overrides.items())
+    assert core.task_show(root)["state"]["evidence_continuity"]["handoffs"][-1]["candidate"] == "C4"
+
+
+def test_concurrent_child_append_selection_and_reservation_share_checkpoint_lock(evidence_task, monkeypatch):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    child, handoff = _spawn(root, "implementer", "concurrent-observer", marker=_selected_message())
+    checkpoint_entered, release_checkpoint, check_lock_attempted = threading.Event(), threading.Event(), threading.Event()
+    original = task_authority.checkpoint
+    original_lock = core._lock
+    @contextmanager
+    def observed_task_lock(selected_root):
+        if threading.current_thread().name.startswith("evidence-root"):
+            check_lock_attempted.set()
+        with original_lock(selected_root):
+            yield
+    monkeypatch.setattr(core, "_lock", observed_task_lock)
+    def paused_checkpoint(selected_root):
+        if threading.current_thread().name.startswith("evidence-append"):
+            checkpoint_entered.set()
+            assert release_checkpoint.wait(10)
+        original(selected_root)
+    monkeypatch.setattr(task_authority, "checkpoint", paused_checkpoint)
+    def append():
+        core.select_task(root, task_id)
+        return codex_adapter.task_observe(root, "implementer", handoff, lifecycle._identity_hash(child["agent_id"]),
+            observation_json=json.dumps(_observation("O-concurrent")))
+    def select_and_reserve():
+        core.select_task(root, task_id)
+        # The child write is still in progress; authority checking must wait for
+        # the checkpoint instead of rejecting its intermediate state digest.
+        assert task_authority.check(root) is not None
+        _preselect(root, "reviewer")
+        return lifecycle._reserve_managed_spawn(root, _opaque_request("reviewer"))
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="evidence-append") as append_pool, ThreadPoolExecutor(max_workers=1, thread_name_prefix="evidence-root") as root_pool:
+        first = append_pool.submit(append)
+        try:
+            assert checkpoint_entered.wait(10)
+            second = root_pool.submit(select_and_reserve)
+            assert check_lock_attempted.wait(10)
+        finally:
+            release_checkpoint.set()
+        assert first.result()["ok"] is True
+        assert second.result() == ""
+    assert core.task_get(root, "O-concurrent")["object"]["handoff_id"] == handoff
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
+    assert core.task_get(root, ledger["pending_authorized_spawn"]["handoff_id"])["object"]["candidate"] == "C4"
+    assert task_authority.check(root) is not None

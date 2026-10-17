@@ -65,6 +65,37 @@ def prompt(role):
     return roles.get_role(role).instructions
 
 
+def test_delegated_cognitive_ownership_is_in_resident_context_at_the_decision_points():
+    # Structural distribution: the whole-goal state is retained at routing,
+    # same-Workstream exclusions are at dispatch, and legal capability is
+    # separated from responsibility. Native behavior still needs observation.
+    resident = codex_bootstrap.controller_guidance()
+    routing = controller_instructions.render(section="routing")
+    handoff = controller_instructions.render(section="handoff")
+    capability = controller_instructions.render(section="durable")
+    for section in (routing, handoff, capability):
+        assert section.strip() in resident
+    concepts(routing, ("full original goal", "global facts", "hard invariants"),
+             ("distilled child conclusions", "contradictions", "UNKNOWN", "current candidate judgments"),
+             ("child owns", "investigation", "implementation", "local verification working set"))
+    concepts(handoff, ("after complete dispatch", "reading searching testing diff review runtime probing implementation analysis"),
+             ("not independent global decision work", "even when useful to global acceptance"),
+             ("pending immediate decision", "precise source spot-check"),
+             ("necessary child unfinished", "wait normally", "do not invent busywork"),
+             ("two independent source-region questions", "targeted post-result spot-check"))
+    concepts(capability, ("legal capability", "separate", "cognitive responsibility"),
+             ("controller-direct", "single-agent", "direct execution"),
+             ("no file line token query tool-count quota", "permission"))
+    assert "Default delegated routing recommends" not in resident
+    # Controller procedures have one normal delivery layer; its registered
+    # identity intentionally does not inject another role instruction copy.
+    assert prompt("controller") == ""
+    controller = roles._instructions("controller")
+    concepts(controller, ("full original goal", "global facts", "contradictions", "current candidate judgments"),
+             ("child owns", "working set"), ("after complete dispatch", "not independent global decision work"),
+             ("legal read Git diagnostic capability", "no mechanical quotas", "privilege denials"))
+
+
 def test_runtime_ownership_has_one_normal_layer_per_concern():
     global_text = adapter._global_agents_block().decode()
     project = adapter.render_managed()
@@ -143,11 +174,10 @@ def test_waiting_guidance_uses_native_events_and_observation_ownership():
              ("parallel direct dependencies", "without per-child polling loops"),
              ("neither fixed 60 seconds nor fixed 60 minutes fits every task"))
     concepts(handoff,
-             ("focused direct read", "spot-check", "one decision-critical fact"),
-             ("broad or continuing searches", "repeated diff review", "ordinary test runs", "routine local repair",
-              "investigator", "executor"),
-             ("after a complete handoff", "independent work", "can change the next decision", "monitoring", "patrol",
-              "delay waiting"))
+             ("precise source spot-check", "pending immediate decision"),
+             ("after complete dispatch", "reading searching testing diff review runtime probing implementation analysis"),
+             ("not independent global decision work", "even when useful to global acceptance"),
+             ("necessary child unfinished", "wait normally", "do not invent busywork", "delay waiting"))
 
 
 def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
@@ -478,7 +508,7 @@ def test_controller_owned_product_completion_and_model_routing_reach_resident_co
     concepts(controller, ("same in delegated", "controller-direct", "single-agent"),
              ("test pass", "reviewer ready", "native completed", "mechanical done", "distinct"))
     concepts(roles._instructions("controller"),
-             ("focused direct read", "spot-check", "decision-critical fact"),
+             ("precise source spot-check", "pending immediate decision"),
              ("verifier", "optional compatibility check", "no verifier", "no reviewer", "required final stage"))
     assert "Controller does not perform final acceptance itself" not in controller
     assert "final product acceptance uses a separate explicit closing handoff" not in controller

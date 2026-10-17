@@ -519,7 +519,8 @@ def test_project_init_after_host_install_uses_only_activation_marker(tmp_path: P
 
 
 @pytest.mark.skipif(__import__("os").name != "nt", reason="Windows Host trampoline")
-def test_global_trampoline_is_transparent_without_project_marker(tmp_path: Path) -> None:
+@pytest.mark.parametrize("control", [False, True])
+def test_global_trampoline_preserves_runtime_guard_without_project_marker(tmp_path: Path, control) -> None:
     script = tmp_path / "host home" / lifecycle_module.HOST_HOOK_SCRIPT_NAME
     script.parent.mkdir(parents=True)
     script.write_bytes(lifecycle_module.host_hook_script_bytes())
@@ -532,33 +533,40 @@ def test_global_trampoline_is_transparent_without_project_marker(tmp_path: Path)
     before = sorted(str(path.relative_to(project)) for path in project.rglob("*"))
 
     result = subprocess.run(
-        ["cmd.exe", "/d", "/c", "call", str(script), str(absent_exe), "0" * 64, "PreToolUse", lifecycle_module.MANAGED_HOOK_ABI],
+        ["cmd.exe", "/d", "/c", "call", str(script), str(absent_exe), "0" * 64, "0" * 64, "PreToolUse", lifecycle_module.MANAGED_HOOK_ABI],
         cwd=deep,
-        input=b"{}",
+        input=b'{"tool_name":"Bash","tool_input":{"command":"thaliris task-start probe"}}' if control else b"{}",
         capture_output=True,
         check=False,
         timeout=10,
     )
 
+    # Parent-workspace navigation must reach the verified receiver even when
+    # no ancestor marker exists. An absent runtime is never invoked, and the
+    # ordinary diagnosis stays legal and managed control retains UNKNOWN/refusal.
     assert result.returncode == 0
-    assert result.stdout == b""
+    specific = json.loads(result.stdout)["hookSpecificOutput"]
+    assert "assurance UNKNOWN" in specific["additionalContext"]
+    assert specific.get("permissionDecision") == ("deny" if control else None)
     assert result.stderr == b""
     assert sorted(str(path.relative_to(project)) for path in project.rglob("*")) == before
     assert not (project / ".context").exists()
 
 
 @pytest.mark.skipif(__import__("os").name != "nt", reason="Windows Host trampoline")
-def test_global_trampoline_finds_repo_marker_from_nested_cwd(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("activated", [False, True])
+def test_global_trampoline_reaches_verified_receiver_from_nested_cwd(tmp_path: Path, monkeypatch, activated) -> None:
     script = tmp_path / "host home" / lifecycle_module.HOST_HOOK_SCRIPT_NAME
     script.parent.mkdir(parents=True)
     script.write_bytes(lifecycle_module.host_hook_script_bytes())
     from thaliris_codex import host_preflight
     (script.parent / host_preflight.NAME).write_bytes(host_preflight.script_bytes())
     project = tmp_path / "activated project"
-    (project / ".codex").mkdir(parents=True)
-    (project / ".codex" / "thaliris.json").write_bytes(
-        b'{"format":"thaliris-project-activation-v1"}\n'
-    )
+    if activated:
+        (project / ".codex").mkdir(parents=True)
+        (project / ".codex" / "thaliris.json").write_bytes(
+            b'{"format":"thaliris-project-activation-v1"}\n'
+        )
     deep = project / "nested" / "a" / "b"
     deep.mkdir(parents=True)
     dispatched = tmp_path / "dispatch.log"
@@ -3252,13 +3260,16 @@ def test_all_native_terminal_children_allow_mechanical_close(tmp_path: Path) -> 
         root.mkdir()
         root = repo(root)
         _owned_task_start(root, "latest child", None, None)
-        spawn_start(root, "child-a")
-        stop(root, "child-a")
-        reconcile(root, "child-a", {"completed": "result"})
-        spawn_start(root, "child-b")
+        # Native agent identities are global: independent repositories cannot
+        # reuse the same exact child ID now that navigation preserves it.
+        first, second = f"child-a-{index}", f"child-b-{index}"
+        spawn_start(root, first)
+        stop(root, first)
+        reconcile(root, first, {"completed": "result"})
+        spawn_start(root, second)
         if attest_stop:
-            stop(root, "child-b")
-        reconcile(root, "child-b", latest_status)
+            stop(root, second)
+        reconcile(root, second, latest_status)
         state = core.task_show(root)["state"]
         if should_close:
             assert codex_adapter.task_close(root, state["revision"])["status"] == "DONE"
@@ -3332,9 +3343,80 @@ def test_missing_native_snapshot_cannot_erase_terminal_or_launder_conflict(tmp_p
     reconcile(root, "child", "not_found")
     reconcile(root, "child", {"completed": None})
     child = lifecycle(root)["children"][-1]
-    assert child["native_terminal_status"] == "completed" and child["native_status_conflict"] is True
+    assert child["native_terminal_status"] == "running" and child["native_status_conflict"] is True
+    assert child["native_turn_identity_unknown"] is True
     assert not lifecycle_module.native_execution_closed(root)
     assert lifecycle_module.task_state_recovery_blocker(root, core.selected_task(root)) is not None
+
+
+@pytest.mark.parametrize("terminal,status", [
+    ({"completed": "delivered FINAL"}, "completed"),
+    ({"errored": "failure"}, "errored"),
+    ("interrupted", "interrupted"),
+    ("shutdown", "shutdown"),
+])
+def test_reused_thread_activity_retains_history_without_closing_unknown_turn(tmp_path, terminal, status):
+    root = repo(tmp_path)
+    _owned_task_start(root, "thread activity is not permanent death", None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", terminal)
+    assert lifecycle_module.native_execution_closed(root)
+    reconcile(root, "child", "running")
+    child = lifecycle(root)["children"][-1]
+    assert child["native_terminal_status"] == "running"
+    assert child["native_turn_identity_unknown"] is True
+    assert {"status": status, "source": "list_agents", "turn_id_hash": None} in child["native_observation_history"]
+    assert child["native_status_identity_scope"] == "legacy_thread_snapshot"
+    # A stale unscoped terminal snapshot cannot complete a subsequent turn.
+    for observation in (terminal, "not_found", {"completed": None}):
+        reconcile(root, "child", observation)
+    assert lifecycle(root)["children"][-1]["native_terminal_status"] == "running"
+    assert not lifecycle_module.native_execution_closed(root)
+    assert lifecycle_module.managed_dependency_pending(root)
+    decision = handle_hook(root, "PreToolUse", hook_payload(agent_id="child", agent_type="worker",
+        tool_name="Bash", tool_input={"command": "Set-Content src/example.py changed"}))
+    assert "permissionDecision" in decision and '"deny"' in decision
+
+
+def test_new_start_turn_keeps_handoff_binding_and_unscoped_completion_unknown(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "same native thread distinct Hook turn", None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", {"completed": "old FINAL"})
+    before = lifecycle(root)["children"][-1]
+    new_turn = hook_payload(agent_id="child", agent_type="worker", turn_id="next-native-turn")
+    assert handle_hook(root, "SubagentStart", new_turn) == ""
+    child = lifecycle(root)["children"][-1]
+    assert child["turn_id_hash"] == before["turn_id_hash"]
+    assert child["handoff_id"] == before["handoff_id"]
+    assert child["native_terminal_status"] is None
+    assert child["native_turn_identity_unknown"] is True
+    assert {"status": "started", "source": "SubagentStart", "turn_id_hash": lifecycle_module._turn_id_hash(new_turn)} in child["native_observation_history"]
+    assert not lifecycle(root).get("identity_collisions")
+    reconcile(root, "child", {"completed": None})
+    assert not lifecycle_module.native_execution_closed(root)
+    # No installed event ingress exists for even a real-shaped turn completion.
+    snapshot = lifecycle(root)
+    assert handle_hook(root, "turn/completed", {"threadId": "child", "turn": {
+        "id": "next-native-turn", "status": "completed"}}) == ""
+    assert lifecycle(root) == snapshot
+    command = {**new_turn, "tool_name": "Bash", "tool_input": {"command": "Set-Content src/example.py changed"}}
+    assert '"deny"' in handle_hook(root, "PreToolUse", command)
+
+
+def test_terminal_ingress_capability_stays_unknown_after_hooks_and_legacy_completion(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "formal runtime capability", None, None)
+    spawn_start(root, "child")
+    stop(root, "child")
+    reconcile(root, "child", {"completed": "result"})
+    report = codex_adapter.doctor(root)
+    assert report["host_capability"]["managed_child_turn_notification_ingress"] == "UNKNOWN"
+    assert report["lifecycle_reconciliation"]["managed_child_turn_notification_ingress"] == "UNKNOWN"
+    assert report["lifecycle_reconciliation"]["native_status_identity_scope"] == "legacy_thread_snapshot"
+    guidance = controller_instructions.render(section="completion")
+    assert "including when mechanical terminal\nstatus is UNKNOWN" in guidance
+    assert "not a result-delivery gate" in guidance
 
 
 def test_doctor_distinguishes_optional_stop_from_native_terminal_fact(tmp_path):

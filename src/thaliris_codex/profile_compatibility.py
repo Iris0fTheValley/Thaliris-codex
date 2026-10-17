@@ -51,10 +51,14 @@ def check(root: Path, home: Path, target: str, selection: dict, *, cwd: str | No
         root = root.resolve()
         folders = [home]
         current = Path(cwd).resolve() if cwd is not None else root
-        if current != root and root not in current.parents:
+        if current != root and root not in current.parents and current not in root.parents:
             raise ProfileUnknown("spawn cwd is outside the selected project")
+        # Exact task navigation can select a nested repository from a parent
+        # native workspace. Its child repository profiles are not loaded by
+        # that Host; inspect the actual cwd layer rather than inventing one.
+        boundary = current if current in root.parents else root
         folders.extend(parent / ".codex" for parent in (current, *current.parents)
-                       if parent == root or root in parent.parents)
+                       if parent == boundary or boundary in parent.parents)
         candidates = []
         for folder in dict.fromkeys(folders):
             declared_files = set()

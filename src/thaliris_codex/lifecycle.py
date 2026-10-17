@@ -316,6 +316,18 @@ def _v041_host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
 
 
 def host_hook_script_bytes() -> bytes:
+    """Reach exact actor navigation even when cwd has no ancestor marker.
+
+    The verified receiver performs repository selection. This does not create
+    an activation marker or merge independent worktrees into one authority.
+    """
+    old = _pre_repository_association_host_hook_script_bytes()
+    begin = old.index(b'set "_thaliris_search_dir=%CD%"\r\n')
+    end = old.index(b':thaliris_dispatch\r\n', begin)
+    return old[:begin] + old[end:]
+
+
+def _pre_repository_association_host_hook_script_bytes() -> bytes:
     """Check the independent SessionStart recovery before project dispatch."""
     old = _pre_catalog_recovery_host_hook_script_bytes()
     preparation = (
@@ -517,14 +529,14 @@ def _v041_pinned_host_command(script: Path, executable: Path, executable_sha256:
 
 
 def _pinned_host_source(script: Path, executable: Path, executable_sha256: str,
-                        runtime_sha256: str | None, event: str) -> str:
+                        runtime_sha256: str | None, event: str, *, previous: bool = False) -> str:
     """Build the generated inline Host check; modified trampoline bytes cannot skip it."""
     payload = {
         "script": str(script), "executable": str(executable), "sha": executable_sha256,
         "runtime": runtime_sha256, "event": event, "abi": MANAGED_HOOK_ABI,
     }
     data = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).decode("ascii")
-    script_sha = hashlib.sha256(host_hook_script_bytes()).hexdigest()
+    script_sha = hashlib.sha256(_pre_repository_association_host_hook_script_bytes() if previous else host_hook_script_bytes()).hexdigest()
     source = (
         "$ErrorActionPreference='Stop';"
         f"$p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{data}'))|ConvertFrom-Json);"
@@ -584,6 +596,10 @@ def _pinned_host_payload(command: str) -> dict[str, Any] | None:
             _pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"]),
             _legacy_pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"]),
             _v041_pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"], payload["abi"]),
+            'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal_without_variables(
+                _pinned_host_source(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"], previous=True)) + '"',
+            'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal(
+                _pinned_host_source(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"], previous=True)) + '"',
         }:
             return None
         return payload
@@ -660,7 +676,7 @@ def _host_hook_command_is_managed(
         if not script.is_absolute() or script.resolve(strict=True) != (codex_home / HOST_HOOK_SCRIPT_NAME).resolve(strict=True):
             return False
         if script.is_symlink() or script.read_bytes() not in {
-            host_hook_script_bytes(), _pre_catalog_recovery_host_hook_script_bytes(), _v041_host_hook_script_bytes(), _previous_host_hook_script_bytes(), _legacy_host_hook_script_bytes()
+            host_hook_script_bytes(), _pre_repository_association_host_hook_script_bytes(), _pre_catalog_recovery_host_hook_script_bytes(), _v041_host_hook_script_bytes(), _previous_host_hook_script_bytes(), _legacy_host_hook_script_bytes()
         }:
             return False
         if not executable.is_absolute() or executable.is_symlink():
@@ -1339,9 +1355,15 @@ def _claim_agent_association(root: Path, task_id: str, agent_hash: str) -> bool:
                 stream.write((json.dumps(expected, sort_keys=True) + "\n").encode())
                 stream.flush()
                 os.fsync(stream.fileno())
+            from . import repository_association
+            repository_association.publish(root, task_id, agent_hash, "agent")
             return True
         except FileExistsError:
-            return path.is_file() and json.loads(path.read_bytes()) == expected
+            if path.is_file() and json.loads(path.read_bytes()) == expected:
+                from . import repository_association
+                repository_association.publish(root, task_id, agent_hash, "agent")
+                return True
+            return False
     except (OSError, ValueError, TypeError):
         return False
 
@@ -1352,6 +1374,8 @@ def _write_session_association(root: Path, task_id: str, session_hash: str) -> N
     reused = prior.get("requires_dispatch_id") is True or prior.get("task_id") not in {None, task_id}
     core._atomic_write(path, (json.dumps({"version": 1, "task_id": task_id,
         "session_id_hash": session_hash, "requires_dispatch_id": reused}, sort_keys=True) + "\n").encode())
+    from . import repository_association
+    repository_association.publish(root, task_id, session_hash, "session")
 
 
 def _dispatch_identity_required(root: Path, state: dict[str, Any], session_hash: str | None) -> bool:
@@ -1373,7 +1397,7 @@ def associate_task(root: Path, task_id: str, session_hash: str, expected_authori
     prior = core.selected_task(root)
     try:
         core.select_task(root, task_id)
-        with core._lock(root):
+        with task_authority._lock(root):
             if task_authority.digest(task_authority.path(root)) != expected_authority:
                 raise ValueError("TASK_AUTHORITY_CHANGED")
             record = task_authority.check(root)
@@ -1405,6 +1429,63 @@ def _associated_task(root: Path, payload: dict[str, Any]) -> str | None:
 
 
 def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
+    # Literal observation text is data, even when it names apply_patch or a
+    # protected path. Normalize before deny-only scans, then pass the same
+    # command through every existing identity, authority and lifecycle check.
+    from . import observation_transport
+    try:
+        normalized = _inline_observation_transport(payload) if event == "PreToolUse" else None
+    except observation_transport.UnsupportedShellQuote:
+        return _permission_deny("THALIRIS_UNSUPPORTED_SHELL_QUOTE: use JSON Unicode escapes for PowerShell smart quotes")
+    if normalized is None:
+        return _handle_hook_routed(root, event, payload, managed_hook_abi)
+    routed = normalized
+    result = _handle_hook_routed(root, event, routed, managed_hook_abi)
+    if result:
+        output = json.loads(result)
+        specific = output.get("hookSpecificOutput", {})
+        if specific.get("permissionDecision") == "deny":
+            return result
+        # Preserve any exact identity additions made by the normal child path.
+        updated = specific.get("updatedInput", routed["tool_input"])
+        specific["updatedInput"] = updated
+        specific["hookEventName"] = "PreToolUse"
+        specific["permissionDecision"] = "allow"
+        output["hookSpecificOutput"] = specific
+        return json.dumps(output, ensure_ascii=False, separators=(",", ":"))
+    return _pre_tool_updated_input_output(routed["tool_input"])
+
+
+def _inline_observation_transport(payload: object) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    command = _bash_command(payload)
+    if command is None or _context_arguments(command) is None:
+        return None
+    from . import observation_transport
+    prefix = command[:len(command) - len(command.lstrip())]
+    direct = command.lstrip()
+    if direct.startswith("& "):
+        prefix += "& "
+        direct = direct[2:]
+    normalized = observation_transport.literal_object_argument(
+        direct, powershell=_maintenance_shell_dialect(payload) == "powershell")
+    if normalized is None:
+        return None
+    original = payload.get("tool_input")
+    if not isinstance(original, dict):
+        return None
+    key = next((name for name in ("command", "cmd") if original.get(name) == command), None)
+    if key is None:
+        return None
+    updated = {**original, key: prefix + normalized}
+    routed = {**payload, "tool_input": updated}
+    if _context_call(routed)[0] != "task-observe":
+        return None
+    return routed
+
+
+def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
     if not isinstance(payload, dict):
         return ""
     if event == "PreToolUse":
@@ -1420,7 +1501,19 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
             mutating = False
         if mutating and (payload.get("readonly") is True or binding is not None and not binding.repo_write_allowed):
             return _permission_deny("THALIRIS_READONLY_ACTOR: this known role remains readonly even when task association or authority is unavailable")
-    root = _hook_repository_root(root, payload)
+    try:
+        from . import repository_association
+        cwd_root = _hook_repository_root(root, payload)
+        root = repository_association.resolve(payload, cwd_root) or cwd_root
+    except (OSError, ValueError, TypeError, KeyError):
+        diagnostic = "THALIRIS_REPOSITORY_ASSOCIATION_UNKNOWN: exact actor navigation is ambiguous, stale or unavailable; no repository was selected"
+        if event == "PreToolUse":
+            if (_managed_spawn_requested(payload) or _managed_control_dependency(payload, root)
+                    or payload.get("agent_id") is not None or payload.get("agent_type") is not None
+                    or normalized in set(_COLLABORATION_TOOL_NAMES) - set(_DELEGATION_TOOL_NAMES)):
+                return _permission_deny(diagnostic)
+            return ""
+        return json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": diagnostic}}) if event == "PostToolUse" else ""
     prior = core.selected_task(root)
     try:
         selected = _associated_task(root, payload)
@@ -1464,7 +1557,7 @@ def handle_hook(root: Path, event: str, payload: object, managed_hook_abi: str |
                         return _permission_deny("THALIRIS_READONLY_ACTOR: the known handoff role remains readonly despite missing fields or damaged authority")
                     expected = known[0]
                     if mutating and _native_execution_terminal(expected):
-                        return _permission_deny("THALIRIS_TERMINAL_ROLE_SESSION: exact native terminal evidence closes this managed turn; the identity cannot regain repository writes")
+                        return _permission_deny("THALIRIS_TERMINAL_ROLE_SESSION: native terminal evidence closes this handoff's execution; later work needs its own authorization")
                     profile = _native_spawn_agent_type({"tool_input": payload})
                     conflict = (any(payload.get(key) is not None for key in ("agent_type", "agentType"))
                         and profile != expected["agent_type"])
@@ -1559,7 +1652,6 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
     try:
         if event not in HOOK_EVENTS or not isinstance(payload, dict):
             return ""
-        root = _hook_repository_root(root, payload)
         if event == "PreToolUse":
             if payload.get("fenced") is True:
                 return _permission_deny("THALIRIS_FENCED_ACTOR")
@@ -1642,8 +1734,10 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                     _best_effort_record(_record_delegation_telemetry, root, payload)
             if isinstance(tool, str) and _tool_basename(tool) in _OBSERVED_EXECUTION_TOOL_NAMES:
                 _best_effort_record(_record_execution_observation, root, payload)
-                return _post_init_attestation(root, payload, managed_hook_abi)
-            return ""
+                attestation = _post_init_attestation(root, payload, managed_hook_abi)
+                if attestation:
+                    return attestation
+            return _controller_evidence_context(root, payload)
         # Stop has no production policy role. It neither invokes a model nor
         # blocks or corrects the Controller.
         return ""
@@ -1657,6 +1751,71 @@ def _best_effort_record(function: Any, *args: Any, **kwargs: Any) -> None:
         function(*args, **kwargs)
     except Exception:
         pass
+
+
+def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
+    """Reenter evidence on ordinary result delivery, before the next decision.
+
+    This observes no product semantics and schedules no extra event or stage.
+    Child results, test PASS and Reviewer READY cannot hide the packet merely
+    because they did not invoke a task-state mutation.
+    """
+    task_id = core.selected_task(root)
+    if task_id is None or active_controller_owner(root, task_id) != _session_id_hash(payload):
+        return ""
+    task_authority.check(root)
+    state = core._load_state(root)
+    if not state.get("evidence_continuity"):
+        return ""
+    packet = core._continuity_status(state)
+    # Some Native Hosts supply an opaque spawn message to Hooks. A bound
+    # lifecycle handoff then exists without a readable selected marker. Expose
+    # that mechanical gap to the Controller; never decrypt, guess relevance or
+    # silently claim its observations are durably associated.
+    associated = {item["id"] for item in state["evidence_continuity"]["handoffs"]}
+    unassociated = []
+    try:
+        ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
+        unassociated = [{"handoff_id": item["handoff_id"], "role": item["role"],
+                        "parent_handoff_id": item["root_handoff_id"] if item.get("depth") == 2 else None}
+                       for item in ledger["children"]
+                       if item.get("managed") is True and item.get("handoff_bound") is True
+                       and item.get("handoff_id") and item["handoff_id"] not in associated]
+    except (OSError, ValueError, KeyError, TypeError):
+        # An auxiliary lifecycle diagnostic must not hide existing critical
+        # observations or imply that all handoffs were associated.
+        packet["unassociated_handoffs_status"] = "UNKNOWN"
+    packet["unassociated_handoffs"] = unassociated[:8]
+    packet["unassociated_handoffs_total"] = (
+        None if packet.get("unassociated_handoffs_status") == "UNKNOWN" else len(unassociated))
+    if (
+        not unassociated
+        and packet.get("unassociated_handoffs_status") != "UNKNOWN"
+        and packet.get("unincorporated_total") == 0
+        and packet.get("unresolved_judgments_total") == 0
+        and packet.get("latest_judgments_total") == 0
+    ):
+        return ""
+    selected = {item["observation_id"] for item in packet["unincorporated"]}
+    selected.update(item["id"] for item in packet["unresolved_judgments"])
+    excerpts = []
+    for kind, field in (("observations", "text"), ("judgments", "reasoning")):
+        for item in state["evidence_continuity"][kind]:
+            if item["id"] not in selected:
+                continue
+            excerpt = {"id": item["id"], "excerpt": item[field][:384]}
+            if len(json.dumps(excerpts + [excerpt], ensure_ascii=False).encode("utf-8")) <= 4096:
+                excerpts.append(excerpt)
+    packet["decision_context_excerpts"] = excerpts
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext":
+        "Evidence Continuity before your next requirement/completion judgment. Models decide applicability; "
+        "PASS, READY and Completed do not dispose evidence. Use task-get for exact records and "
+        "task-status --evidence-offset for remaining pages; no polling or closing stage is required.\n" +
+        ("Selected observations for unassociated handoffs are not durably linked. If selected for this task, "
+         "use Controller task-evidence-register with the exact handoff identity, candidate and requirement refs. "
+         "An opaque or unmarked Host message supplies no association; do not infer it from role or lineage.\n"
+         if unassociated else "") +
+        json.dumps(packet, ensure_ascii=False)}}, ensure_ascii=False)
 
 
 def _hook_repository_root(root: Path, payload: dict[str, Any]) -> Path:
@@ -1752,7 +1911,7 @@ def _profile_files_present_at_session_start(root: Path) -> dict[str, dict[str, o
 
 
 def _record_session_start(root: Path, payload: dict[str, Any]) -> None:
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         if payload.get("source") in {"startup", "clear"}:
@@ -1796,7 +1955,7 @@ def _record_prompt_telemetry(root: Path, payload: dict[str, Any]) -> None:
     prompt = payload.get("prompt")
     if not isinstance(prompt, str):
         return
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
@@ -1819,7 +1978,7 @@ def _record_delegation_telemetry(root: Path, payload: dict[str, Any]) -> None:
         "child_identity_hash": _child_identity_hash(tool, tool_input),
         "dispatch_status": _dispatch_status(_post_tool_response(payload)),
     }
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
@@ -1843,7 +2002,7 @@ def _runtime_metadata(state: dict[str, Any], payload: dict[str, Any]) -> None:
 
 def _record_runtime_event(root: Path, payload: dict[str, Any], event: str, tool: str) -> None:
     """Persist bounded evidence that a root hook event reached this adapter."""
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
@@ -1881,7 +2040,7 @@ def _record_controller_guard_event(root: Path, payload: dict[str, Any], action: 
     host collector bind PreToolUse, the deny decision, and the absence of a
     side effect to the same call instead of combining unrelated observations.
     """
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
@@ -1932,7 +2091,7 @@ def _record_child_runtime_event(root: Path, payload: dict[str, Any], event: str)
     tool = payload.get("tool_name") or payload.get("tool")
     if not isinstance(tool, str):
         return
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
@@ -1976,7 +2135,7 @@ def _record_protocol_deviation(
         key: item[key] for key in ("agent_id", "agent_type", "tool", "operation", "target", "blocked")
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     item["fingerprint"] = fingerprint
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _lifecycle_path(root, task_id)
         state = _load_lifecycle(path, task_id)
         deviations = state.setdefault("protocol_deviations", [])
@@ -2008,7 +2167,7 @@ def _record_protocol_deviation(
 
 def consume_protocol_deviation_notice(root: Path, task_id: str) -> str | None:
     """Return one bounded aggregate notice and consume the whole pending batch."""
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _lifecycle_path(root, task_id)
         if not path.is_file():
             return None
@@ -2048,7 +2207,8 @@ def _lifecycle_path(root: Path, task_id: str) -> Path:
 
 def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) -> dict[str, Any]:
     if verify_authority:
-        task_authority._store(path.parents[3], task_id).check()
+        with task_authority._lock(path.parents[3]):
+            task_authority._store(path.parents[3], task_id).check()
     if not path.is_file():
         return {"version": LIFECYCLE_STATE_VERSION, "task_id_hash": _task_key(task_id), "children": [], "pending_authorized_spawn": None, "sequence": 0}
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -2057,6 +2217,14 @@ def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) 
     owner = value.get("owner_session_id_hash")
     if owner is not None and (not isinstance(owner, str) or re.fullmatch(r"[0-9a-f]{64}", owner) is None):
         raise ValueError("invalid lifecycle Controller owner")
+    selection = value.get("next_evidence_dispatch")
+    if selection is not None and (
+            not isinstance(selection, dict)
+            or set(selection) - {"role", "expected_agent_type", "candidate", "requirement_refs", "durable_paths", "owner_session_id_hash"}
+            or not {"role", "expected_agent_type", "candidate", "requirement_refs", "owner_session_id_hash"} <= set(selection)
+            or _native_agent_roles().get(selection.get("expected_agent_type")) != selection.get("role")
+            or selection.get("owner_session_id_hash") != owner):
+        raise ValueError("invalid lifecycle evidence selection")
     pending = value.get("pending_authorized_spawn")
     if pending is not None and (
         not isinstance(pending, dict)
@@ -2087,7 +2255,7 @@ def record_task_start_owner(root: Path, task_id: str, session_hash: str) -> None
     """Bind a newly attested managed task to its immutable Controller session."""
     if re.fullmatch(r"[0-9a-f]{64}", session_hash) is None:
         raise ValueError("managed task start requires a proven Controller session")
-    with core._lock(root):
+    with task_authority._lock(root):
         state = core._load_state(root, active=True)
         if state.get("task_id") != task_id:
             raise ValueError("managed task changed before owner recording")
@@ -2280,7 +2448,7 @@ def _bound_managed_child(root: Path, payload: dict[str, Any]) -> bool:
     if task_id is None:
         return False
     try:
-        with core._lock(root):
+        with task_authority._lock(root):
             state = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
             return _bound_child_record(state, payload) is not None
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -2365,7 +2533,7 @@ def _bound_child_pretool_diagnostic(root: Path, payload: dict[str, Any]) -> tupl
         if task_id is None:
             statuses, hashes = _child_binding_field_statuses(None, payload, None)
             return False, {"field_status": statuses, "identity_hashes": hashes}
-        with core._lock(root):
+        with task_authority._lock(root):
             state = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
             record = _bound_child_record(state, payload)
             statuses, hashes = _child_binding_field_statuses(state, payload, record)
@@ -2398,7 +2566,7 @@ def _record_bound_role_session_denial(root: Path, payload: dict[str, Any], diagn
         "mismatch_fields": sorted(key for key, value in statuses.items() if value == "MISMATCH"),
         "observed_at_ns": observed_at_ns,
     }
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
@@ -2417,7 +2585,7 @@ def _bound_child_parent_message(root: Path, payload: dict[str, Any]) -> bool:
     if task_id is None:
         return False
     try:
-        with core._lock(root):
+        with task_authority._lock(root):
             state = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
             child = _bound_child_record(state, payload)
             if child is None:
@@ -2460,7 +2628,8 @@ def _turn_id_hash(payload: dict[str, Any]) -> str | None:
 
 
 def _register_spawn_evidence(task_state: dict[str, Any], handoff_id: str, role: str,
-                             handoff_text: str, parent: dict[str, Any] | None) -> bool:
+                             handoff_text: str, parent: dict[str, Any] | None,
+                             selection: dict[str, Any] | None = None) -> bool:
     """Carry opaque selected references, never requirements or global context."""
     candidate, refs, durable_paths = "UNKNOWN", [], []
     parent_id = parent["handoff_id"] if parent else None
@@ -2469,19 +2638,27 @@ def _register_spawn_evidence(task_state: dict[str, Any], handoff_id: str, role: 
                    if item["id"] == parent_id]
         if len(matches) != 1:
             return False
-        candidate, refs = matches[0]["candidate"], matches[0]["requirement_refs"]
+        # Parent lineage is exact, but relevance is still Controller-owned.
+        # Record Scanner facts without guessing that every parent requirement
+        # applies. Controller can judge the observation against selected refs.
+        candidate, refs = matches[0]["candidate"], []
     else:
         markers = re.findall(r"(?m)^thaliris-evidence: (.+)$", handoff_text)
         if len(markers) > 1:
             raise ValueError("ambiguous evidence selection")
-        if not markers:
+        if not markers and selection is None:
             return False
+        metadata = selection
         if markers:
-            metadata = json.loads(markers[0])
-            if not isinstance(metadata, dict) or set(metadata) - {"candidate", "requirement_refs", "durable_paths"}:
+            marker = json.loads(markers[0])
+            if not isinstance(marker, dict) or set(marker) - {"candidate", "requirement_refs", "durable_paths"}:
                 raise ValueError("invalid selected evidence metadata")
-            candidate, refs = metadata.get("candidate", "UNKNOWN"), metadata.get("requirement_refs", [])
-            durable_paths = metadata.get("durable_paths", [])
+            if selection is not None and any(marker.get(key, default) != selection.get(key, default)
+                    for key, default in (("candidate", "UNKNOWN"), ("requirement_refs", []), ("durable_paths", []))):
+                raise ValueError("conflicting readable marker and dispatch selection")
+            metadata = marker
+        candidate, refs = metadata.get("candidate", "UNKNOWN"), metadata.get("requirement_refs", [])
+        durable_paths = metadata.get("durable_paths", [])
     record = {"id": handoff_id, "parent_handoff_id": parent_id, "candidate": candidate,
               "producer": "handoff:" + handoff_id, "requirement_refs": list(refs)}
     if durable_paths:
@@ -2490,6 +2667,29 @@ def _register_spawn_evidence(task_state: dict[str, Any], handoff_id: str, role: 
         record["durable_paths"] = durable_paths
     core._register_evidence_handoff(task_state, record)
     return True
+
+
+def _write_evidence_reservation(root: Path, task_state: dict[str, Any],
+                                path: Path, ledger: dict[str, Any] | None) -> None:
+    """Commit under the task lock; restore exact protected bytes on write failure.
+
+    No Native dispatch is released until both existing stores are written. A
+    process interruption still follows ordinary authority-conflict recovery.
+    """
+    paths = (core._state_path(root), path, task_authority.path(root))
+    previous = {target: target.read_bytes() if target.exists() else None for target in paths}
+    try:
+        core._write_state(root, task_state)
+        task_authority.checkpoint(root)
+        if ledger is not None:
+            _write_capture(path, ledger)
+    except BaseException:
+        for target, content in previous.items():
+            if content is None:
+                target.unlink(missing_ok=True)
+            else:
+                core._atomic_write(target, content)
+        raise
 
 
 def _reserve_managed_spawn(
@@ -2535,7 +2735,7 @@ def _reserve_managed_spawn(
     if session_id_hash is None:
         return _permission_deny("THALIRIS_MANAGED_SESSION_REQUIRED: managed spawn authorization requires a current session identity.")
     try:
-        with core._lock(root):
+        with task_authority._lock(root):
             # Re-read while holding the same lock used by task mutations.
             if _active_task_id(root) != task_id:
                 return _permission_deny("THALIRIS_MANAGED_SPAWN_UNAVAILABLE: the active task changed before authorization.")
@@ -2563,6 +2763,13 @@ def _reserve_managed_spawn(
                 return _permission_deny("THALIRIS_SCANNER_SLOT_ACTIVE: this exact parent already has a live Scanner; coordinate its result before another same-parent Scanner")
             if state["pending_authorized_spawn"] is not None:
                 return _permission_deny("THALIRIS_UNBOUND_DISPATCH_PENDING: associate or cancel this one unbound native dispatch before another same-task dispatch; missing Host identity fields cannot choose between reservations.")
+            selection = state.get("next_evidence_dispatch") if not nested else None
+            if selection is not None and (
+                    selection["owner_session_id_hash"] != session_id_hash
+                    or active_controller_owner(root, task_id) != session_id_hash
+                    or selection["role"] != role
+                    or selection["expected_agent_type"] != expected_agent_type):
+                return _permission_deny("THALIRIS_EVIDENCE_DISPATCH_CONFLICT: selected dispatch requires its exact owning Controller, role and native profile.")
             state["sequence"] = int(state.get("sequence", 0)) + 1
             task_state = core._load_state(root, active=True)
             if task_state.get("task_id") != task_id:
@@ -2573,14 +2780,13 @@ def _reserve_managed_spawn(
             payload_hash = hashlib.sha256(handoff_text.encode("utf-8")).hexdigest()
             handoff_material = f"{task_id}\0{task_state['revision']}\0{session_id_hash}\0{state['sequence']}\0{payload_hash}"
             handoff_id = f"handoff-{hashlib.sha256(handoff_material.encode('utf-8')).hexdigest()[:32]}"
-            evidence_registered = _register_spawn_evidence(task_state, handoff_id, role, handoff_text, parent)
+            evidence_registered = _register_spawn_evidence(task_state, handoff_id, role, handoff_text, parent,
+                {key: selection[key] for key in ("candidate", "requirement_refs", "durable_paths") if key in selection}
+                if selection is not None else None)
             if evidence_registered:
                 task_state["revision"] += 1
-                core._write_state(root, task_state)
-                # The lifecycle capture validates the authority's selected task
-                # digest before it writes. Checkpoint the already-validated Core
-                # append first so the two-file handoff reservation can proceed.
-                task_authority.checkpoint(root)
+            if selection is not None:
+                del state["next_evidence_dispatch"]
             state["pending_authorized_spawn"] = {
                 "role": role,
                 "expected_agent_type": expected_agent_type,
@@ -2601,7 +2807,10 @@ def _reserve_managed_spawn(
                 "spawn_turn_id_hash": _turn_id_hash(payload),
             }
             _runtime_metadata(state, payload)
-            _write_capture(path, state)
+            if evidence_registered:
+                _write_evidence_reservation(root, task_state, path, state)
+            else:
+                _write_capture(path, state)
             if updated_input is not None and routed_input is not None:
                 if isinstance(payload.get("tool_input"), dict):
                     updated_input.append(routed_input)
@@ -2617,7 +2826,7 @@ def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, exp
     task_id = core.selected_task(root)
     if task_id is None or not isinstance(reason, str) or not reason.strip() or len(reason) > 4096:
         raise ValueError("TASK_DEPENDENCY_DISPOSITION_REQUIRED")
-    with core._lock(root):
+    with task_authority._lock(root):
         task_authority.check(root)
         state = core._load_state(root, active=True)
         if state["task_id"] != task_id or state["revision"] != base_revision:
@@ -2702,7 +2911,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
     turn_id_hash = _turn_id_hash(payload)
     if task_id is None or not isinstance(agent_id, str) or not agent_id or role is None or session_id_hash is None or turn_id_hash is None:
         return False
-    with core._lock(root):
+    with task_authority._lock(root):
         if _active_task_id(root) != task_id or _session_fenced(root, session_id_hash):
             return False
         path = _lifecycle_path(root, task_id)
@@ -2777,6 +2986,19 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
                 **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")}})
             state["pending_authorized_spawn"] = None
+        elif (prior.get("managed") is True and prior.get("handoff_bound") is True
+                and prior.get("management_disposition") != "ABANDONED_DEPENDENCY"
+                and prior.get("agent_type") == native_agent_type
+                and prior.get("session_id_hash") == session_id_hash
+                and prior.get("turn_id_hash") != turn_id_hash):
+            # A thread may execute another turn. Observe it without rebinding
+            # the old handoff or treating its terminal fact as thread death.
+            _record_native_history(prior, prior.get("native_terminal_status"), prior.get("native_terminal_source"))
+            _record_native_history(prior, "started", "SubagentStart", turn_id_hash)
+            prior["native_terminal_status"] = None
+            prior["native_terminal_source"] = "SubagentStart"
+            prior["native_turn_identity_unknown"] = True
+            prior["native_status_conflict"] = True
         else:
             collisions = state.setdefault("identity_collisions", [])
             if isinstance(collisions, list) and len(collisions) < 16:
@@ -2790,7 +3012,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
         _write_capture(path, state)
     # Keep only the old bounded identity-corroboration sample for diagnostics;
     # completion authority remains exclusively in the task-local lifecycle file.
-    with core._lock(root):
+    with task_authority._lock(root):
         runtime_path = _session_dir(root, payload) / "runtime.json"
         runtime = _load_runtime(runtime_path)
         _runtime_metadata(runtime, payload)
@@ -2809,7 +3031,7 @@ def _record_subagent_stop(root: Path, payload: dict[str, Any]) -> bool:
     turn_id_hash = _turn_id_hash(payload)
     if task_id is None or not isinstance(agent_id, str) or not agent_id or native_agent_type is None or session_id_hash is None or turn_id_hash is None:
         return False
-    with core._lock(root):
+    with task_authority._lock(root):
         if _active_task_id(root) != task_id or _session_fenced(root, session_id_hash):
             return False
         path = _lifecycle_path(root, task_id)
@@ -2847,9 +3069,10 @@ def _native_terminal_status(value: object) -> str | None:
 
 
 def _native_execution_terminal(child: dict[str, Any]) -> bool:
-    """Read the native turn observation without a second execution state."""
+    """Read the accepted execution observation without a second state engine."""
     status = child.get("native_terminal_status")
-    return isinstance(status, str) and status in {"completed", "interrupted", "errored", "shutdown"}
+    return (not child.get("native_turn_identity_unknown")
+            and isinstance(status, str) and status in {"completed", "interrupted", "errored", "shutdown"})
 
 
 def _child_for_native_name(children: list[object], name: str) -> dict[str, Any] | None:
@@ -2863,19 +3086,47 @@ def _child_for_native_name(children: list[object], name: str) -> dict[str, Any] 
     return matches[0] if len(matches) == 1 else None
 
 
+def _record_native_history(child: dict[str, Any], status: object, source: object, turn_id_hash: str | None = None) -> None:
+    """Retain bounded provenance, without assigning a snapshot to a Hook turn."""
+    item = {"status": status, "source": source, "turn_id_hash": turn_id_hash}
+    history = child.setdefault("native_observation_history", [])
+    if item not in history[-1:]:
+        history.append(item)
+        del history[:-16]
+
+
 def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status: str, source: str) -> bool:
-    """Release only a proved terminal execution slot; never accept a result."""
+    """Record supported legacy thread statuses; never accept a model result."""
     if child.get("management_disposition") == "ABANDONED_DEPENDENCY":
         child.setdefault("late_native_observations", []).append({"status": status, "source": source})
         return True
     if status not in {"pending_init", "running", "not_found", "completed", "interrupted", "errored", "shutdown"}:
         return False
+    if child.get("native_turn_identity_unknown"):
+        # Current list/wait/control snapshots carry thread identity, not turn
+        # identity. After reuse they cannot associate an old completion with
+        # the current execution. Keep the observation without closing it.
+        _record_native_history(child, status, source)
+        if status in {"running", "pending_init"}:
+            child["native_terminal_status"] = status
+            child["native_terminal_source"] = source
+        return True
     prior = child.get("native_terminal_status")
     if _native_execution_terminal(child) and prior != status:
-        # Absence from a later snapshot does not erase an exact terminal fact.
-        # A live or different terminal observation contradicts the ended turn.
+        # Absence does not erase the previous terminal observation. A later
+        # active snapshot may concern another turn; different terminal values
+        # leave unresolved evidence rather than overwriting that history.
         if status == "not_found":
             return False
+        _record_native_history(child, prior, child.get("native_terminal_source"))
+        _record_native_history(child, status, source)
+        if status in {"running", "pending_init"}:
+            # This may be a legal subsequent turn, rather than a contradiction
+            # about the ended turn. Its identity and terminal ingress remain
+            # UNKNOWN; never invent a new turn or reactivate the old handoff.
+            child["native_terminal_status"] = status
+            child["native_terminal_source"] = source
+            child["native_turn_identity_unknown"] = True
         child["native_status_conflict"] = True
         return True
     if prior == status:
@@ -2886,6 +3137,7 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
     state["sequence"] = int(state.get("sequence", 0)) + 1
     child["native_terminal_status"] = status
     child["native_terminal_source"] = source
+    child["native_status_identity_scope"] = "legacy_thread_snapshot"
     return True
 
 
@@ -2936,7 +3188,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
     response = _post_tool_response(payload)
     if task_id is None or not isinstance(response, dict):
         return
-    with core._lock(root):
+    with task_authority._lock(root):
         if _active_task_id(root) != task_id:
             return
         path = _lifecycle_path(root, task_id)
@@ -3246,7 +3498,7 @@ def _record_execution_observation(root: Path, payload: dict[str, Any]) -> None:
         nested = response.get("result")
         if isinstance(nested, dict):
             item["nested_result_keys"] = sorted(str(key) for key in nested)[:16]
-    with core._lock(root):
+    with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
@@ -3303,10 +3555,17 @@ def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: boo
     command = _bash_command(payload)
     if command is None:
         return None, []
+    # A shell-tool template commonly ends in a newline. It terminates the
+    # same standalone call; only separators between actual command bytes
+    # make this a compound route. Keep non-whitespace suffixes visible.
     separator_check = command.lstrip()
     if separator_check.startswith("&") and len(separator_check) > 1 and separator_check[1].isspace():
         separator_check = separator_check[1:].lstrip()
     segments = _split_command_separators(separator_check)
+    if segments is not None and len(segments) > 1:
+        # Validate the original first: trimming an escaped newline could
+        # conceal unsupported syntax. Only empty terminal lines may vanish.
+        segments = _split_command_separators(separator_check.rstrip())
     if segments is None or len(segments) != 1:
         return None, []
     arguments = _context_arguments(command, validate_selected_maintenance=validate_selected_maintenance)
@@ -3786,7 +4045,12 @@ def _updated_command_output(payload: dict[str, Any], argument: str) -> str:
     if key is None:
         return _permission_deny("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
     updated = dict(original)
-    updated[key] = f"{original[key]} {argument}"
+    command = original[key]
+    ending = re.search(r"[\r\n]\s*\Z", command)
+    end = ending.start() if ending else len(command)
+    # Identity options must remain on the invocation line, before any
+    # terminal newline supplied by the native shell-tool template.
+    updated[key] = f"{command[:end]} {argument}{command[end:]}"
     return json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
@@ -4188,7 +4452,7 @@ def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_h
         "authority_contract_sha256": task_authority.digest(contract_path) if contract_path else None,
         "authority_provenance": "CONTROLLER_ASSERTED_HUMAN_INSTRUCTION" if explicit else "LEGACY_SYNTHETIC_CONTROLLER",
     }
-    with core._lock(root):
+    with task_authority._lock(root):
         _write_capture(_start_attestation_path(root, token), record)
     if event == "PostToolUse":
         return json.dumps({"hookSpecificOutput": {
@@ -4217,7 +4481,7 @@ def _issue_task_abandon_attestation(root: Path, payload: dict[str, Any], managed
         "created_at_ns": now,
         "expires_at_ns": now + _START_ATTESTATION_TTL_NS,
     }
-    with core._lock(root):
+    with task_authority._lock(root):
         _write_capture(_start_attestation_path(root, token), record)
     return _updated_command_output(payload, f"--hook-attestation {token}")
 
@@ -4241,7 +4505,7 @@ def _issue_bootstrap_observation(root: Path, task_id: str, payload: dict[str, An
         "created_at_ns": now,
         "expires_at_ns": now + _START_ATTESTATION_TTL_NS,
     }
-    with core._lock(root):
+    with task_authority._lock(root):
         _write_capture(_start_attestation_path(root, token), record)
     return _updated_command_output(payload, f"--hook-attestation {token}")
 
@@ -4255,7 +4519,7 @@ def consume_bootstrap_observation(root: Path, task_id: str, token: str | None) -
     if match is None:
         raise error
     path = _start_attestation_path(root, token)
-    with core._lock(root):
+    with task_authority._lock(root):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -4294,7 +4558,7 @@ def consume_task_start_attestation(root: Path, token: str | None, controller_bri
     if match is None:
         raise error
     path = _start_attestation_path(root, token)
-    with core._lock(root):
+    with task_authority._lock(root):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -4332,7 +4596,7 @@ def consume_task_abandon_attestation(root: Path, token: str | None) -> tuple[str
     if match is None:
         raise error
     path = _start_attestation_path(root, token)
-    with core._lock(root):
+    with task_authority._lock(root):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -4464,7 +4728,9 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     tool = payload.get("tool_name") or payload.get("tool")
     if not isinstance(tool, str):
         return ""
-    root = _hook_repository_root(root or Path.cwd(), payload)
+    from . import repository_association
+    cwd_root = _hook_repository_root(root or Path.cwd(), payload)
+    root = repository_association.resolve(payload, cwd_root) or cwd_root
     normalized = _tool_basename(tool)
     # Plain direct argparse help is read-only. Check its shell syntax before
     # managed-state admission so expressions or redirections cannot use the
@@ -4579,6 +4845,16 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             return ""
         if normalized in {"send_message", "followup_task", "send_input"} and _active_child_communication(root, payload):
             return ""
+        if operation == "task-evidence-register":
+            # Existing session association, not an authority or bearer token.
+            # The CLI checks it only for preselection; legacy registration keeps
+            # the existing persistent-authority/reassociation behavior.
+            supplied = _direct_context_option(payload, {"--controller-session-id-hash"})
+            session_hash = _session_id_hash(payload)
+            if session_hash is None or supplied is not None and supplied != session_hash:
+                return _permission_deny("THALIRIS_EVIDENCE_DISPATCH_CONFLICT: Controller session association differs from the Hook actor.")
+            if supplied is None:
+                return _updated_command_output(payload, "--controller-session-id-hash " + session_hash)
         if normalized in _FRESH_CHILD_REUSE_TOOL_NAMES and _managed_collaboration_target(root, payload) or normalized == "Agent":
             _best_effort_record(_record_controller_guard_event, root, payload, "CHILD_REUSE", "blocked")
             return _permission_deny("THALIRIS_FRESH_ROLE_SESSION_REQUIRED: continue work with a new named-role spawn_agent(fork_turns=\"none\") handoff.")
@@ -4899,7 +5175,7 @@ def task_abandon(
     except (ValueError, TypeError, AttributeError) as exc:
         raise ValueError("invalid expected task id") from exc
 
-    with core._lock(root):
+    with task_authority._lock(root):
         state_path = core._state_path(root, task_id)
         try:
             state_raw = state_path.read_bytes()

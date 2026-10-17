@@ -7,12 +7,36 @@ layer proves human authorship or universal native Root identity.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
+import threading
 
 from thaliris import authority, core
 from thaliris.authority import MODES, digest
 
 SECURITY_PATHS = (".context/config.json", ".codex/thaliris.json", ".codex/hooks.json", ".codex/config.toml")
+_held_task_locks = threading.local()
+
+
+@contextmanager
+def _lock(root: Path):
+    """Share Core's task lock across adapter reads and coupled writes.
+
+    Adapter helpers may reenter on the same thread; Core remains the single
+    cross-process lock owner. This prevents checking an intermediate digest
+    between a checked state append and its authority checkpoint.
+    """
+    key = root.resolve()
+    held = getattr(_held_task_locks, "roots", set())
+    if key in held:
+        yield
+        return
+    with core._lock(root):
+        _held_task_locks.roots = held | {key}
+        try:
+            yield
+        finally:
+            _held_task_locks.roots = held
 
 
 def directory() -> Path:
@@ -71,6 +95,13 @@ def _evidence(root: Path, record: dict) -> dict:
 
 
 def check(root: Path) -> dict | None:
+    if core.selected_task(root) is None:
+        return None
+    with _lock(root):
+        return _check_locked(root)
+
+
+def _check_locked(root: Path) -> dict | None:
     if core.selected_task(root) is None:
         return None
     store = _store(root)

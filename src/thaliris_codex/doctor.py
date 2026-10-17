@@ -189,6 +189,10 @@ def _host_capability(root: Path, *, hooks: dict[str, object], lifecycle: dict[st
         "controller_deny_observed": UNKNOWN,
         "controller_side_effect_prevented": UNKNOWN,
         "subagent_lifecycle_observed": "YES" if lifecycle.get("start") and lifecycle.get("stop") else UNKNOWN,
+        # Hook activity and a maintenance app-server connection do not prove
+        # subscription to Desktop's managed-child turn notifications.
+        "managed_child_turn_notification_ingress": UNKNOWN,
+        "managed_child_turn_notification_ingress_reason": "No supported Desktop turn notification subscription is established by the installed hooks",
         "reviewer_native_readonly_observed": UNKNOWN,
         "trusted_runtime_isolation_observed": UNKNOWN,
     }

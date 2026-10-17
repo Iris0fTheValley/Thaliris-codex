@@ -78,23 +78,56 @@ Controller registers opaque requirements and selected handoff edges using
 `task-evidence-register --role controller --base-revision N --input FILE`.
 The input contains `requirements: [{id, workchain_ref}]` and
 `handoffs: [{id, parent_handoff_id, candidate, producer, requirement_refs}]`.
-For new work, Controller registers related requirement refs and includes an own-line spawn marker
+For new work, Controller preselects the next top-level managed dispatch in that same
+registration operation (or after requirements are already registered):
+`"next_dispatch":{"role":"investigator","expected_agent_type":"thaliris-investigator","candidate":"C1","requirement_refs":["R1"]}`.
+The existing task lock and authority protect this one selection. The Hook supplies the
+Controller's existing session association. A matching owning Controller reservation
+consumes it once and registers the newly generated exact handoff
+before Native execution, including opaque Host messages. A wrong profile/role/owner or
+conflicting readable marker refuses without consuming it; nested children inherit their
+already associated parent's provenance and cannot consume the top-level selection.
+Model/effort defaults and permitted explicit overrides are independent of this metadata.
+Optionally include the identical association in an own-line spawn marker
 `thaliris-evidence: {"candidate":"C1","requirement_refs":["R1"]}`;
 Curator may also receive exact `durable_paths`. The adapter binds provenance from existing
-lifecycle/native association. Nested Scanner inherits its parent's selection and cannot
-rewrite it through a marker. Register nonempty requirement refs before spawn. Legacy handoffs
-without a marker may still spawn, but their observation persistence refuses missing provenance;
-return the fact and its sources to Controller for exact association instead of storing unlinked evidence.
+lifecycle/native association. Nested Scanner retains parent lineage and logical candidate,
+with empty requirement refs; its marker cannot select global relevance. Controller later
+cites those observations in selected requirement judgments. Register nonempty requirement
+refs before a top-level spawn. Native Hosts may expose an opaque spawn message to Hooks;
+an intended plaintext marker then does not establish an association. Ordinary Controller
+result delivery reports bounded exact `unassociated_handoffs`. For selected work use the
+existing Controller `task-evidence-register` with that native-bound handoff ID, original
+parent ID, candidate, producer and selected refs for legacy/history recovery. That
+postspawn recovery cannot prevent a first observation from racing association; use
+preselection for new work. Do not decrypt payloads or infer
+global relevance. Unmarked handoffs remain compatible, but observation persistence refuses
+missing provenance; return the fact and sources for exact association instead of storing
+unlinked evidence. See the [Native ownership and evidence acceptance plan](../../docs/delegated-ownership-native-acceptance.md).
 
 When an already discovered fact changes local conclusion, local acceptance or critical UNKNOWN,
 record it with source refs and selected provenance. This adds no search duty, global-importance
 judgment, model call or acceptance gate. `task-observe --role ROLE --observation-json '<JSON>'`
 uses the existing Hook binding to supply its exact Task ID, `--handoff-id ID --agent-id-hash HASH`.
+Read or validate selected sources in a separate read-only tool call, then invoke the installed
+runner directly for the observation. Terminal newlines are supported; variables, script wrappers
+and compound shell statements do not receive the direct invocation's identity rewrite.
+The Hook carries a literal JSON object as UTF-8/base64 within that same option before
+native shell dispatch; the CLI decodes it inside `task-observe`. This preserves quotes,
+backslashes and Unicode through Windows PowerShell and the pinned `.cmd` runner, and
+keeps control-looking payload text separate from executable shell syntax. Pass ordinary
+JSON, for example `--observation-json '{"id":"O1","text":"local fact","source_refs":["S1"]}'`.
+PowerShell single-quoted literals double embedded apostrophes (`Native''s`); POSIX uses
+normal shell quoting. JSON `\u0027` also works. The Host must apply `updatedInput`.
+PowerShell inline commands conservatively refuse raw smart quotes U+2018–U+201F;
+use JSON Unicode escapes such as `\u2019`. POSIX literals retain these Unicode characters.
+Executable syntax outside the payload retains readonly/control-state checks. Existing
+direct JSON and correctly native-escaped argv remain supported.
 Readonly children need no payload file write; `--input FILE` also accepts an existing file. Its minimal body is
 `{"id":"O1","text":"local fact","source_refs":["S1"]}`. If S1 is not already registered, add
 `sources: [{"id":"S1","kind":"local","locator":"tests/result.txt","summary":"exact output"}]`.
 Source refs must be nonempty and resolve to sources. The adapter fills candidate, handoff and
-nonempty requirement refs from the selected binding; conflicting explicit fields are rejected.
+requirement refs from the selected binding; conflicting explicit fields are rejected.
 No Controller revision CAS is required. `task-status --evidence-offset N` pages pending evidence
 and judgments; `task-get` retrieves exact records. Existing Controller state-operation outputs
 also include bounded evidence visibility, including revision conflicts and successful closure.
@@ -102,10 +135,29 @@ Child observation acknowledgements do not receive unrelated global evidence bodi
 `task-judge --role controller --base-revision N --input FILE` records `id`, `candidate`,
 `requirement_ref`, exact `observation_refs`, `outcome` and `reasoning`. Outcomes are
 `satisfied`, `unknown`, `repair` and `no-current-impact`. An observation retains its immutable
-observed candidate C1; a judgment may assess it against current candidate C2 with reasoning
+logical handoff candidate label C1, not a spawn-time repository identity; source refs and
+optional producer-selected `observed_state` identify the local observation (otherwise actual
+state identity is UNKNOWN). A judgment may assess it against current candidate C2 with reasoning
 about its present applicability. Read/ack is not incorporation; incorporated unknown/repair
 remains unresolved. Prior records survive handoff, update and close as history; mechanical
 DONE does not decide current requirement satisfaction.
+
+Judgments may include exact prior `judgment_refs` for the same requirement. Controller
+explains how it addresses that prior basis without reciting its full observation history.
+Unaddressed model-authored repair/unknown basis remains in `unresolved_judgments` even
+after a later satisfied judgment cites only fresh observations. Complete legacy recitation
+of the earlier observation basis also establishes a mechanical continuity link.
+Ordinary Controller PostToolUse results reintroduce bounded evidence and local excerpts
+before the next broad completion judgment. This uses existing result delivery, no polling,
+fixed final stage or semantic close gate. Children never receive that global packet.
+
+Explicit task admission/association publishes exact actor navigation beside external task
+authority. From a parent native cwd, the Hook validates repository-local session/agent
+associations before applying the original task Authority and lifecycle checks. Multiple
+nested repositories remain independent. Ambiguous/stale navigation grants no managed
+binding; no descendant marker discovery chooses a repository. Generic unmanaged work
+keeps its passthrough behavior. Profile compatibility uses actual native cwd layers,
+including a parent workspace, rather than assuming child-repository profiles were loaded.
 
 Controller may import selected historical child results with `task-observe --role controller
 --handoff-id ID --observation-json '<JSON>'`, registering a missing exact association first.

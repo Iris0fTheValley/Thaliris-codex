@@ -74,7 +74,10 @@ handoff 链路与不透明 requirement refs；这不增加搜索义务、全局�
 关键证据跨后续 Handoff 保持可见，直到 Controller 明确重评当前候选所关联的用户需求：
 satisfied、unknown、repair，或说明为何已不影响当前候选。读取或确认收到不算处置，
 PASS、READY、Completed、DONE 不能替代需求判断。旧观察与判断保留为历史，不自动成为当前真相。
-观察保留其原候选 C1；Controller 可针对当前候选 C2 判断其适用性，并明确记录当前候选与理由。
+不可变的 candidate 是 handoff 逻辑标签，不是仓库快照；来源与可选的 `observed_state` 区分局部观察，缺失实际状态身份时保留 UNKNOWN。
+Nested Scanner 保留 parent provenance，但不推断全局 requirement relevance，未关联观察由 Controller 选择适用需求。
+后续 judgment 用 `judgment_refs` 与理由或完整 observation basis 显式处理此前 repair/unknown 依据；只有新正面证据不会让旧依据退场。
+Adapter 在普通 Controller 结果交付时重新呈现 bounded evidence，时序早于下一次 broad completion 判断；不增加轮询、固定阶段、Agent 或 close gate。
 
 Curator 只维护精确选定的持久知识与 INDEX，可编辑、合并、拆分、替换或删除已有条目。
 Core 提供带 CAS 的文档维护与来源记录，模型决定语义协调。Curator 不扫描知识库、不委派、
@@ -130,7 +133,7 @@ Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目
 
 ## 安装与本地开发
 
-pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.5,<0.5。
+pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.6,<0.5。
 
 Windows Python 3.11+ 的正常安装先创建临时 bootstrap 环境，再使用包内的
 runtime installer。请独立选择已审阅的 adapter 完整 commit。省略 `--runtime` 时，
@@ -264,7 +267,7 @@ Authority 恢复必须通过显式 Task ID，或已经关联到该任务的 sess
 
 Core 将该可选非空字符串作为不可变 intent 保存；适配器只接受 luna-only，并验证每个执行绑定。外部 anchor 固定已校验的 profile/config hashes，子角色与可变配置不能扩展或解除约束。安装后需要新的 Host session。Admission 比较 SessionStart 时记录的 role profile 和公开 config 文件快照；磁盘快照不能证明 Host 实际加载的 role map 或 CLI -c 覆盖。SubagentStart 核对受约束子角色的 Host model；缺失或不匹配时 handoff 不绑定，之后该子角色的工具会被拒绝，但 hook 无法阻止模型调用。约束禁止 Astra profile 和每次 spawn 的模型覆盖；该模式使用固定的 Luna/xhigh role profile。未启用约束时，七个默认路由的语义角色由 managed `PreToolUse` 补齐省略的 model/effort；只提供一个字段时按原生默认语义处理另一个，显式值不改写。执行约束或经验证的必要例外仍可选择其他受支持值。详细迁移说明见 [执行约束移植说明](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/split-execution-constraint-port.md)。
 
-该功能需要 thaliris>=0.4.5。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
+该功能需要 thaliris>=0.4.6。开发测试必须安装本次修复所用的 Core checkout；旧 monolithic wheel 不满足 split package 边界。
 
 ## CI 与平台兼容范围
 

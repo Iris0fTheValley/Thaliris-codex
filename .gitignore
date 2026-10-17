@@ -2,6 +2,7 @@
 .context/backups/
 .context/recovery/
 .context/state.json
+.context/tasks/
 .context/context.lock
 # thaliris:end
 # thaliris-codex:begin

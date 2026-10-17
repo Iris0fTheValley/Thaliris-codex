@@ -56,6 +56,11 @@ ACTIVE state, UNKNOWN child or orphaned reservation never selects the current ta
 New tasks have separate ledgers and authority; old evidence remains recoverable.
 Legacy singleton state is available only for intentional diagnostics or explicit
 same-task recovery, and grants no automatic session association.
+Explicit admission/association also publishes exact actor navigation outside the repository.
+Hooks in a parent native workspace use it to select the repository, then apply the same
+task Authority, owner, child lineage, readonly and routing checks. It grants no authority.
+Several nested repositories remain independent; ambiguous or stale actor navigation
+returns UNKNOWN/refusal for managed control, never a downward marker search or first match.
 
 ## Persistent authority
 
@@ -173,8 +178,13 @@ challenge adds value. No Verifier, Reviewer, separate closing handoff, or new ch
 a required final stage. SubagentStop is optional
 observational evidence, not another gate.
 Follow the global startup/authority contract and the selected execution mode.
-In delegated mode, Controller owns direction, scope, acceptance criteria, context selection
-and next routing; assigned executors own implementation design and local methods.
+In delegated mode, Controller retains the full original goal, direction, scope and acceptance criteria,
+global facts and hard invariants, distilled child conclusions, contradictions and UNKNOWN,
+current candidate judgments, context selection and next routing. The child owns its
+delegated investigation, implementation and local verification working set. Delegate
+broad repository investigation, searches and call-site collection, log cleaning, tests,
+local analysis and implementation to the suitable fresh role. Delegation transfers that
+working set while retaining the Controller's rich global semantic state and reasoning.
 Controller-direct permits Controller execution with useful fresh auxiliary roles;
 single-agent permits ordinary execution without children. Isolation and readonly
 boundaries hold in every mode. Damaged management does not transfer child duties
@@ -258,9 +268,16 @@ or forwarding evidence is not disposition. Neither test PASS, Reviewer READY, na
 Completed nor mechanical DONE substitutes for this requirement judgment. Incorporated
 unknown/repair judgments remain visible as unresolved requirements; an incorporation record
 alone does not mean satisfaction. Preserve previous observations and judgments as history;
-an old handoff observation is not automatically current truth. An observation keeps its immutable
-observed candidate (for example C1); Controller may assess it against a different current candidate
-(C2), explicitly recording that candidate and reasoning for its present applicability.
+an old handoff observation is not automatically current truth. The immutable `candidate`
+on a handoff/observation is a logical workstream label (for example C1), not an observed
+repository snapshot. Repair can change files within that label. Source refs identify what
+was observed; optional `observed_state` records a producer-selected local state label.
+Omission means actual state identity is UNKNOWN. Do not infer identical actual states
+from matching candidate labels. Controller may judge a different current candidate C2.
+For a later judgment, explicitly address still-applicable prior repair/unknown basis in
+reasoning and `judgment_refs`, or cite its complete observation basis. A new satisfied
+judgment citing only fresh positive observations leaves that earlier basis visible.
+Prior judgment refs avoid reciting the full history; Core records these mechanical links.
 
 Core stores opaque requirements, handoff links, observations and model-authored judgments.
 It does not classify semantic importance, infer acceptance, route work, require approval,
@@ -272,22 +289,77 @@ Controller commands use `--role controller --base-revision N --input FILE`.
 A selected child records `task-observe --role ROLE --observation-json '<JSON>'`; the existing
 Hook binding supplies its exact Task ID, `--handoff-id ID --agent-id-hash HASH` without an
 extra Agent call or payload file write. `--input FILE` remains available for existing files.
+Read or validate selected local sources in a separate read-only tool call, then issue one
+direct installed-runner invocation for the observation. A terminal newline is supported;
+do not wrap the invocation in variables, scripts or compound shell statements.
 The minimal body is `{"id":"O1","text":"local fact","source_refs":["S1"]}`; include
 `sources: [{"id":"S1","kind":"local","locator":"tests/result.txt","summary":"exact output"}]`
 when the source is not already registered. Source refs must be nonempty and resolve to sources.
-The adapter fills candidate, handoff and nonempty requirement refs from the selected association;
-conflicting explicit fields are rejected. For new work, register related requirement refs before
-the Controller spawn and include their selected association in an own-line handoff marker:
+Pass ordinary JSON in a shell literal. The trusted PreToolUse Hook transports a literal
+JSON object inside the same `--observation-json` argument using UTF-8/base64 before
+PowerShell/`.cmd` argv dispatch, then adds the normal exact identity fields. The CLI decodes
+it within `task-observe`; payload words such as `apply_patch` are data. Executable syntax
+outside that literal still passes the existing command, readonly and control-state guards.
+PowerShell example: `& '<pinned runner>.cmd' --root '<repo>' task-observe --role investigator
+--observation-json '{"id":"O1","text":"Native''s local fact","source_refs":["S1"]}'`.
+POSIX example: `thaliris --root '<repo>' task-observe --role investigator
+--observation-json '{"id":"O1","text":"local fact","source_refs":["S1"]}'`.
+Double an apostrophe inside a PowerShell single-quoted literal; POSIX uses its normal shell
+quoting. JSON `\u0027` works in both. PowerShell inline commands conservatively refuse raw
+smart quotes U+2018–U+201F; use JSON Unicode escapes such as `\u2019`.
+POSIX literals retain these Unicode characters. Do not manually add backslashes before JSON
+structural quotes on this hooked path. Existing direct JSON, native-escaped argv and `--input FILE`
+remain supported; this transport requires the Host to apply `updatedInput`.
+The adapter fills candidate, handoff and requirement refs from the selected association;
+conflicting explicit fields are rejected. For new work, before the owning Controller's
+top-level managed spawn use the existing `task-evidence-register` revision CAS to select
+the next dispatch. It may register requirement refs in the same operation:
+`{"requirements":[{"id":"R1","workchain_ref":"opaque-ref"}],"next_dispatch":{"role":"investigator","expected_agent_type":"thaliris-investigator","candidate":"C1","requirement_refs":["R1"]}}`.
+Use the installed pinned runner with explicit `--root REPO --task-id ID
+task-evidence-register --role controller --base-revision N --input FILE`.
+Hook supplies the existing Controller session association mechanically; persistent task
+authority remains required. The optional
+`next_dispatch` selects exact semantic role and native profile, logical candidate,
+opaque requirement refs and optional Curator `durable_paths`; it does not select model
+or effort. Normal defaults and explicit permitted overrides still apply. The current
+task authority protects this single selection. During the existing reservation, the
+exact owning Controller's matching top-level spawn consumes it once and registers the
+new exact handoff before Native execution. A wrong role/profile/owner refuses without
+consuming it; children cannot create, change or consume a top-level selection. Register
+each selection before its corresponding dispatch, after any preceding selection is
+consumed. No postspawn association, child retry or parent acknowledgement is needed.
+Optionally repeat the same association in an own-line readable handoff marker:
 `thaliris-evidence: {"candidate":"C1","requirement_refs":["R1"],"durable_paths":[".agent-memory/selected.md"]}`.
-Select `durable_paths` only for Curator. Nested Scanner inherits the parent's Core association;
-its marker cannot rewrite it. Legacy handoffs without a marker may still spawn, but cannot
-persist an unlinked observation. Such refusal means no durable observation was recorded.
+Readable conflicting markers refuse; opaque messages use the preselected association
+without decryption or semantic inference. Select `durable_paths` only for Curator.
+Nested Scanner retains exact parent lineage and
+logical candidate, but starts with empty requirement refs: provenance does not establish
+global relevance. Its marker cannot choose global refs. Its observations remain visible as
+unassigned evidence until Controller cites them in a selected requirement judgment.
+Without a preselection the existing readable-marker path remains supported. Handoffs
+without either association may still spawn, but cannot persist an unlinked observation.
+Some Native Hosts expose an opaque spawn message to Hooks: a marker in
+the model's intended message then proves no automatic evidence association. Ordinary
+Controller result delivery reports exact bound handoffs missing that association.
+Use Controller `task-evidence-register` with the exact native-bound handoff ID, original
+parent handoff ID, logical candidate, `producer: handoff:ID` and selected requirement refs
+for legacy or already dispatched work. This recovery cannot prevent a child's first
+observation from racing association; use preselection for new work. A nested Scanner's
+parent is already associated when its preselected reservation returns; nested relevance
+still starts unassigned. Do not decrypt Host payloads or infer selected refs from role,
+lineage or the intended marker. This is a fallback within the existing selected work,
+not a new approval stage. Such refusal means no durable observation was recorded.
 Return the observation and source pointers to Controller for exact association when selected
 provenance is unavailable; preserve the fact in FINAL for Controller historical import.
 Use `task-status --evidence-offset N` for bounded evidence pages and `task-get` for exact records.
-Controller state-operation results retain this bounded evidence packet alongside success,
-revision conflicts and mechanical closure. Its presence keeps requirement judgments visible;
-it is not an automatic failure, approval or semantic closure gate.
+Ordinary Controller PostToolUse result delivery reintroduces the bounded evidence packet
+before the next requirement-satisfied or broad completion decision, including test PASS,
+child Completed and Reviewer READY results. Review the relevant pending observations and
+prior unresolved judgment basis before that decision; retrieve exact records/pages only
+as needed. This is existing event delivery, not polling, an extra stage or a closing handoff.
+State-operation results also retain the packet alongside success, conflicts and mechanical
+closure; task-close output alone arrives too late to inform an earlier completion decision.
+Core does not decide semantic relevance, failure, approval or product completion.
 For selected historical child results, Controller uses `task-observe --role controller
 --handoff-id ID --observation-json '<JSON>'`. The adapter preserves the original native producer
 and marks Controller as submitter; importing history neither reactivates a child nor establishes
@@ -306,11 +378,19 @@ Decisions, invariants and acceptance bind; recommendations are non-binding. Meth
 belong to the executor. Reuse established inventory and reopen only decision-critical
 originals; a new Scanner covers a genuinely uncovered evidence gap.
 
-A focused direct read or spot-check may resolve one decision-critical fact. Broad or
-continuing searches, repeated diff review, ordinary test runs and routine local repair
-belong with an Investigator or executor. After a complete handoff, finish only
-independent work that can change the next decision; do not use monitoring or patrol of
-that delegated Workstream to delay waiting for its needed result.
+A direct Controller read is a precise source spot-check for a pending immediate
+decision. It does not replace delegated investigation. After complete dispatch, reading,
+searching, testing, diff review, runtime probing and implementation analysis within that
+delegated Workstream are the child's work, even when useful to global acceptance.
+They are not independent global decision work. Finish genuinely independent global
+decision work first; when none remains and the necessary child is unfinished, wait
+normally for its decision-changing native event. Do not invent busywork to delay waiting.
+After the result, integrate its distilled conclusions with retained global facts and
+acceptance; reopen a precise original only when a pending immediate decision needs it.
+For example, two independent source-region questions go to fresh investigators with
+selected source pointers. Once dispatched, retain the global acceptance question and
+wait for the needed results; do not repeat their searches or tests. A specific disputed
+source fact in a returned conclusion can justify a targeted post-result spot-check.
 
 Use a stable narrative base language and preserve precision-bearing original terms,
 quotations, distinctions and user formulations when translation would materially
@@ -415,11 +495,11 @@ allowed path and links but does not generate or choose semantic entries. Near ta
 closure, select Curator only when reusable knowledge has future value; supply exact
 prior memory, navigation and evidence. Keep INDEX semantic and concise. `CHANGED` is an
 observation, not semantic invalidation; Controller decides revalidation.
-Default delegated routing recommends a short-lived Investigator/Scanner for open
-discovery, broad searches and large diagnostics, and an executor for substantial
-implementation. Ordinary Controller reads, Git and diagnostics are legal within the
-task boundary. Choose direct work or delegation by its purpose and working set;
-file, line, token and query counts do not grant or deny permission. Prefer catalog,
+Ordinary Controller reads, Git and diagnostics are legal within the task boundary.
+Legal capability is separate from delegated cognitive responsibility: it does not
+transfer the child's working set back to Controller. In delegated mode use the ownership
+and handoff rules above; controller-direct and single-agent permit direct execution.
+No file, line, token, query or tool-count quota grants or denies permission. Prefer catalog,
 document-get, task-get, artifact-get and exact instruction sections when useful.
 Hooks cannot prove cumulative semantic scope or every third-party MCP tool's behavior.
 
@@ -450,8 +530,11 @@ chooses repair, extra verification or mechanical closure.
 Use only trusted direct runtime commands and native coordination allowed by the
 current execution mode. Native failure reconciliation needs exact trusted evidence;
 timeouts, not_found and prose are not death proof. Explicit dependency disposition
-may end management without proving termination. After FINAL, use its result; a decision-changing unknown returns the decision to
-Controller and does not trigger another wait or repeated recovery of the old task.
+may end management without proving termination. After FINAL, immediately use its
+delivered result for semantic judgment and routing, including when mechanical terminal
+status is UNKNOWN. A decision-changing unknown returns the decision to Controller
+and does not trigger another wait or repeated recovery of the old task. Mechanical
+terminal status is not a result-delivery gate.
 
 First continue independent work that should take priority before waiting. After dispatch, finish genuinely independent work that can change the next decision; monitoring, rereading, repeated searching or patrolling the same delegated Workstream is not independent work. When none remains and a necessary direct child is unfinished, wait for a decision-changing native event instead of continuing that patrol. Only call wait_agent for an unfinished direct child whose result is necessary, with no other higher-priority work. This policy applies at every authorized delegation layer, including Implementer or Reviewer waiting for an Investigator Scanner; observe only your direct dependencies. First confirm the current Host's meaningful-event early return, user interruption, child notifications and actual tool maximum; unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early return and user interruption and no interim decision, default to the supported 60-minute window (timeout_ms=3600000); completion can wake the parent early. Windows are not execution deadlines. If stage checks are necessary or early return is unreliable, recommend 60 seconds for very short tasks, 10–60 minutes for ordinary tasks, and about 30 minutes for longer-task stage checks. Actual tool limits, explicit applicable higher-level limits and exceptions take precedence; neither fixed 60 seconds nor fixed 60 minutes fits every task. Historical averages must not force early wakes. Wait for decision-changing native events across parallel direct dependencies, without per-child polling loops. Distinguish native completion, ordinary messages, timeout, exceptions and UNKNOWN: messages and timeouts do not prove completion; exceptions do not fabricate terminal evidence. A wake-only result needs one available exact native status check; use valid completion once without repeated confirmation. After timeout, reassess the necessary direct dependency and available independent work before any further wait; do not repeat useless waits indefinitely. Do not substitute sleep, high-frequency queries, heartbeat services or status-only model wakeups. Do not poll a finished child or create repeated status-only reasoning turns solely to observe unchanged state when native waiting is available. Tests, builds, CI and external processes belong to their direct executor: use the corresponding tool's actual waiting capability, not wait_agent parameters.
 
@@ -472,8 +555,22 @@ spawned agent ID. V2 `list_agents` status entries use canonical task names. An e
 native Completed observation proves execution closure without a second confirmation.
 An exact V1 `close_agent` snapshot or V2 `interrupt_agent` previous Completed status
 also supplies a native execution fact; a running previous status proves no completion.
-These observations prove turn closure, not permanent identity destruction. A closed
-task grants no managed writes when the native identity is later reused.
+These legacy observations retain the existing initial-execution compatibility
+contract; they do not establish permanent identity destruction or a formal turn-keyed
+channel. A closed task grants no managed writes when the native identity is later reused.
+The installed Hook adapter has no established supported subscription to Desktop's
+`turn/started` or `turn/completed` notifications; report that ingress capability as
+UNKNOWN. Its short-lived maintenance app-server client owns its process/stdout,
+which does not establish access to Desktop's sessions. Do not add a monitor, read
+arbitrary session logs, infer completion from Stop/FINAL/prose, or accept injected
+turn events as a substitute for a trusted runtime ingress.
+Legacy list/wait/control statuses identify a child thread without a native turn ID.
+Preserve that compatibility provenance without assigning them an invented turn.
+After a later running/start observation, retain historical terminal evidence and
+current activity in the existing lifecycle record: unscoped completion cannot close
+a newer known or ambiguous execution. A status conflict may reflect unresolved turn
+association; it does not establish permanent thread death. Another native turn does
+not reactivate its previous handoff's managed grants.
 The one-key `{"completed": <string or null>}` variant proves execution completion;
 null supplies no result text and cannot establish semantic acceptance. A V2 wake-only
 wait, Stop, nickname, missing target or unsupported payload remains UNKNOWN.

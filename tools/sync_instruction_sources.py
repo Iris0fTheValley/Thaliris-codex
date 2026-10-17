@@ -27,7 +27,7 @@ def main() -> int:
     drift = []
     for name, expected in outputs.items():
         path = root / name
-        current = path.read_text(encoding="utf-8")
+        current = path.read_bytes().decode("utf-8") if name == "AGENTS.md" else path.read_text(encoding="utf-8")
         if name == "AGENTS.md":
             # Preserve any user text outside the existing valid managed span.
             span = codex_adapter._managed_span(current, "AGENTS.md")
@@ -37,7 +37,7 @@ def main() -> int:
         if current != expected:
             drift.append(name)
             if not args.check:
-                path.write_text(expected, encoding="utf-8", newline="\n")
+                path.write_bytes(expected.encode("utf-8"))
     tracked = set(subprocess.check_output(["git", "-C", str(root), "ls-files", "--", ".codex/agents"], text=True).splitlines())
     for name, (model, effort, role) in roles.agent_profiles().items():
         relative = f".codex/agents/{name}"
@@ -61,7 +61,7 @@ def main() -> int:
                 path.write_bytes(expected)
     if args.core_root is not None:
         path = args.core_root / "AGENTS.md"
-        current = path.read_text(encoding="utf-8")
+        current = path.read_bytes().decode("utf-8")
         span = codex_adapter._managed_span(current, "Core AGENTS.md")
         if span is None:
             raise ValueError("Core managed span missing")
@@ -69,7 +69,7 @@ def main() -> int:
         if current != expected:
             drift.append("Core AGENTS.md")
             if not args.check:
-                path.write_text(expected, encoding="utf-8", newline="\n")
+                path.write_bytes(expected.encode("utf-8"))
     print("instruction artifacts: " + (", ".join(drift) if drift else "current"))
     return int(args.check and bool(drift))
 
