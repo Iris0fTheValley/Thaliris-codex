@@ -342,15 +342,17 @@ def test_untrusted_executable_stops_before_probe(monkeypatch, tmp_path: Path):
     assert result["session_restart_required"] is False
 
 
-def test_cli_non_git_root_returns_structured_bootstrap_failure(tmp_path: Path, capsys):
-    exit_code = cli.main(["--root", str(tmp_path), "codex-bootstrap"])
+def test_cli_non_directory_root_returns_structured_bootstrap_failure(tmp_path: Path, capsys):
+    root = tmp_path / "file.txt"
+    root.write_text("user bytes", encoding="utf-8")
+    exit_code = cli.main(["--root", str(root), "codex-bootstrap"])
 
     captured = capsys.readouterr()
-    assert exit_code == 3
+    assert exit_code == 2
     assert captured.err == ""
     assert captured.out.count("\n") == 1
     assert json.loads(captured.out) == {
-        "error": "not a Git workspace",
+        "error": "--root must be an existing directory",
         "ok": False,
         "status": "BOOTSTRAP_UNAVAILABLE",
         "session_restart_required": False,
@@ -702,8 +704,10 @@ def test_global_startup_entry_covers_new_projects_without_git_metadata():
     assert "read-only/chat/non-git work needs no startup" not in normalized
     assert "including readme-only changes, configuration changes and new project creation" in normalized
     assert "without git metadata" in normalized
-    assert "initialize git at the intended project root before bootstrap" in normalized
-    assert "do not initialize unrelated directories or create git metadata for read-only work" in normalized
+    assert "supports bootstrap and managed task admission" in normalized
+    assert "bootstrap never runs git init" in normalized
+    assert "initialize git at the intended project root before bootstrap" not in normalized
+    assert "only when repository creation is within the user's requested scope" in normalized
     assert "they do not initiate project bootstrap or task admission" in normalized
     assert "do not bootstrap, task-start or task-abandon" in normalized
     # The pinned runner, Controller instruction retrieval and authority
@@ -714,9 +718,7 @@ def test_global_startup_entry_covers_new_projects_without_git_metadata():
     assert "preserve unknown user-owned bytes" in normalized
 
 
-def test_new_non_git_project_reaches_existing_bootstrap_after_intended_root_init(tmp_path: Path, monkeypatch):
-    import subprocess
-
+def test_explicit_non_git_project_bootstraps_without_git_init(tmp_path: Path, monkeypatch):
     from thaliris_codex import host_transition
 
     project = tmp_path / "new-project"
@@ -726,13 +728,6 @@ def test_new_non_git_project_reaches_existing_bootstrap_after_intended_root_init
     (unrelated / "user-notes.txt").write_text("keep\n", encoding="utf-8")
     monkeypatch.setattr(host_transition, "pending", lambda *_args: False)
 
-    # codex-bootstrap still requires Git metadata: the entry behavior is the
-    # owning Controller creating the repository at the intended project root,
-    # never the CLI initializing an arbitrary directory.
-    with pytest.raises(RuntimeError, match="not a Git workspace"):
-        bootstrap.bootstrap(project)
-
-    subprocess.run(["git", "init", "-q", str(project)], check=True)
     calls = []
 
     def invoke(executable, root, command):
@@ -747,7 +742,7 @@ def test_new_non_git_project_reaches_existing_bootstrap_after_intended_root_init
 
     assert result["status"] == "READY" and result["init_invoked"] is True
     assert calls == [(project.resolve(), "bootstrap-check"), (project.resolve(), "init")]
-    assert (project / ".git").is_dir()
+    assert not (project / ".git").exists()
     assert not (unrelated / ".git").exists()
     assert [item.name for item in unrelated.iterdir()] == ["user-notes.txt"]
 

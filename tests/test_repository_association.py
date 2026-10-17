@@ -12,11 +12,15 @@ from tests.test_evidence_continuity_adapter import (
 )
 
 
+@pytest.mark.parametrize("evidence_task", ["git", "nongit"], indirect=True)
 def test_parent_workspace_routes_spawn_start_wait_and_readonly_to_exact_task(evidence_task):
     root, task_id = evidence_task
     _register_requirement(root)
     sibling = root.parent / (root.name + "-second-managed-repo")
-    subprocess.run(["git", "init", "-q", str(sibling)], check=True)
+    if (root / ".git").exists():
+        subprocess.run(["git", "init", "-q", str(sibling)], check=True)
+    else:
+        sibling.mkdir()
     codex_adapter.init(sibling)
     sibling_before = (sibling / ".codex/thaliris.json").read_bytes()
     request = _event(cwd=str(root.parent), tool_name="spawn_agent", tool_input={
@@ -43,12 +47,17 @@ def test_parent_workspace_routes_spawn_start_wait_and_readonly_to_exact_task(evi
     assert lifecycle._native_execution_terminal(saved)
     assert (sibling / ".codex/thaliris.json").read_bytes() == sibling_before
     assert not (root.parent / ".codex/thaliris.json").exists()
+    assert not (root.parent / ".git").exists()
 
 
+@pytest.mark.parametrize("evidence_task", ["git", "nongit"], indirect=True)
 def test_ambiguous_session_refuses_parent_but_exact_repository_and_child_remain_selected(evidence_task):
     root, task_id = evidence_task
     other = root.parent / (root.name + "-other")
-    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    if (root / ".git").exists():
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+    else:
+        other.mkdir()
     codex_adapter.init(other)
     other_task = core.task_start(other, "independent", None, None)["task_id"]
     lifecycle._write_session_association(other, other_task, lifecycle._identity_hash("evidence-controller-session"))
@@ -60,6 +69,7 @@ def test_ambiguous_session_refuses_parent_but_exact_repository_and_child_remain_
     assert repository_association.resolve({**event, "agent_id": "exact-child"}, root.parent) == root
 
 
+@pytest.mark.parametrize("evidence_task", ["git", "nongit"], indirect=True)
 def test_stale_navigation_never_adopts_another_repository(evidence_task):
     root, _ = evidence_task
     path = lifecycle._association_path(root, lifecycle._identity_hash("evidence-controller-session"))

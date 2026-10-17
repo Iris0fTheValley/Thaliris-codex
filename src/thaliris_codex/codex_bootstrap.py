@@ -1,4 +1,4 @@
-"""One-shot project-external bootstrap for a Codex Git workspace.
+"""One-shot project-external bootstrap for a Codex managed project.
 
 This module shares protocol constants with the lifecycle adapter.  It is
 installed with the canonical ``thaliris`` command, so it remains available
@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 
 from thaliris import core
@@ -37,15 +39,74 @@ def ordered_response(payload: dict[str, object]) -> dict[str, object]:
 
 
 def _repo_root(path: Path) -> Path:
-    result = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode or not result.stdout.strip():
-        raise RuntimeError("not a Git workspace")
-    return Path(result.stdout.strip()).resolve()
+    """Select the Git worktree root or keep a proven non-Git directory.
+
+    This boundary does not discover descendants or create a repository. Core
+    validates the selected managed root before project state is written.
+    """
+    path = path.resolve(strict=True)
+    if not path.is_dir():
+        raise ValueError("--root must be an existing directory")
+
+    def entry_kind(target: Path, *, directory: bool) -> bool:
+        try:
+            mode = target.stat().st_mode
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            raise ValueError("Git metadata status is UNKNOWN; refusing to select a managed root") from exc
+        return stat.S_ISDIR(mode) if directory else stat.S_ISREG(mode)
+
+    def git_metadata_present() -> bool:
+        if (
+            entry_kind(path / "HEAD", directory=False)
+            and entry_kind(path / "config", directory=False)
+            and entry_kind(path / "objects", directory=True)
+        ):
+            return True
+        current = path
+        while True:
+            marker = current / ".git"
+            try:
+                marker.lstat()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise ValueError("Git metadata status is UNKNOWN; refusing to select a managed root") from exc
+            else:
+                return True
+            if current == current.parent:
+                return False
+            current = current.parent
+
+    def discovery_environment_present() -> bool:
+        return any(os.environ.get(name) for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"))
+
+    metadata = git_metadata_present()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip()).resolve()
+        if (
+            result.returncode != 0
+            and not metadata
+            and not discovery_environment_present()
+            and "not a git repository" in (result.stderr or "").casefold()
+        ):
+            return path
+    except FileNotFoundError as exc:
+        missing_program = exc.filename is None or Path(exc.filename).name.casefold() in {"git", "git.exe"}
+        if missing_program and path.is_dir() and not metadata and not discovery_environment_present():
+            return path
+        raise ValueError("Git root discovery is UNKNOWN; refusing to select a managed root") from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("Git root discovery is UNKNOWN; refusing to select a managed root") from exc
+    raise ValueError("Git root discovery is UNKNOWN; refusing to select a managed root")
 
 
 def _trusted_executable() -> list[str] | None:

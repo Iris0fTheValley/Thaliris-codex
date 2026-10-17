@@ -142,7 +142,8 @@ An adapter can use the same Python Core from a transport process:
 from pathlib import Path
 from thaliris import authority, core
 
-# root is an existing Git workspace. These calls require adapter authorization.
+# root is an explicit existing managed project directory; Git is optional.
+# These calls require adapter authorization.
 core.init(root)
 store = authority.AuthorityStore(
     root, Path.home() / ".thaliris" / "task-authority",

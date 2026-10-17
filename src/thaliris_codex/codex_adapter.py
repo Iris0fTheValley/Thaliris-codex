@@ -1588,10 +1588,11 @@ only for a missing-context index or exceptional recovery/Host maintenance;
 `controller-instructions --section <name>` retrieves the exact procedure.
 Chatting and read-only work need no project bootstrap.
 
-For a new project directory without Git metadata, when creating a repository is
-within the user's requested project scope, initialize Git at the intended project
-root before bootstrap. Do not initialize unrelated directories or create Git
-metadata for read-only work.
+An explicit existing project directory without Git metadata supports bootstrap and
+managed task admission. Bootstrap never runs git init. Create Git metadata only
+when repository creation is within the user's requested scope, independently of
+bootstrap. Native cwd, managed project root and Git worktree root are distinct;
+missing Git capabilities do not revoke task authority or lifecycle.
 
 Managed children follow their selected handoff and role instructions; they do not
 initiate project bootstrap or task admission, and they do not bootstrap, task-start

@@ -17,6 +17,13 @@ same-context bootstrap for another workspace may pass
 is caller-provided, is not inferred from emitted stdout, and is not persisted. New
 sessions and fresh children do not reuse it. A changed digest or omitted acknowledgement
 returns the full current guidance.
+Bootstrap accepts an explicit existing project directory without Git metadata and
+never runs `git init`. Existing Git worktree root selection remains compatible.
+Git HEAD/surface observations are locally unavailable without Git; Git evidence
+freshness is UNKNOWN. Managed admission, persistent task intent and exact actor
+navigation retain their existing authority checks. A parent native cwd does not
+select a nested managed project by scanning descendants: exact actor associations
+select it, and ambiguous or stale associations fail closed.
 The [repository Controller document](../../docs/thaliris-controller.md) is rendered
 from that source, including registry bindings. Retrieval grants no authority; other
 roles may retrieve rules on demand within their existing authority.

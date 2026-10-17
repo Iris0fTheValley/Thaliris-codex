@@ -38,7 +38,8 @@ def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False):
     return str(path) + "#sha256=" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, monkeypatch):
+@pytest.mark.parametrize("project_kind", ["git", "nongit"])
+def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, monkeypatch, project_kind):
     import thaliris
     import thaliris_codex
     core = source_wheel(tmp_path, "thaliris", Path(thaliris.__file__).parent)
@@ -95,7 +96,10 @@ def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, mo
     installed = codex_adapter.codex_install(maintenance_contract=contract)
     assert installed["ok"], installed
     project = tmp_path / "project"
-    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    if project_kind == "git":
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+    else:
+        project.mkdir()
     (project / "docs").mkdir()
     (project / "docs/thaliris-role-packs.md").write_bytes(b"user-owned role description")
     # Bootstrap executes the installed console launcher and installed Core,
@@ -104,6 +108,38 @@ def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, mo
     assert ready["status"] == "READY", ready
     assert ready["controller_actor_assurance"] == "UNKNOWN"
     assert (project / "docs/thaliris-role-packs.md").read_bytes() == b"user-owned role description"
+    # Exercise installed CLI/Core admission and continuation in fresh processes.
+    # Only the external authority storage path is isolated; no production
+    # authority store, Host configuration or native process is changed.
+    authority_directory = tmp_path / "isolated-authority"
+    worker = '''
+from pathlib import Path
+import sys
+from thaliris_codex import cli, task_authority
+assert Path(cli.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+task_authority.directory = lambda: Path(sys.argv[1])
+raise SystemExit(cli.main(sys.argv[2:]))
+'''
+    intent = tmp_path / "project-intent.json"
+    intent.write_text(json.dumps({"human_instruction": "Verify disposable project admission",
+        "boundary": "Disposable project only", "invariants": "Preserve user-owned bytes",
+        "acceptance": "Bootstrap, admission and continuation work"}), encoding="utf-8")
+    interpreter = executable.parent / ("python.exe" if os.name == "nt" else "python")
+    command = [str(interpreter), "-I", "-B", "-c", worker, str(authority_directory),
+               "--root", str(project), "--session-id", "isolated-smoke-session"]
+    admitted = subprocess.run([*command, "task-start", "Disposable project admission",
+        "--authority-contract", str(intent)], cwd=tmp_path,
+        env=runtime_identity.child_environment(), capture_output=True, text=True, timeout=30)
+    assert admitted.returncode == 0, admitted.stderr or admitted.stdout
+    task = json.loads(admitted.stdout)
+    assert task["status"] == "ACTIVE" and task["task_authority"]["execution_mode"] == "delegated"
+    continued = subprocess.run([*command, "--task-id", task["task_id"], "codex-bootstrap"],
+        cwd=tmp_path, env=runtime_identity.child_environment(), capture_output=True, text=True, timeout=30)
+    assert continued.returncode == 0, continued.stderr or continued.stdout
+    assert json.loads(continued.stdout)["status"] == "CURRENT_CONTINUATION"
+    assert (project / ".git").exists() == (project_kind == "git")
+    assert not (tmp_path / ".git").exists()
+    assert not (tmp_path / ".context").exists()
     assert runtime_identity.manifest_bytes(executable) == before
     with pytest.raises(ValueError, match="already exists"):
         runtime_setup.create(target, core, adapter)

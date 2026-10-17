@@ -212,7 +212,7 @@ CI 将该变量指向 shared-core checkout。
 
 Host 安装后，除非用户明确选择不使用 Thaliris，实质性项目文件修改均由 owning Controller 使用已安装 pinned runner 对目标仓库运行一次 `codex-bootstrap`，包括 README-only、配置修改和新项目创建。聊天与只读工作不需要项目 Bootstrap。
 
-新建目录没有 Git 元数据时，只有在创建仓库属于用户任务范围的情况下，才先在目标项目根目录初始化 Git；不得为无关目录或只读工作创建 Git 元数据。`codex-bootstrap` 本身仍要求 Git 元数据，不会自行初始化任意目录。这是单独的一次调用：
+显式指定的现有项目目录无需 Git 元数据即可 bootstrap 并准入受管任务；`codex-bootstrap` 不运行 `git init`。仅当创建仓库属于用户任务范围时才独立创建 Git 元数据。native cwd、managed project root 和 Git worktree root 是不同概念；既有 Git 根选择保持兼容。无 Git 时，HEAD 和 Git surface 观察局部不可用，Git evidence freshness 保持 `UNKNOWN`，任务 authority 与 lifecycle 仍可使用。这是单独的一次调用：
 
 ```powershell
 & '<installed pinned runner>' --root '<repo>' codex-bootstrap

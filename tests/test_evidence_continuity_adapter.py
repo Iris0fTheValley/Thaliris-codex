@@ -16,8 +16,9 @@ from thaliris_codex import cli, codex_adapter, lifecycle, roles, task_authority
 
 
 @pytest.fixture
-def evidence_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+def evidence_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request) -> tuple[Path, str]:
+    if getattr(request, "param", "git") == "git":
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     home = tmp_path / "isolated-codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
     agents = home / "agents"

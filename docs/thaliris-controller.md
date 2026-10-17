@@ -32,11 +32,13 @@ configuration changes and new project creation, unless the human opts out, the o
 Controller runs `<installed pinned runner> --root <repo> codex-bootstrap` directly once. Its response
 contains full resident guidance unless the Controller supplies the exact digest of a
 complete copy already present in the same context. Chatting and read-only work needs
-no project bootstrap. When a new project directory has no Git
-metadata, initialize Git at the intended project root before bootstrap if creating a
-repository is within the user's requested project scope; do not initialize unrelated
-directories or create Git metadata for read-only work. Bootstrap itself still requires
-Git metadata and never initializes arbitrary directories.
+no project bootstrap. Explicit existing project directories without Git metadata
+support bootstrap and managed task admission; bootstrap never runs git init.
+The managed project root, native cwd and Git worktree root are distinct. Existing
+Git worktree selection is preserved. Without Git, Git HEAD and surface observations
+are unavailable, and Git evidence freshness is UNKNOWN; task authority and lifecycle
+remain available. Create Git metadata only when repository creation is within the
+user's requested scope, independently of bootstrap.
 Managed children follow their handoff; do not bootstrap, task-start or task-abandon
 the owning Controller's ACTIVE task. Use this installed pinned runner for later operations;
 do not select alternate startup commands, shell-computed hashes or unknown runtime code.

@@ -221,7 +221,7 @@ The installer creates the dedicated runtime without ensurepip and installs both 
 
 After Host installation, unless the user opts out of Thaliris, the owning Controller runs `codex-bootstrap` once for substantive project file changes, including README-only work, configuration changes and new project creation, using the installed pinned runner and target repository. Chatting and read-only work need no project Bootstrap.
 
-If a new directory lacks Git metadata, initialize Git at the intended project root first only when creating a repository is within the user's task scope. Do not initialize unrelated directories or create Git metadata for read-only work. `codex-bootstrap` itself still requires Git metadata and never initializes arbitrary directories. Make this a separate invocation:
+An explicitly selected existing project directory supports bootstrap and managed task admission without Git metadata; `codex-bootstrap` never runs `git init`. Create Git metadata independently only when repository creation is within the user's scope. Native cwd, managed project root and Git worktree root are distinct; existing Git root selection remains compatible. Without Git, HEAD and Git surface observations are locally unavailable and Git evidence freshness stays `UNKNOWN`, while task authority and lifecycle remain available. Make this a separate invocation:
 
 ```powershell
 & '<installed pinned runner>' --root '<repo>' codex-bootstrap
