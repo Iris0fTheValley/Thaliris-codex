@@ -1,5 +1,16 @@
 # Codex Adapter: Runtime Layers and Mechanical Boundaries
 
+Instruction distribution follows ownership: child profiles carry selected local
+responsibilities, semantic endpoints, evidence and facts needed for their tool actions.
+Controller resident guidance owns the full task, model/role/context selection,
+successor routing and product acceptance. Adapter/lifecycle binds identity,
+provenance, task, role, handoff and workchain; children do not reconstruct these
+associations or the global requirement graph. Detailed Host waiting and compatibility
+protocols remain in this reference and Controller guidance; delegating roles retain
+event-driven direct-dependency behavior. A usable child FINAL informs semantic
+judgment without another lifecycle wait; native completion and Core closure remain
+separate mechanical facts.
+
 `thaliris_codex.roles` owns native role prompts and binding facts. Inherited global
 and project managed spans contain shared boundaries. Normal Controller procedures
 are delivered into Controller context by the already-required bootstrap response,

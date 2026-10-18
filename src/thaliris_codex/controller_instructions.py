@@ -7,6 +7,37 @@ import shlex
 
 from . import roles
 
+
+_WAITING_INSTRUCTIONS = (
+    "First continue independent work that should take priority before waiting. After dispatch, finish "
+    "genuinely independent work that can change the next decision; monitoring, rereading, repeated "
+    "searching or patrolling the same delegated Workstream is not independent work. When none remains "
+    "and a necessary direct child is unfinished, wait for a decision-changing native event instead of "
+    "continuing that patrol. Only call wait_agent for an unfinished direct child whose result is "
+    "necessary, with no other higher-priority work. "
+    "This policy applies at every authorized delegation layer, including Implementer or Reviewer "
+    "waiting for an Investigator Scanner; observe only your direct dependencies. First confirm the "
+    "current Host's meaningful-event early return, user interruption, child notifications and actual tool maximum; "
+    "unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early return and "
+    "user interruption and no interim decision, default to the supported 60-minute window "
+    "(timeout_ms=3600000); completion can wake the parent early. Windows are not execution "
+    "deadlines. If stage checks are necessary or early return is unreliable, recommend 60 seconds "
+    "for very short tasks, 10–60 minutes for ordinary tasks, and about 30 minutes for longer-task "
+    "stage checks. Actual tool limits, explicit applicable higher-level limits and exceptions take "
+    "precedence; neither fixed 60 seconds nor fixed 60 minutes fits every task. Historical averages "
+    "must not force early wakes. Wait for decision-changing native events across parallel direct "
+    "dependencies, without per-child polling loops. Distinguish native completion, ordinary messages, "
+    "timeout, exceptions and UNKNOWN: messages and timeouts do not prove completion; exceptions "
+    "do not fabricate terminal evidence. A wake-only result needs one available exact native status "
+    "check; use valid completion once without repeated confirmation. After timeout, reassess the "
+    "necessary direct dependency and available independent work before any further wait; do not "
+    "repeat useless waits indefinitely. Do not substitute sleep, high-frequency queries, heartbeat "
+    "services or status-only model wakeups. Do not poll a finished child or create repeated "
+    "status-only reasoning turns solely to observe unchanged state when native waiting is available. "
+    "Tests, builds, CI and external processes belong to their direct "
+    "executor: use the corresponding tool's actual waiting capability, not wait_agent parameters. "
+)
+
 SECTIONS = {
     "startup": "Startup and admission",
     "authority": "Persistent authority",
@@ -44,7 +75,7 @@ def render(runner: str = "<installed pinned runner>", *, section: str | None = N
         for role in roles.role_choices() if role != "controller"
     )
     rendered = source.replace("@RUNNER@", runner).replace("@ROLE_ROWS@", rows).replace(
-        "@WAITING_INSTRUCTIONS@", roles._WAITING_INSTRUCTIONS.strip()
+        "@WAITING_INSTRUCTIONS@", _WAITING_INSTRUCTIONS.strip()
     )
     if section is None:
         return rendered

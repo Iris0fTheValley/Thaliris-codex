@@ -166,6 +166,15 @@ hashes, attestations and lifecycle details out of that prose and report blocked 
 
 ## Routing, selected context, evidence and acceptance
 
+Instruction ownership follows decision ownership. Native child profiles contain
+selected local responsibilities, endpoint, evidence and tool-action facts; they
+do not carry the full role/model table, Host compatibility protocol, global
+acceptance ledger or successor selection. The adapter/lifecycle supplies identity,
+provenance, task/role/handoff/workchain associations and mechanical constraints.
+A child returns local facts, candidate, evidence, UNKNOWN, contradictions and
+remaining work. Controller chooses what follows; no child result mandates a
+successor, Reviewer, closing handoff or fixed pipeline.
+
 The Controller is the sole task-specific semantic router. Core records identities,
 revisions, hashes, provenance and observations; models decide meaning and completion.
 Native Completed proves execution closure, never child-result meaning or quality.

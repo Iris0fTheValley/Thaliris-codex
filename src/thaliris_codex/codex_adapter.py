@@ -615,6 +615,40 @@ for _profile_name, _profile_hash in _EVIDENCE_CONTINUITY_PREDECESSOR_LUNA_PROFIL
     )
 
 
+
+# Exact filename-bound output from immutable 936fac07f73d6405a3300aafcc6262d176aa6b61; source/renderer witnesses
+# and managed/role-pack bytes live in tests/fixtures/role-ownership-before.
+_ROLE_OWNERSHIP_PREDECESSOR_PROFILE_HASHES = {'default': {'thaliris-investigator.toml': 'b4cf613136660edf844a6615f2c89c734ffc4789b8a357ef0ae1fae88783980a',
+             'thaliris-curator.toml': 'a77e870d0d877433410344ba3d5da09f20031c3e1db0dbd46b60123f68f581aa',
+             'thaliris-reasoning-specialist.toml': '83e182e293543d3ac995930b8f424b2c056a56a5ee972d5e3fa0b8b7510fcff6',
+             'thaliris-implementer.toml': '805743b439eeebbeedbf939e371f503f608f5f7c6c896c576fab789d99e37fc9',
+             'thaliris-focused-implementer.toml': 'd3a686ec5de97f59aaf4b1d85630e5a8fee3650a6130467543692ab15bdd3d18',
+             'thaliris-verifier.toml': 'b3d2faa7415ce5962e235f6273b54d5ce1e3c37b3a2f000e38dd6cbaa4e45b84',
+             'thaliris-reviewer.toml': 'fbe884a5832edc2afbd780e2494ccb24659953a01f94a8b9f2d49e1f036eb26d',
+             'thaliris-reasoning-specialist-astra-medium.toml': '2e6475256878d78d11800a4bf16ae31a0712ce6b4b4f7632870a5d7c19c1a125',
+             'thaliris-reasoning-specialist-xhigh.toml': '54fbef255e9c68957913ae96b87182d2e53711efaa077b697ffd38d7db721e52',
+             'thaliris-focused-implementer-astra-medium.toml': 'd92fc7b58e37865e29fceb4ece1e7765b0ad452cd23899e7d30d2d6d07fdf366',
+             'thaliris-focused-implementer-xhigh.toml': '37117ee7eef732320d1b73702ab352fa9be63f23d43c03436b351692730f48f2'},
+ 'luna-only': {'thaliris-investigator.toml': '95624a3478ca150124871d2c48de93f9dfc0115aea8d420c5c0278a1911b1418',
+               'thaliris-curator.toml': '65809097f6f150a631d31b2d86858fac52151409811f2e5080afc7b8d167756a',
+               'thaliris-reasoning-specialist.toml': '285afa6b1c3f5745bc2a0317b84e8187dd9325f91734a3024962787d112f6044',
+               'thaliris-implementer.toml': '8f6509ab79bd62f6800605669936dfde13903b2cc8b44237ad029e3250f77c62',
+               'thaliris-focused-implementer.toml': '408f95bbc20d48efbe701d866779b0007a3595ca5c26a8176a783c3fc1719c2a',
+               'thaliris-verifier.toml': '80a5d0474517b1655c092e89d3b0472db1e6f34fc365ab619723fea6439b1ded',
+               'thaliris-reviewer.toml': 'ca2b4171ca1a80157801ca37db55be4b5ee595d84a7301ced94fb8cb04696590',
+               'thaliris-reasoning-specialist-astra-medium.toml': '2e6475256878d78d11800a4bf16ae31a0712ce6b4b4f7632870a5d7c19c1a125',
+               'thaliris-reasoning-specialist-xhigh.toml': '54fbef255e9c68957913ae96b87182d2e53711efaa077b697ffd38d7db721e52',
+               'thaliris-focused-implementer-astra-medium.toml': 'd92fc7b58e37865e29fceb4ece1e7765b0ad452cd23899e7d30d2d6d07fdf366',
+               'thaliris-focused-implementer-xhigh.toml': '37117ee7eef732320d1b73702ab352fa9be63f23d43c03436b351692730f48f2'}}
+for _profile_set in _ROLE_OWNERSHIP_PREDECESSOR_PROFILE_HASHES.values():
+    for _profile_name, _profile_hash in _profile_set.items():
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = (
+            _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash})
+        )
+_KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES |= frozenset({'da899c4afb9df4e24e1772606aa3d965e51607c8c3748b89ebc99e245991d5a9'})
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'71affa6b8abc26009254d3b67b6de65f3c31d2d75a75cd96dca9c70ac3ceeeed'})
+
+
 def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
     # JSON string escaping is compatible with TOML basic strings; native
     # isolation instructions contain quotes that must not terminate the value.
@@ -1028,20 +1062,11 @@ Isolation and readonly boundaries hold in every mode; damaged management grants 
 additional authority. Effective live Host maintenance needs separate human authority.
 Changed disk files do not prove native activation. Preserve unknown user-owned bytes.
 
-Controller retains the full original goal, scope, acceptance,
-global facts, hard invariants, distilled findings, UNKNOWN, contradictions, current
-candidate judgments and routing reasons. Controller selects and judges evidence,
-integrates the original objective, acceptance criteria and available evidence, and
-decides product acceptance;
-the child owns its delegated investigation, implementation and verification working
-set. Legal tool capability does not transfer cognitive ownership. Normal Controller
-routing, precise immediate-decision spot-checks and native waiting follow its resident
-guidance; they have no numeric/tool-permission gate.
-
-No fixed closing handoff, extra lifecycle stage or new Agent is required. `PASS`
-describes checks run, `READY` describes the selected review, native child `Completed`
-describes execution termination, and Core `DONE` records mechanical closure; none
-alone decides product acceptance.
+Controller owns the full goal, global facts and invariants, acceptance and routing.
+The child owns its selected local assignment and investigation, implementation and
+verification working set. Legal tool capability does not transfer cognitive ownership.
+The adapter/lifecycle binds mechanical identity, provenance, task, role, handoff and
+workchain; children do not reconstruct global state or choose what follows their result.
 
 Assigned children use current-role native instructions and their authorized parent's
 selected spawn handoff without parent conversation history; unselected material stays
@@ -1050,16 +1075,11 @@ owning Controller. Methods and ordinary local repair belong to the assigned exec
 Return decision-changing unknowns to Controller. Rules are retrievable on demand
 within authority; contextual selection is not secrecy.
 
-The owning Controller uses guidance delivered by normal bootstrap for startup/admission,
-routing, handoff, waiting, endpoints and acceptance. [Controller instructions](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/thaliris-controller.md)
-are the canonical full reference. The installed pinned runner's `controller-instructions`
-lists retrieval paths; `controller-instructions --section <name>` retrieves an exact
-missing section or exceptional recovery/Host maintenance procedure on demand, and
-`controller-instructions --resident` restores the complete normal guidance after a
-truncated bootstrap response. Only acknowledge an exact bootstrap guidance digest after
-the complete tool result and its END marker are visible; pass it as
-`--controller-guidance-sha256 <digest>` only for another root in this same context.
-New sessions and fresh children do not reuse it.
+The owning Controller uses resident guidance delivered by normal bootstrap for
+startup/admission, routing, handoff, waiting, endpoints and product acceptance.
+[Controller instructions](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/docs/thaliris-controller.md)
+are the canonical full reference; the installed pinned runner's `controller-instructions`
+lists retrieval paths. Rules remain retrievable within existing authority.
 Role responsibilities are in native profiles and
 [role docs](docs/thaliris-role-packs.md); mechanical details are in
 [Codex protocol](https://github.com/Iris0fTheValley/Thaliris-codex/blob/main/adapter/codex/README.md).
@@ -1086,29 +1106,12 @@ selects roles; resident Controller instructions own normal orchestration, with e
 recovery/Host maintenance retrieved on demand. Full mechanical
 design belongs to [Codex protocol](../adapter/codex/README.md), not repeated prompts.
 
-{_native_profile_facts()}
-Ordinary profiles omit model and effort. PreToolUse routing supplies omitted
-model/effort values from the Controller's resident table for exact ordinary role
-profiles after applicable guards. During an ACTIVE task, existing managed
-freshness, owner, delegation and authority checks still precede routing and
-reservation. In NO_TASK or inactive state, routing updates native arguments only;
-it creates no reservation or lifecycle binding. Codex applies a configured role
-model after spawn arguments, so keeping these profiles model-free preserves
-explicit task choices. A read-only compatibility check verifies only the selected
-ordinary target in personal/project scopes, using TOML name and legacy config_file
-identity. Fixed model/effort fields must agree with selected/routed fields; model-free
-user edits are allowed. Conflicts or unverifiable target bindings prevent reservation
-and preserve user bytes. Model-only selection keeps Native configured/default effort.
-Disk compatibility does not prove the running Host loaded those definitions.
-Static Astra variants retain fixed bindings and require current-task human
-authorization. Dedicated luna-only policy freezes Luna/xhigh bindings and forbids
-model overrides; it changes execution, not role responsibilities. A trusted isolated
-Native run confirmed the managed route contexts, nested binding,
-generic passthrough, and pre-reservation same-name profile denial on
-`codex-cli 0.162.0-alpha.17.2`. Its readonly child contexts and lifecycle
-observations apply only to this temporary candidate; production Hook and desktop
-Host activation remain `UNKNOWN`.
-Source rendering does not prove that a running Host loaded these profiles.
+Role meaning is separate from model/profile bindings. The Controller selects the
+role, model and context under the task's authorization; model defaults and routing
+belong to its [resident guidance](thaliris-controller.md). The adapter applies
+mechanical bindings and preserves readonly and task constraints. Source rendering
+does not prove that a running Host loaded these profiles. Host-specific routing,
+version observations and compatibility details live in the Codex protocol reference.
 
 {role_sections}
 """

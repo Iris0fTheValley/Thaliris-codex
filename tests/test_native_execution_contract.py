@@ -84,7 +84,8 @@ def test_current_role_profiles_preserve_local_iteration_and_selected_context():
             assert "implementation methods" in text
         if role == "focused-implementer":
             assert "full reasoning, implementation, runtime-feedback and revision loop" in text
-            assert "fresh ordinary Implementer" in text
+            assert "without choosing a successor role or session" in text
+            assert "fresh ordinary Implementer" not in text
             assert "PASS alone is insufficient" in text
 
 

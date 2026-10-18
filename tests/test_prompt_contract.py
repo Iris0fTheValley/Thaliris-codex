@@ -249,15 +249,16 @@ def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
     ordinary, focused = prompt("implementer"), prompt("focused-implementer")
     concepts(ordinary, ("stable accepted direction", "deterministic convergence"),
              ("same session", "smallest acceptance-relevant"),
-             ("original acceptance", "git closure", "unfinished assignment"))
+             ("selected local acceptance", "git closure", "unfinished assignment"))
     concepts(focused, ("full reasoning", "implementation", "runtime-feedback", "revision loop"),
              ("core solution", "hard invariants", "unknowns are resolved", "focused evidence"),
              ("remaining tasks", "causal model", "architecture", "contract", "scope", "acceptance", "direction"),
              ("pass alone", "endpoint"),
-             ("regression", "lint", "build", "generated/docs sync", "compatibility", "deterministic defects", "project/package install-smoke", "git closure", "fresh ordinary"),
+             ("without choosing", "successor role", "session"),
              ("shared guidance", "cannot extend"),
              ("exact candidate/diff", "evidence and limits", "remaining tasks", "escalation boundary"))
     assert "may remain in this workstream" not in normalized(focused)
+    assert "fresh ordinary Implementer" not in focused
     assert "runtime feedback" not in normalized(ordinary)
     concepts(focused, ("including package/install smoke", "evidence could change the core solution"),
              ("sync formal docs", "where they establish core semantics"))
@@ -266,16 +267,16 @@ def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
 def test_reviewer_critical_evidence_and_correction_boundary():
     reviewer = prompt("reviewer")
     concepts(reviewer, ("converged candidate", "selected acceptance", "hard invariants", "cross-boundary"),
-             ("reviewer is optional", "ready reports the selected review", "controller integrates",
-              "objective", "criteria", "available evidence", "deciding product completion"),
+             ("reviewer is optional", "critical closure of the selected review", "controller", "routing"),
              ("non-writing",),
              ("counterevidence", "finding"), ("inadequate evidence", "unverified", "insufficient"),
              ("ready only", "evidence", "critical closure"),
              ("absence", "not verified acceptance"),
-             ("bounded defect", "design unchanged", "fresh ordinary"),
-             ("architecture", "contract", "invariant", "scope", "acceptance", "decision basis", "controller reopen"),
+             ("bounded defect", "design unchanged", "evidence that shakes", "supplied decision basis"),
+             ("architecture", "contract", "invariant", "scope", "acceptance"),
              ("finding", "affected surface", "needed validation"))
     require_local_prohibition(reviewer, action="repair", target="candidate")
+    assert "fresh ordinary" not in reviewer and "Controller reopen" not in reviewer
     mutated = reviewer.replace("do not repair the candidate", "do repair the candidate", 1)
     assert mutated != reviewer
     with pytest.raises(AssertionError, match="local prohibition"):
@@ -531,10 +532,9 @@ def test_controller_owned_product_completion_and_model_routing_reach_resident_co
         concepts(prompt(role), ("generic native agent", "not a Thaliris role"))
     for role in ("implementer", "focused-implementer"):
         concepts(prompt(role), ("report the candidate", "criterion-linked evidence", "unknown for unverified behavior"),
-                 ("controller integrates", "original objective", "acceptance criteria", "available evidence",
-                  "determine product completion"),
-                 ("no required separate closing handoff", "no new child"),
-                 ("test pass", "reviewer ready", "native completed", "mechanical done", "distinct"))
+                 ("selected local assignment", "remaining work", "controller", "task-level judgment", "routing"))
+        for controller_only in ("Reviewer READY", "mechanical DONE", "determine product completion"):
+            assert controller_only not in prompt(role)
         assert "final product acceptance through a separate explicit closing handoff" not in prompt(role)
 
 
@@ -570,9 +570,10 @@ def test_resident_waiting_observation_and_causal_contract_rejects_negation_rever
     concepts(value, ("actual tool limits", "higher-level limits", "precedence"),
              ("meaningful-event early return", "confirmed", "60-minute", "default"))
     for text in (prompt("implementer"), prompt("focused-implementer")):
-        concepts(text, ("actual tool limits", "higher-level limits", "precedence"),
+        concepts(text, ("tool's documented limits", "unconfirmed capabilities remain UNKNOWN"),
                  ("independent work", "before waiting", "necessary", "direct child"),
-                 ("confirmed", "meaningful-event early return", "user interruption", "60-minute", "default"))
+                 ("meaningful-event early return", "user interruption"))
+        assert "60-minute" not in text and "3600000" not in text
         require_local_prohibition(text, action="repeat", target="waits")
         mutant = text.replace("do not repeat useless waits indefinitely", "do repeat useless waits indefinitely")
         with pytest.raises(AssertionError, match="local prohibition"):

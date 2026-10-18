@@ -1,0 +1,36 @@
+{
+  "commit": "936fac07f73d6405a3300aafcc6262d176aa6b61",
+  "roles_git_blob": "a3b544f93c6f9f7b9e56fa096326784e103e3dfc",
+  "renderer_sha256": "eb408973cc36eb97aa8a8f49d05aab26b23dd0a6a2afab362aa7a049741c7d04",
+  "profiles": {
+    "default": {
+      "thaliris-investigator.toml": "b4cf613136660edf844a6615f2c89c734ffc4789b8a357ef0ae1fae88783980a",
+      "thaliris-curator.toml": "a77e870d0d877433410344ba3d5da09f20031c3e1db0dbd46b60123f68f581aa",
+      "thaliris-reasoning-specialist.toml": "83e182e293543d3ac995930b8f424b2c056a56a5ee972d5e3fa0b8b7510fcff6",
+      "thaliris-implementer.toml": "805743b439eeebbeedbf939e371f503f608f5f7c6c896c576fab789d99e37fc9",
+      "thaliris-focused-implementer.toml": "d3a686ec5de97f59aaf4b1d85630e5a8fee3650a6130467543692ab15bdd3d18",
+      "thaliris-verifier.toml": "b3d2faa7415ce5962e235f6273b54d5ce1e3c37b3a2f000e38dd6cbaa4e45b84",
+      "thaliris-reviewer.toml": "fbe884a5832edc2afbd780e2494ccb24659953a01f94a8b9f2d49e1f036eb26d",
+      "thaliris-reasoning-specialist-astra-medium.toml": "2e6475256878d78d11800a4bf16ae31a0712ce6b4b4f7632870a5d7c19c1a125",
+      "thaliris-reasoning-specialist-xhigh.toml": "54fbef255e9c68957913ae96b87182d2e53711efaa077b697ffd38d7db721e52",
+      "thaliris-focused-implementer-astra-medium.toml": "d92fc7b58e37865e29fceb4ece1e7765b0ad452cd23899e7d30d2d6d07fdf366",
+      "thaliris-focused-implementer-xhigh.toml": "37117ee7eef732320d1b73702ab352fa9be63f23d43c03436b351692730f48f2"
+    },
+    "luna-only": {
+      "thaliris-investigator.toml": "95624a3478ca150124871d2c48de93f9dfc0115aea8d420c5c0278a1911b1418",
+      "thaliris-curator.toml": "65809097f6f150a631d31b2d86858fac52151409811f2e5080afc7b8d167756a",
+      "thaliris-reasoning-specialist.toml": "285afa6b1c3f5745bc2a0317b84e8187dd9325f91734a3024962787d112f6044",
+      "thaliris-implementer.toml": "8f6509ab79bd62f6800605669936dfde13903b2cc8b44237ad029e3250f77c62",
+      "thaliris-focused-implementer.toml": "408f95bbc20d48efbe701d866779b0007a3595ca5c26a8176a783c3fc1719c2a",
+      "thaliris-verifier.toml": "80a5d0474517b1655c092e89d3b0472db1e6f34fc365ab619723fea6439b1ded",
+      "thaliris-reviewer.toml": "ca2b4171ca1a80157801ca37db55be4b5ee595d84a7301ced94fb8cb04696590",
+      "thaliris-reasoning-specialist-astra-medium.toml": "2e6475256878d78d11800a4bf16ae31a0712ce6b4b4f7632870a5d7c19c1a125",
+      "thaliris-reasoning-specialist-xhigh.toml": "54fbef255e9c68957913ae96b87182d2e53711efaa077b697ffd38d7db721e52",
+      "thaliris-focused-implementer-astra-medium.toml": "d92fc7b58e37865e29fceb4ece1e7765b0ad452cd23899e7d30d2d6d07fdf366",
+      "thaliris-focused-implementer-xhigh.toml": "37117ee7eef732320d1b73702ab352fa9be63f23d43c03436b351692730f48f2"
+    }
+  },
+  "managed_sha256": "9fe4fc066cb890df3c7656bf664935bace9851cc8349290f545848e658320909",
+  "role_pack_sha256": "71affa6b8abc26009254d3b67b6de65f3c31d2d75a75cd96dca9c70ac3ceeeed",
+  "managed_span_sha256": "da899c4afb9df4e24e1772606aa3d965e51607c8c3748b89ebc99e245991d5a9"
+}

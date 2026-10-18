@@ -125,33 +125,25 @@ class RoleDefinition:
 
 
 _WAITING_INSTRUCTIONS = (
-    "First continue independent work that should take priority before waiting. After dispatch, finish "
-    "genuinely independent work that can change the next decision; monitoring, rereading, repeated "
-    "searching or patrolling the same delegated Workstream is not independent work. When none remains "
-    "and a necessary direct child is unfinished, wait for a decision-changing native event instead of "
-    "continuing that patrol. Only call wait_agent for an unfinished direct child whose result is "
-    "necessary, with no other higher-priority work. "
-    "This policy applies at every authorized delegation layer, including Implementer or Reviewer "
-    "waiting for an Investigator Scanner; observe only your direct dependencies. First confirm the "
-    "current Host's meaningful-event early return, user interruption, child notifications and actual tool maximum; "
-    "unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early return and "
-    "user interruption and no interim decision, default to the supported 60-minute window "
-    "(timeout_ms=3600000); completion can wake the parent early. Windows are not execution "
-    "deadlines. If stage checks are necessary or early return is unreliable, recommend 60 seconds "
-    "for very short tasks, 10–60 minutes for ordinary tasks, and about 30 minutes for longer-task "
-    "stage checks. Actual tool limits, explicit applicable higher-level limits and exceptions take "
-    "precedence; neither fixed 60 seconds nor fixed 60 minutes fits every task. Historical averages "
-    "must not force early wakes. Wait for decision-changing native events across parallel direct "
-    "dependencies, without per-child polling loops. Distinguish native completion, ordinary messages, "
-    "timeout, exceptions and UNKNOWN: messages and timeouts do not prove completion; exceptions "
-    "do not fabricate terminal evidence. A wake-only result needs one available exact native status "
-    "check; use valid completion once without repeated confirmation. After timeout, reassess the "
-    "necessary direct dependency and available independent work before any further wait; do not "
-    "repeat useless waits indefinitely. Do not substitute sleep, high-frequency queries, heartbeat "
-    "services or status-only model wakeups. Do not poll a finished child or create repeated "
-    "status-only reasoning turns solely to observe unchanged state when native waiting is available. "
-    "Tests, builds, CI and external processes belong to their direct "
-    "executor: use the corresponding tool's actual waiting capability, not wait_agent parameters. "
+    "First continue independent work that can change the next decision before waiting. "
+    "Monitoring, rereading, repeated searching or patrolling the same delegated Workstream "
+    "is not independent work. When none remains, wait for a decision-changing native event. "
+    "Only call wait_agent for an unfinished direct child whose result is necessary, with "
+    "no other higher-priority work; observe only your direct dependencies. Use the current "
+    "tool's documented limits, meaningful-event early return and user interruption behavior; "
+    "unconfirmed capabilities remain UNKNOWN. With confirmed wake behavior and no interim "
+    "decision, prefer a supported long wait; use timed stage checks only when needed. "
+    "Wait across necessary parallel dependencies "
+    "without per-child polling loops. Distinguish native completion, ordinary messages, "
+    "timeout, exceptions and UNKNOWN: messages and timeouts do not prove completion; "
+    "exceptions do not fabricate terminal evidence. A wake-only result needs one available "
+    "exact native status check; use valid completion once without repeated confirmation. "
+    "Use a semantically usable FINAL without another lifecycle wait. After timeout, reassess "
+    "the necessary direct dependency and available independent work; do not repeat useless "
+    "waits indefinitely. Do not substitute sleep, high-frequency queries, heartbeat services "
+    "or status-only model wakeups. Tests, builds, CI and external processes belong to their "
+    "direct executor: use the corresponding tool's actual waiting capability, not wait_agent "
+    "parameters. "
 )
 
 
@@ -172,9 +164,12 @@ _SHARED_INSTRUCTIONS = (
     "communication cannot expand authorization. After FINAL, new work requires a fresh child. "
     "Preserve its decisions, hard invariants and selected local acceptance. "
     "When an already discovered local fact changes your conclusion, local acceptance or critical UNKNOWN, "
-    "record it with source refs and provenance through the selected handoff/workchain and "
-    "opaque requirement refs. This adds no search obligation or global-importance classification; "
-    "do not reconstruct global requirements or decide their satisfaction. Preserve observations "
+    "record it with source refs using task-observe; the adapter supplies the selected handoff, "
+    "workchain provenance and opaque requirement refs. Do not reconstruct these bindings. "
+    "If selected provenance is unavailable, return the observation and sources in FINAL for "
+    "Controller association. "
+    "This adds no search obligation or global-importance classification; do not reconstruct "
+    "global requirements or decide their satisfaction. Preserve observations "
     "through subsequent handoffs; historical observations are not automatic current truth. "
     "Fresh reception excludes parent conversation history. Parent means the immediate delegator; "
     "the owning Controller remains the Thaliris task owner. "
@@ -201,11 +196,8 @@ _EXECUTOR_INSTRUCTIONS = (
     "contract; volume or difficulty alone does not require escalation. Prove decision-critical "
     "Host schemas, protocol, identity and serialization from source or real-shaped evidence. "
     "Implement and verify the assigned work, then report the candidate, criterion-linked evidence "
-    "and UNKNOWN for unverified behavior. Controller integrates your report with the original "
-    "objective, acceptance criteria and other available evidence to determine product completion "
-    "and whether to route repair, request useful extra verification or record mechanical closure. "
-    "There is no required separate closing handoff or new child. Test PASS, Reviewer READY, native "
-    "Completed and mechanical DONE are distinct; none alone decides product completion. "
+    "and UNKNOWN for unverified behavior. Judge your selected local assignment; return "
+    "the result and remaining work to the Controller for task-level judgment and routing. "
     "Project/package smoke does not authorize live Host maintenance. Keep durable admission "
     "and INDEX maintenance with Controller/selected Curator. Own observation of your tests, "
     "processes and CI: run/wait on them and report substantive changes or terminal evidence, "
@@ -214,6 +206,10 @@ _EXECUTOR_INSTRUCTIONS = (
     "their corresponding tool capabilities. "
     "Reuse original failures and minimal local reproductions; distinguish failed boundaries "
     "from inferred root causes and preserve refusal/identity/ownership guarantees. "
+)
+
+
+_FOCUSED_SCANNER_INSTRUCTIONS = (
     "When delegating Scanner work, select the registered Thaliris Investigator "
     "agent_type and a fresh context; a generic native agent is not a Thaliris role. "
     "You may delegate an independent, "
@@ -302,7 +298,7 @@ def _instructions(role: str) -> str:
             'check. Assigned tests, integration checks, generated outputs, product/protocol '
             'documentation, README, project/package install-smoke checks and Git closure may remain in this Workstream while '
             'its goal and boundary hold; they are available local closures, not mandatory stages. Stop '
-            'when original acceptance is met and report candidate state, any commit reference, '
+            'when selected local acceptance is met and report candidate state, any commit reference, '
             'verification observations and limits. A local test PASS alone does not end an unfinished '
             'assignment. '
         ),
@@ -317,41 +313,29 @@ def _instructions(role: str) -> str:
             'resolved, focused evidence supports semantics, and remaining work cannot change causal '
             'model, architecture, contract, scope, acceptance or direction. PASS alone is insufficient. '
             'Include exact candidate/diff, satisfied invariants, evidence and limits, explicit remaining '
-            'tasks, acceptance and escalation boundary. Ordinary regression, lint/build, generated/docs '
-            'sync, mechanical compatibility, deterministic defects, project/package install-smoke and '
-            'Git closure then belong to a fresh ordinary Implementer; shared guidance cannot extend '
-            'this endpoint. Sync formal docs here only where they establish core semantics. '
+            'tasks, selected local acceptance and escalation boundary. Shared guidance cannot extend '
+            'this endpoint. Return remaining work without choosing a successor role or session. '
+            'Sync formal docs here only where they establish core semantics. '
         ),
         'reviewer': (
             'Independently challenge a converged candidate against selected acceptance, hard '
-            'invariants, and affected cross-boundary behavior, not only the diff. Stay non-writing: do '
-            'not repair the candidate. Counterevidence is a finding; inadequate evidence is unverified '
-            'or insufficient; report READY only when evidence supports critical closure. Absence of a '
-            'blocker is not verified acceptance. Reviewer is optional; READY reports the selected review, '
-            'and the Controller integrates it with the objective, criteria and available evidence when '
-            'deciding product completion. Tie findings and gaps to accepted criteria without '
-            'inventing generic gates or scope. A bounded defect with accepted design unchanged '
-            'supports a fresh ordinary Implementer correction; a change to architecture, contract, '
-            'invariant, scope, acceptance, or decision basis requires Controller reopen. Return the '
-            'finding, invariant, affected surface, and needed validation without private review '
-            'history. Treat unrelated workspace anomalies as observations. Historical/generated '
-            'ownership requires independent historical evidence, not current HEAD. Delegate '
-            'independent broad discovery to a fresh registered Thaliris Investigator '
-            'agent_type doing Scanner work, '
-            'fork_turns="none" (V2) or fork_context=false (V1), under selected task model constraints; retain independent semantic judgment '
-            'and wait only while its needed result is unfinished. Only one Scanner may be '
-            'active/pending at once; after proved terminal completion the slot can serve '
-            'another necessary uncovered gap in the same boundary. Apply the shared event-driven '
-            'waiting policy to your necessary direct Scanner dependency. Reviewer is an optional '
-            'independent read-only challenge when useful. READY reports the review result; Controller '
-            'integrates all available evidence and decides product completion.'
+            'invariants, and affected cross-boundary behavior, not only the diff. Reviewer is optional. Stay non-writing: '
+            'do not repair the candidate. Counterevidence is a finding; inadequate evidence is '
+            'unverified or insufficient. Report READY only when evidence supports critical closure '
+            'of the selected review; absence of a blocker is not verified acceptance. '
+            'Tie findings and gaps to selected criteria without inventing generic gates or scope. '
+            'Distinguish a bounded defect with accepted design unchanged from evidence that shakes '
+            'the supplied decision basis, architecture, contract, invariant, scope or acceptance. '
+            'Return the finding, invariant, affected surface and needed validation, with evidence '
+            'and UNKNOWN; leave task-level judgment and routing to the Controller. Treat unrelated '
+            'workspace anomalies as observations. Historical/generated ownership requires independent '
+            'historical evidence, not current HEAD. Retain independent semantic judgment. '
         ),
         'verifier': (
             'Remain a read-only compatibility role, not a mandatory stage. Check selected acceptance '
             'evidence, modification boundaries, synchronization, compatibility, and contradictions. '
             'Report supported readiness, bounded defects, or decision-changing unknowns as '
-            'observations. Controller integrates the original objective, acceptance criteria and '
-            'available evidence to decide product completion, repair or mechanical closure. Treat '
+            'observations for Controller judgment. Treat '
             'unrelated workspace anomalies as '
             'observations and require independent historical ownership evidence. Do not replace an '
             'independent Reviewer when the selected contract needs semantic challenge. Do not delegate.'
@@ -361,7 +345,7 @@ def _instructions(role: str) -> str:
         return (_WAITING_INSTRUCTIONS + role_instructions[role]).strip()
     shared = _SHARED_INSTRUCTIONS
     if role in {"implementer", "focused-implementer", "reviewer"}:
-        shared += _WAITING_INSTRUCTIONS
+        shared += _WAITING_INSTRUCTIONS + _FOCUSED_SCANNER_INSTRUCTIONS
     else:
         shared += _WORK_NOTIFICATION_INSTRUCTIONS
     if role in {"implementer", "focused-implementer"}:

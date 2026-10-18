@@ -16,19 +16,24 @@ FIXTURES = Path(__file__).parent / "fixtures/all-layer-wait-predecessor"
 
 @pytest.mark.parametrize("role", ["controller", "implementer", "focused-implementer", "reviewer"])
 def test_delegating_roles_check_independent_work_before_waiting(role):
-    text = roles._instructions(role)
+    text = controller_instructions._WAITING_INSTRUCTIONS if role == "controller" else roles._instructions(role)
     assert text.index("First continue independent work") < text.index("Only call wait_agent")
-    assert "monitoring, rereading, repeated searching or patrolling the same delegated Workstream is not independent work" in text
-    assert "wait for a decision-changing native event instead of continuing that patrol" in text
+    assert "monitoring, rereading, repeated searching or patrolling the same delegated Workstream is not independent work" in text.lower().replace("workstream", "Workstream")
+    assert "wait for a decision-changing native event" in text.lower()
     assert "unfinished direct child whose result is necessary" in text
     assert "no other higher-priority work" in text
     assert "observe only your direct dependencies" in text
-    assert "With confirmed meaningful-event early return and user interruption and no interim decision" in text
-    assert "default to the supported 60-minute window (timeout_ms=3600000); completion can wake the parent early" in text
-    assert "Windows are not execution deadlines" in text
     assert "unconfirmed capabilities remain UNKNOWN" in text
-    assert "Actual tool limits, explicit applicable higher-level limits and exceptions take precedence" in text
-    assert "neither fixed 60 seconds nor fixed 60 minutes fits every task" in text
+    if role == "controller":
+        assert "With confirmed meaningful-event early return and user interruption and no interim decision" in text
+        assert "default to the supported 60-minute window (timeout_ms=3600000); completion can wake the parent early" in text
+        assert "Windows are not execution deadlines" in text
+        assert "Actual tool limits, explicit applicable higher-level limits and exceptions take precedence" in text
+        assert "neither fixed 60 seconds nor fixed 60 minutes fits every task" in text
+    else:
+        assert "tool's documented limits, meaningful-event early return and user interruption" in text
+        assert "3600000" not in text and "60-minute" not in text
+        assert "semantically usable FINAL without another lifecycle wait" in text
     assert "tool maximum is capacity" not in text
 
 
@@ -36,7 +41,7 @@ def test_delegating_roles_check_independent_work_before_waiting(role):
 def test_scanner_parents_use_shared_events_and_direct_process_observation(role):
     text = roles.get_role(role).instructions
     for clause in (
-        "waiting for an Investigator Scanner", "without per-child polling loops",
+        "fresh Investigator Scanner", "without per-child polling loops",
         "messages and timeouts do not prove completion", "exceptions do not fabricate terminal evidence",
         "A wake-only result needs one available exact native status check",
         "use valid completion once without repeated confirmation",
@@ -63,7 +68,8 @@ def test_non_delegating_roles_only_receive_work_notification_evidence_principles
 
 def test_controller_uses_the_canonical_parent_wait_policy_once():
     text = controller_instructions.render(section="completion")
-    assert text.count(roles._WAITING_INSTRUCTIONS.strip()) == 1
+    assert text.count(controller_instructions._WAITING_INSTRUCTIONS.strip()) == 1
+    assert roles._WAITING_INSTRUCTIONS.strip() not in text
     assert "child notifications" in text
     assert "@WAITING_INSTRUCTIONS@" not in controller_instructions.resident("runner")
 

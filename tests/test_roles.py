@@ -1037,7 +1037,9 @@ def test_selected_local_observation_and_global_requirement_judgment_contract():
         prompt = roles.get_role(role).instructions
         assert "selected local acceptance" in prompt
         assert "When an already discovered local fact changes" in prompt
-        assert "record it with source refs and provenance" in prompt
+        assert "record it with source refs using task-observe" in prompt
+        assert "adapter supplies the selected handoff" in prompt
+        assert "Do not reconstruct these bindings" in prompt
         assert "You may record an already discovered" not in prompt
         assert "no search obligation or global-importance classification" in prompt
         assert "do not reconstruct global requirements" in prompt
