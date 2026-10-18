@@ -29,6 +29,7 @@ test = ["pytest>=8.0"]
 [project.scripts]
 thaliris = "thaliris_codex.cli:main"
 context = "thaliris_codex.cli:main"
+thaliris-release = "thaliris_codex.release_manager:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

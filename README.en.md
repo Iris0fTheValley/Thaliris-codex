@@ -142,80 +142,59 @@ The Codex model catalog is Host-wide configuration (`model_catalog_json`), separ
 
 ## Installation and local development
 
-pyproject.toml declares Python >=3.11 and thaliris>=0.4.6,<0.5.
+### Recommended: a published release
 
-On Windows with Python 3.11+, create a disposable bootstrap environment and use
-the packaged runtime installer. Select the independently reviewed full adapter
-commit. When `--runtime` is omitted, setup discovers the current Codex Host's
-package family and resolves its existing LocalCache directory to the physical
-path before creating a candidate. A bootstrap launched outside Codex resolves
-only a unique registration of the exact `OpenAI.Codex` package; missing or
-ambiguous discovery fails closed. No Store internal path needs to be entered.
+No Thaliris Codex release has been published from this source state. The commands below are templates for the first release; the tag workflow has not run, and the six platform gates, GitHub attestations and published release are unverified. On Windows, the normal client requires only system Python 3.11+. Select a specific release tag, download that tag's thaliris-bootstrap.py, and verify the bootstrap independently before running it. Obtain the matching release.json SHA-256 from a separately trusted source; do not take the digest from the same unauthenticated manifest. See the [release lifecycle](docs/release-lifecycle.md) for attestation constraints, offline bundles and lifecycle limits.
 
-```powershell
-py -3.11 -m venv .thaliris-bootstrap
-$bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
-$adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
-& $bootstrap -m pip install --no-deps $adapterSource
-$env:PYTHONDONTWRITEBYTECODE = '1'
-$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@31f8e6212adbd27be2f8af1f21811811b0882695' --adapter-source $adapterSource | ConvertFrom-Json)
-if (-not $runtime.ok) { throw $runtime.error }
-$exe = $runtime.executable
-& $exe version
-```
+~~~powershell
+$tag = '<selected-release-tag>'
+$releaseUrl = "https://github.com/Iris0fTheValley/Thaliris-codex/releases/download/$tag"
+$manifest = "$releaseUrl/release.json"
+$manifestSha256 = '<64-character SHA-256 from an independently trusted source>'
+$bootstrap = Join-Path $PWD 'thaliris-bootstrap.py'
+Invoke-WebRequest -Uri "$releaseUrl/thaliris-bootstrap.py" -OutFile $bootstrap
 
-For an intentional custom location, pass `--runtime 'D:\chosen\runtime'`; that path is still checked for final physical identity. The default creates a new uniquely named runtime under the discovered Host base.
+# Independently verify the downloaded bootstrap before running it.
+py -3.11 $bootstrap install --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human installation request>'
+~~~
 
-Replace the adapter commit placeholder with the independently reviewed published revision. Host maintenance uses `codex-maintenance-plan` and an explicit `--maintenance-contract FILE`, independently of project init/task admission. Prior authorized installation receipts establish byte ownership; candidate equality does not. Unknown project role documentation is preserved without blocking admission, while unknown control instructions remain blocking. Supported uninstall and normal reinstall preserve user configuration and recovery evidence. See [Host maintenance](docs/thaliris-host-maintenance.md) for the public sequence and legacy approval boundary.
+Before update, reset $tag, $releaseUrl, $manifest, $manifestSha256 and $bootstrap for the target release, download its thaliris-bootstrap.py and verify that bootstrap independently. Then run update below. For status, repair and uninstall, use the selected release and its trusted digest. Status reports disk and candidate facts; repair retries the selected release under the same ownership rules; uninstall uses the selected release's uninstaller. Every action requires both trust inputs, and maintenance actions require the actual human instruction:
 
-The `multi_agent_mode_hint_text` compatibility edit uses four exact
-source-verified Codex CLI builds as its fast path: `0.162.0-alpha.17.2`,
-`0.162.0-alpha.2`, `0.162.0` and `0.162.1`. Other CLI builds that report a
-version undergo an isolated prompt/type capability check in a disposable
-`CODEX_HOME` and workspace. It confirms string acceptance, the empty value's
-prompt effect, and rejection of an integer by running finite synthetic text tasks
-against a loopback Responses sink. It does not copy the current user's config or
-authentication. On Windows it resolves the real ProgramData known folder and
-checks `OpenAI/Codex/config.toml` and `requirements.toml`; on Linux it checks
-`/etc/codex/{config,requirements,managed_config}.toml`. If any path exists, a
-check fails, or the platform's managed configuration cannot be proven absent,
-the probe does not start `exec`; macOS managed preferences therefore remain
-UNKNOWN. When those paths are proven absent, it passes `--disable hooks
---disable plugins`. These flags alone do not disable managed hooks, which is why
-the system-layer check comes first. Complete consistent evidence is required before planning a
-write; contradictory evidence reports `CAPABILITY_INCOMPATIBLE`, while missing
-or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`. The field is still
-written only when the user-level leaf is absent; existing values are preserved.
-Higher-priority project configuration or CLI `-c` can still override it. Field
-ownership, the normal upgrade/uninstall entrypoints, and fresh-session/Fresh Child
-acceptance are documented in [Host maintenance](docs/thaliris-host-maintenance.md).
-The stable `0.162.0`/`0.162.1` and alpha `0.162.0-alpha.17.2` sources verify the
-schema and native empty-value handling; `0.162.0-alpha.2` is tag `rust-v0.162.0-alpha.2`,
-peeled commit `74e804deeb1241d5fe699b31fb319f7d46454c42`.
+~~~powershell
+py -3.11 $bootstrap update --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human update request>'
+py -3.11 $bootstrap status --manifest $manifest --manifest-sha256 $manifestSha256
+py -3.11 $bootstrap repair --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human repair request>'
+py -3.11 $bootstrap uninstall --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human uninstall request>'
+~~~
 
-Optional wait guidance uses the four source-verified Codex CLI builds as a fast path. Other CLI builds that report a version use the same isolated check to confirm the `developer_instructions` string type, actual prompt effect and rejection of a wrong type. Complete consistent evidence is required before planning a write; contradictory evidence reports `CAPABILITY_INCOMPATIBLE`, while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`. The guidance is added only when the field is absent; empty or custom user values are preserved. Stable `0.162.0` and `0.162.1` implement the native bounded-wait contract: 10,000 ms minimum, 30,000 ms default and 3,600,000 ms release hard maximum. The effective per-session maximum and whether completion re-enters the current root remain `UNAVAILABLE`/`UNKNOWN`. An upgrade migrates the field only when its complete TOML fragment exactly matches a trusted prior receipt. The next receipt retains those exact historical fragments for recovery and uninstall. User edits or unverifiable history are never overwritten. Read/write failures do not block Host installation; the ownership journal is persisted before writing, and uncertain outcomes remain UNKNOWN.
+prepare verifies a candidate without changing the Host. Automatic latest discovery and a Python-free executable are not provided. Status cannot observe whether a running Host loaded the release or restarted, so those facts remain UNKNOWN. On non-Windows platforms, pass an explicit --cache directory. The release client preserves unowned Host bytes; damaged ownership evidence may require manual recovery.
 
+### Advanced: source development
 
-Setup resolves the automatic Host LocalCache base through an OS handle before
-creating a candidate directory, then observes the final runtime directory before
-creating the venv or installing packages. An explicitly redirected `--runtime`
-stops with the physical path to select; setup removes only the empty leaf created
-by that attempt. Preexisting or nonempty directories remain untouched. The runtime
-location anchor and Windows launcher's embedded interpreter must agree with that
-directory. Setup executes the ordinary final-path
-`thaliris.exe runtime-check` with bytecode writes disabled, and maintenance
-selection repeats that side-effect-free check before producing a contract.
-Preparation, the contract and Host installation use the same final directory.
-Never copy, move or rename an installed venv; recomputing a manifest cannot approve
-relocation, even when the old interpreter still exists. Preserve any candidate that
-fails after the redirect check, and create a new runtime directly at the correct
-final location.
+Source development is separate from ordinary install and update. pyproject.toml requires Python >=3.11 and thaliris>=0.4.6,<0.5. The default Core pairing is recorded once in [release/core.lock.json](release/core.lock.json); read the selected commit there instead of copying a second revision into this README:
 
-Setup and installation also exercise the independent PowerShell runtime guard before switching the Host generation. For explicitly authorized maintenance when the ordinary entrypoints fail, see [launcher preflight recovery](docs/host-preflight-recovery.md).
+~~~powershell
+$coreCommit = (Get-Content release/core.lock.json -Raw | ConvertFrom-Json).commit
+$coreCommit
+~~~
 
-For local development install the reviewed `../Thaliris[test]` checkout, then this repository with `--no-deps -e '.[test]'`. Before running `pytest`, set `THALIRIS_CORE_SOURCE` to the Core checkout root containing `src/thaliris/core.py`; offline recovery source-runner tests load that source explicitly rather than treating an installed package as reviewed source. In PowerShell use `$env:THALIRIS_CORE_SOURCE = (Resolve-Path '../Thaliris').Path`; in a POSIX shell export `THALIRIS_CORE_SOURCE=../Thaliris`. CI points it at the shared-core checkout.
+With local Core and Adapter checkouts, install the Core test extra and the Adapter checkout, then point the source runner at the Core source tree and run the Adapter tests:
 
-The installer creates the dedicated runtime without ensurepip and installs both selected packages through the bootstrap's pip. pip, setuptools and build dependencies stay outside the runtime; no manual `.pth` repair is required. System site packages stay disabled and executable or path-extending `.pth` files remain rejected without exceptions. Verified local wheels are also accepted as `absolute-wheel-path#sha256=<reviewed-digest>`. The entire environment, including shared Core, remains pinned by the runtime manifest. Keep the pinned directory immutable; use a new directory for upgrades. Installing packages does not prove Host enablement, authorization or health.
+~~~sh
+python -m pip install -e '../Thaliris[test]'
+python -m pip install --no-deps -e '.[test]'
+~~~
+
+Offline recovery source-runner tests require THALIRIS_CORE_SOURCE to point to a Core checkout containing src/thaliris/core.py; the runner loads that source checkout explicitly instead of treating an installed Core package as reviewed source. In PowerShell:
+
+~~~powershell
+$env:THALIRIS_CORE_SOURCE = (Resolve-Path '../Thaliris').Path
+python -m pytest
+~~~
+
+In POSIX shells, set THALIRIS_CORE_SOURCE=../Thaliris and run python -m pytest. CI also reads its default Core pairing from release/core.lock.json; a manually dispatched workflow may select another core_ref. Source and Host integration details are in the [Codex integration guide](adapter/codex/README.md) and [Host maintenance guide](docs/thaliris-host-maintenance.md).
+
+Source tests and disk installation do not prove that the current Host loaded or trusts these files. See [task authority](docs/thaliris-task-authority.md) and [runtime recovery](docs/thaliris-runtime-recovery.md) for the project instruction and recovery contracts.
 
 ## Starting and recovering project tasks
 
@@ -290,7 +269,7 @@ This feature requires thaliris>=0.4.6. Development tests must install the Core c
 
 ## CI and platform compatibility
 
-The CI matrix covers Ubuntu and Windows with Python 3.11, 3.12, and 3.13. It uses Core revision `31f8e6212adbd27be2f8af1f21811811b0882695` by default; only a manually dispatched workflow may select another `core_ref`. POSIX runtime-identity checks accept only the exact virtual-environment alias `lib64 -> lib` and verify that target drift is rejected. Hook transport treats only one document-leading UTF-8 BOM as transport syntax; repeated or misplaced BOMs and invalid UTF-8/JSON remain denied. Hook diagnostics emit bounded JSON boundary labels without payload or inferred deeper causes. CI and source tests do not prove that a currently installed Codex process loaded these contents.
+The CI matrix covers Ubuntu and Windows with Python 3.11, 3.12, and 3.13. Its default Core pairing comes from [release/core.lock.json](release/core.lock.json); only a manually dispatched workflow may select another core_ref. POSIX runtime-identity checks accept only the exact virtual-environment alias `lib64 -> lib` and verify that target drift is rejected. Hook transport treats only one document-leading UTF-8 BOM as transport syntax; repeated or misplaced BOMs and invalid UTF-8/JSON remain denied. Hook diagnostics emit bounded JSON boundary labels without payload or inferred deeper causes. CI and source tests do not prove that a currently installed Codex process loaded these contents.
 
 ## Runtime prompt layers
 

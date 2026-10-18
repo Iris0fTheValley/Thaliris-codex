@@ -12,6 +12,23 @@ from tests.model_catalog_fixtures import observed_catalog, bundled_compatible_ca
 PRODUCTION_EXPORTER = catalog.export_upstream
 
 
+def complete_supply(monkeypatch, raw=None, *, source="online"):
+    identity = {"cli_version": "codex-cli 0.162.2", "cli_sha256": "a" * 64}
+    monkeypatch.setattr(catalog, "current_cli_identity", lambda: identity.copy())
+    monkeypatch.setattr(catalog, "export_upstream", lambda *_args, **_kwargs: (
+        raw or observed_catalog(source), identity | {"kind": source,
+            "online_freshness": "VERIFIED" if source == "online" else "UNKNOWN"}))
+    return identity
+
+
+def refresh_intent(tmp_path, home, exe):
+    path = intent(tmp_path, home, exe)
+    value = json.loads(path.read_bytes())
+    value["refresh_model_catalog"] = True
+    path.write_text(json.dumps(value))
+    return path
+
+
 def upstream(extra=False):
     model = {"slug": "test", "capabilities": {"arbitrary": [1, "new", False]},
              "model_messages": {"instructions_template": "first\n" + catalog.TARGET + "\nlast\n", "variables": {"keep": "exact"}}}
@@ -224,18 +241,22 @@ def test_install_update_nochange_uninstall(tmp_path, monkeypatch, pinned_test_th
     exe, _ = pinned_test_thaliris
     home = tmp_path / "home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    supply(monkeypatch)
+    complete_supply(monkeypatch)
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert result["ok"], result
     assert result["native_model_catalog_compatibility"]["status"] == "MANAGED"
     assert catalog.KEY in (home / "config.toml").read_text()
     paths = [home / catalog.NAME, home / maintenance.RECEIPT_NAME, home / "config.toml"]
     before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
+    monkeypatch.setattr(catalog, "export_upstream", lambda *_args, **_kwargs: pytest.fail("compatible reuse must bypass export"))
     result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert result["ok"] and not result["changed"], result
     assert before == [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths]
-    supply(monkeypatch, observed_catalog("online", extra=True))
-    result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
+    assert result["catalog_goal_met"]
+    assert result["native_model_catalog_compatibility"]["compatible_reuse"]
+    assert result["native_model_catalog_compatibility"]["online_freshness"] == "UNKNOWN"
+    complete_supply(monkeypatch, observed_catalog("online", extra=True))
+    result = adapter.codex_install(maintenance_contract=refresh_intent(tmp_path, home, exe))
     assert result["ok"], result
     assert len(json.loads((home / catalog.NAME).read_bytes())["models"]) == 11
     result = adapter.codex_uninstall(maintenance_contract=intent(tmp_path, home, exe, "codex-uninstall"))
@@ -264,14 +285,16 @@ def test_failed_refresh_does_not_claim_stale_healthy(tmp_path, monkeypatch, pinn
     exe, _ = pinned_test_thaliris
     home = tmp_path / "home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    supply(monkeypatch)
+    complete_supply(monkeypatch)
     assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))["ok"]
-    before = (home / catalog.NAME).read_bytes()
+    paths = [home / catalog.NAME, home / "config.toml", home / maintenance.RECEIPT_NAME]
+    before = [(path.read_bytes(), path.stat().st_mtime_ns) for path in paths]
     monkeypatch.setattr(catalog, "export_upstream", lambda _home, **_kwargs: (_ for _ in ()).throw(ValueError("offline")))
-    result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
+    result = adapter.codex_install(maintenance_contract=refresh_intent(tmp_path, home, exe))
     assert not result["ok"], result
     assert result["native_model_catalog_compatibility"]["status"] == "UPSTREAM_REFRESH_FAILED_PRESERVED"
-    assert (home / catalog.NAME).read_bytes() == before
+    assert result["native_model_catalog_compatibility"]["online_freshness"] == "UNKNOWN"
+    assert [(path.read_bytes(), path.stat().st_mtime_ns) for path in paths] == before
 
 
 def test_old_record_install_incompatibility_fails_and_preserves_owned_state(tmp_path, monkeypatch, pinned_test_thaliris):
@@ -708,3 +731,188 @@ def test_old_absent_target_journal_cannot_complete_as_managed(tmp_path):
             finish, {catalog.RECORD_KEY: owned_record}, owned_record,
             {catalog.NAME: source_bytes}, {catalog.NAME: source_bytes}, home, install=True,
         )
+
+
+def owned_catalog(home, monkeypatch, *, source="online"):
+    complete_supply(monkeypatch, source=source)
+    record, planned, raw = catalog.plan_install(home, {}, source=source)
+    (home / catalog.NAME).write_bytes(raw)
+    assert catalog.apply(home, record, allow_insert=True)["status"] == "MANAGED"
+    return record, raw
+
+
+@pytest.mark.parametrize("change", ["binary", "version", "identity_unknown", "transformation", "roster", "source", "legacy", "future_schema", "source_unavailable"])
+def test_reuse_contract_changes_require_real_export(tmp_path, monkeypatch, change):
+    initial_source = "bundled" if change == "source" else "online"
+    record, old_bytes = owned_catalog(tmp_path, monkeypatch, source=initial_source)
+    if change == "binary":
+        monkeypatch.setattr(catalog, "current_cli_identity", lambda: {"cli_version": "codex-cli 0.162.2", "cli_sha256": "b" * 64})
+    elif change == "version":
+        monkeypatch.setattr(catalog, "current_cli_identity", lambda: {"cli_version": "codex-cli 0.162.3", "cli_sha256": "a" * 64})
+    elif change == "identity_unknown":
+        monkeypatch.setattr(catalog, "current_cli_identity", lambda: None)
+    elif change == "transformation":
+        monkeypatch.setattr(catalog.inspect, "getsource", lambda _function: "new transformation implementation")
+    elif change == "roster":
+        monkeypatch.setitem(catalog._MODEL_PROFILES, "online", {
+            "matched": catalog._MODEL_PROFILES["online"]["matched"] | {"future-roster-model"},
+            "absent": catalog._MODEL_PROFILES["online"]["absent"]})
+    elif change == "legacy":
+        del record["reuse_contract"]
+        del record["source"]["cli_sha256"]
+    elif change == "future_schema":
+        record["reuse_contract"] = {"format": "thaliris-catalog-reuse-v999", "new_field": True}
+    elif change == "source_unavailable":
+        def unavailable(_function):
+            raise OSError("source not available")
+        monkeypatch.setattr(catalog.inspect, "getsource", unavailable)
+    calls = []
+    def export(home, *, source):
+        calls.append(source)
+        raise ValueError("offline")
+    monkeypatch.setattr(catalog, "export_upstream", export)
+    next_record, result, raw = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: record}, source="online")
+    assert calls == ["online"]
+    assert next_record == record and raw is None
+    assert result["status"] == "UPSTREAM_REFRESH_FAILED_PRESERVED"
+    assert result["online_freshness"] == "UNKNOWN"
+    assert (tmp_path / catalog.NAME).read_bytes() == old_bytes
+
+
+@pytest.mark.parametrize("edit", ["catalog", "fragment", "field"])
+def test_reuse_never_claims_user_changed_bytes(tmp_path, monkeypatch, edit):
+    record, _ = owned_catalog(tmp_path, monkeypatch)
+    if edit == "catalog":
+        (tmp_path / catalog.NAME).write_bytes(b"user changed")
+    else:
+        path = tmp_path / "config.toml"
+        contents = path.read_text()
+        path.write_text(contents.replace(catalog.MARKER, "# user adopted\n") if edit == "fragment" else "")
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()}
+    monkeypatch.setattr(catalog, "export_upstream", lambda *_args, **_kwargs: pytest.fail("user bytes bypass export"))
+    _, result, raw = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: record})
+    assert result["status"] == "USER_CHANGED_PRESERVED" and raw is None
+    assert before == {path.name: path.read_bytes() for path in tmp_path.iterdir() if path.is_file()}
+
+
+@pytest.mark.parametrize("source", ["online", "bundled"])
+def test_freshness_is_current_operation_evidence(tmp_path, monkeypatch, source):
+    complete_supply(monkeypatch, source=source)
+    record, selected, raw = catalog.plan_install(tmp_path, {}, source=source)
+    assert selected["online_freshness"] == ("VERIFIED" if source == "online" else "UNKNOWN")
+    (tmp_path / catalog.NAME).write_bytes(raw)
+    assert catalog.apply(tmp_path, record, allow_insert=True)["online_freshness"] == "UNKNOWN"
+    transition = {"finish": {"model_catalog_record": record, "model_catalog_status": selected}}
+    # The field is already present; this path does not need a journal write.
+    transition["finish"]["model_catalog_status"] = selected | {"status": "MANAGED"}
+    assert catalog.finish_install(tmp_path, transition)["online_freshness"] == selected["online_freshness"]
+    reused, selected, changed = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: record}, source=source)
+    assert reused == record and changed is None and selected["compatible_reuse"]
+    assert selected["online_freshness"] == "UNKNOWN"
+    transition["finish"]["model_catalog_status"] = selected
+    assert catalog.finish_install(tmp_path, transition)["online_freshness"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("defect", ["receipt", "bytes", "freshness", "transformation"])
+def test_reuse_journal_requires_exact_compatible_generation(tmp_path, monkeypatch, defect):
+    record, raw = owned_catalog(tmp_path, monkeypatch)
+    _, selected, _ = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: record})
+    previous = {catalog.RECORD_KEY: deepcopy(record)}
+    before = {catalog.NAME: raw}
+    after = {catalog.NAME: raw}
+    if defect == "receipt":
+        record["source"]["upstream_sha256"] = "b" * 64
+    elif defect == "bytes":
+        before[catalog.NAME] = b"old different bytes"
+    elif defect == "freshness":
+        selected["online_freshness"] = "VERIFIED"
+    elif defect == "transformation":
+        monkeypatch.setattr(catalog.inspect, "getsource", lambda _fn: "changed")
+    finish = {"model_catalog_record": record, "model_catalog_status": selected}
+    with pytest.raises(ValueError, match="reuse lacks unchanged compatibility evidence"):
+        catalog.validate_transition(finish, previous, record, before, after, tmp_path, install=True)
+
+
+def test_cli_identity_requires_stable_binary_and_version(tmp_path, monkeypatch):
+    exe = tmp_path / "codex.exe"
+    exe.write_bytes(b"binary one")
+    monkeypatch.setattr(catalog.shutil, "which", lambda _name: str(exe))
+    def version(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, b"codex-cli 0.162.2\n", b"")
+    monkeypatch.setattr(catalog.subprocess, "run", version)
+    assert catalog.current_cli_identity() == {"cli_version": "codex-cli 0.162.2", "cli_sha256": catalog.digest(exe.read_bytes())}
+    def replaced(args, **kwargs):
+        exe.write_bytes(b"binary two")
+        return version(args, **kwargs)
+    monkeypatch.setattr(catalog.subprocess, "run", replaced)
+    assert catalog.current_cli_identity() is None
+    monkeypatch.setattr(catalog.shutil, "which", lambda _name: str(tmp_path / "codex.cmd"))
+    assert catalog.current_cli_identity() is None
+    script = tmp_path / "codex"
+    script.write_bytes(b"#!/usr/bin/env node\nrequire('codex')\n")
+    monkeypatch.setattr(catalog.shutil, "which", lambda _name: str(script))
+    assert catalog.current_cli_identity() is None
+
+
+def test_committed_reuse_rechecks_cli_identity_on_replay(tmp_path, monkeypatch, pinned_test_thaliris):
+    exe, _ = pinned_test_thaliris
+    home = tmp_path / "home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    complete_supply(monkeypatch)
+    assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))["ok"]
+    before = (home / catalog.NAME).read_bytes()
+    trust = adapter._install_host_hook_trust
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *_args: (_ for _ in ()).throw(ValueError("temporary trust failure")))
+    path = intent(tmp_path, home, exe)
+    result = adapter.codex_install(maintenance_contract=path)
+    assert not result["ok"] and host_transition.pending(home)
+    monkeypatch.setattr(catalog, "current_cli_identity", lambda: {"cli_version": "codex-cli 0.162.2", "cli_sha256": "b" * 64})
+    monkeypatch.setattr(adapter, "_install_host_hook_trust", trust)
+    result = adapter.codex_install(maintenance_contract=path)
+    assert not result["ok"] and not result["catalog_goal_met"]
+    assert result["native_model_catalog_compatibility"]["status"] == "VERSION_SUPPORT_UNKNOWN"
+    assert result["native_model_catalog_compatibility"]["online_freshness"] == "UNKNOWN"
+    assert (home / catalog.NAME).read_bytes() == before
+
+
+def test_legacy_catalog_gains_reuse_evidence_only_after_real_export(tmp_path, monkeypatch):
+    supply(monkeypatch)
+    old, _, raw = catalog.plan_install(tmp_path, {})
+    assert "reuse_contract" not in old
+    (tmp_path / catalog.NAME).write_bytes(raw)
+    assert catalog.apply(tmp_path, old, allow_insert=True)["status"] == "MANAGED"
+    complete_supply(monkeypatch)
+    exporter = catalog.export_upstream
+    calls = []
+    def export(*args, **kwargs):
+        calls.append(True)
+        return exporter(*args, **kwargs)
+    monkeypatch.setattr(catalog, "export_upstream", export)
+    new, selected, raw = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: old})
+    assert new["reuse_contract"] and calls == [True]
+    assert selected["online_freshness"] == "VERIFIED"
+    assert raw == (tmp_path / catalog.NAME).read_bytes()
+    same, selected, raw = catalog.plan_install(tmp_path, {catalog.RECORD_KEY: new})
+    assert same == new and raw is None and selected["compatible_reuse"]
+    assert calls == [True]
+
+
+def test_unrelated_runtime_update_reuses_catalog_while_offline(tmp_path, monkeypatch, pinned_test_thaliris):
+    import shutil
+    exe, _ = pinned_test_thaliris
+    home = tmp_path / "home"
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    complete_supply(monkeypatch)
+    assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))["ok"]
+    path = home / catalog.NAME
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    second_runtime = tmp_path / "second-runtime"
+    shutil.copytree(exe.parent.parent, second_runtime)
+    new_exe = second_runtime / "Scripts" / exe.name
+    monkeypatch.setattr(adapter, "_host_install_executable", lambda *_args: (new_exe, catalog.digest(new_exe.read_bytes()), None))
+    monkeypatch.setattr(catalog, "export_upstream", lambda *_args, **_kwargs: pytest.fail("offline update must reuse compatible catalog"))
+    result = adapter.codex_install(maintenance_contract=intent(tmp_path, home, new_exe))
+    assert result["ok"] and result["changed"] and result["catalog_goal_met"], result
+    assert result["native_model_catalog_compatibility"]["compatible_reuse"]
+    assert result["native_model_catalog_compatibility"]["online_freshness"] == "UNKNOWN"
+    assert before == (path.read_bytes(), path.stat().st_mtime_ns)

@@ -15,7 +15,7 @@ import thaliris
 from thaliris import core
 
 from thaliris_codex import codex_adapter as adapter, host_maintenance as maintenance, host_transition, lifecycle, runtime_identity, runtime_setup
-from tests.test_host_maintenance_contract import intent, snapshot
+from tests.test_host_maintenance_contract import snapshot
 from tests.test_runtime_setup import source_wheel
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="real Windows native preflight")
@@ -97,12 +97,20 @@ def pending_native(tmp_path, monkeypatch, pinned_test_thaliris, replay_runtime):
     monkeypatch.setenv("CODEX_HOME", str(home))
 
     def make_intent(exe, operation="codex-install", unicode=False):
-        path = intent(tmp_path, home, exe, operation)
-        value = json.loads(path.read_text(encoding="utf-8"))
+        path = tmp_path / (operation + ".json")
+        value = {"format": maintenance.FORMAT, "operation": operation,
+            "codex_home": str(home),
+            "human_instruction": "The human requests this exact reviewed Host maintenance operation.",
+            "installed_runtime_sha256": maintenance.digest((home / runtime_identity.MANIFEST_NAME).read_bytes())
+                if (home / runtime_identity.MANIFEST_NAME).is_file() else "ABSENT",
+            "legacy_owned_bytes": {}}
         if unicode:
             value["human_instruction"] += " Unicode intent: 雪 🪷 \ufeffpreserved"
         contents = runtime_identity.manifest_bytes(exe)
-        metadata = json.loads((exe.parent.parent / "Lib/site-packages/thaliris_codex-0.4.3.dist-info/direct_url.json").read_bytes())
+        metadata_files = list((exe.parent.parent / "Lib/site-packages").glob(
+            "thaliris_codex-*.dist-info/direct_url.json"))
+        assert len(metadata_files) == 1, metadata_files
+        metadata = json.loads(metadata_files[0].read_bytes())
         if "vcs_info" in metadata:
             source_pin = "git+" + metadata["url"] + "@" + metadata["vcs_info"]["commit_id"]
         else:
@@ -111,6 +119,7 @@ def pending_native(tmp_path, monkeypatch, pinned_test_thaliris, replay_runtime):
         value["executor"] = selected
         if operation == "codex-install":
             value["candidate"] = selected
+            value["execution_constraint"] = None
         path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
         return path
 

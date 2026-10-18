@@ -133,80 +133,59 @@ Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目
 
 ## 安装与本地开发
 
-pyproject.toml 声明 Python >=3.11，并依赖 thaliris>=0.4.6,<0.5。
+### 常规安装与更新：已发布版本
 
-Windows Python 3.11+ 的正常安装先创建临时 bootstrap 环境，再使用包内的
-runtime installer。请独立选择已审阅的 adapter 完整 commit。省略 `--runtime` 时，
-setup 会发现当前 Codex Host 的 package family，并在创建候选目录前通过 OS handle
-解析已有 LocalCache 的物理路径。外部启动的 bootstrap 只接受唯一注册的准确
-`OpenAI.Codex` package；无法唯一发现时会 fail closed。用户无需输入 Store 内部路径。
+截至此源码状态，Thaliris Codex 尚无已发布的 release。以下是首个 release 发布后使用的命令模板；tag workflow 尚未运行，六个平台门禁、GitHub attestations 和实际发布结果均未验证。Windows 用户只需已安装的系统 Python 3.11+。先选定明确的 release tag，下载该 tag 的 thaliris-bootstrap.py，并在执行前独立验证 bootstrap。另从独立可信渠道取得该版本 release.json 的 SHA-256；不要从同一份未认证 manifest 读取这个 digest。详细 trust 流程、离线用法和生命周期边界见[发行版生命周期](docs/release-lifecycle.md)。
 
-```powershell
-py -3.11 -m venv .thaliris-bootstrap
-$bootstrap = (Resolve-Path .thaliris-bootstrap\Scripts\python.exe).Path
-$adapterSource = 'git+https://github.com/Iris0fTheValley/Thaliris-codex.git@<reviewed-full-40-character-commit>'
-& $bootstrap -m pip install --no-deps $adapterSource
-$env:PYTHONDONTWRITEBYTECODE = '1'
-$runtime = (& $bootstrap -m thaliris_codex.runtime_setup --core-source 'git+https://github.com/Iris0fTheValley/Thaliris.git@31f8e6212adbd27be2f8af1f21811811b0882695' --adapter-source $adapterSource | ConvertFrom-Json)
-if (-not $runtime.ok) { throw $runtime.error }
-$exe = $runtime.executable
-& $exe version
-```
+~~~powershell
+$tag = '<selected-release-tag>'
+$releaseUrl = "https://github.com/Iris0fTheValley/Thaliris-codex/releases/download/$tag"
+$manifest = "$releaseUrl/release.json"
+$manifestSha256 = '<64-character SHA-256 from an independently trusted source>'
+$bootstrap = Join-Path $PWD 'thaliris-bootstrap.py'
+Invoke-WebRequest -Uri "$releaseUrl/thaliris-bootstrap.py" -OutFile $bootstrap
 
-确实需要指定自定义目录时，可附加 `--runtime 'D:\chosen\runtime'`；该路径仍会接受最终物理身份检查。默认流程会在已发现的 Host base 下创建新的唯一 runtime 目录。
+# Independently verify the downloaded bootstrap before running it.
+py -3.11 $bootstrap install --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human installation request>'
+~~~
 
-请将 adapter commit 占位符替换为独立审阅的已发布不可变版本。Host 维护使用 `codex-maintenance-plan` 和明确的 `--maintenance-contract FILE`，不依赖项目 init/task admission。原始授权安装记录证明 bytes ownership；候选内容相同不证明 ownership。未知项目 role 文档保留且不单独阻止 admission，真正控制指令冲突仍阻止。受支持的卸载和正常重装保留用户配置及恢复证据。公共流程和 legacy 批准边界见 [Host 维护](docs/thaliris-host-maintenance.md)。
+更新时，先将 $tag、$releaseUrl、$manifest、$manifestSha256 和 $bootstrap 设置为新 release，再下载并独立验证该 release 的 bootstrap。然后用新 manifest 和可信 digest 执行 update。status 报告磁盘与候选状态；repair 在相同的 ownership 规则下重试选定 release；uninstall 执行选定 release 的卸载器。所有操作都需要两个 trust inputs，maintenance 操作还需要实际的人类请求：
 
-`multi_agent_mode_hint_text` 兼容项把源码已核实的 Codex CLI 四个精确版本
-`0.162.0-alpha.17.2`、`0.162.0-alpha.2`、`0.162.0` 和 `0.162.1` 作为快速路径。
-其他成功报告版本的 CLI 会在隔离的临时 CODEX_HOME 和工作区中执行 prompt/type 能力检查：
-确认字符串可用、空字符串会抑制提示，并且整数配置被拒绝。检查向本机 loopback
-Responses sink 发送有限的合成文本任务。探测不复制当前用户配置或认证信息；Windows 通过
-`SHGetKnownFolderPath(FOLDERID_ProgramData)` 检查系统级 `OpenAI/Codex/config.toml` 与
-`requirements.toml`，Linux 检查 `/etc/codex/{config,requirements,managed_config}.toml`。
-路径存在、检查失败或平台配置层无法证明不存在时不会启动 exec；macOS managed preferences
-当前保持 UNKNOWN。确认这些路径缺失后，exec 明确传入 `--disable hooks --disable plugins`；
-这两个选项本身不屏蔽 managed hooks，因此必须先证明系统级层缺失。只有证据完整一致才会
-计划写入；明确矛盾报告 `CAPABILITY_INCOMPATIBLE`，证据缺失或含糊报告
-`VERSION_SUPPORT_UNKNOWN`。兼容时仍只在用户级字段缺失时写入空字符串；
-stable `0.162.0`/`0.162.1` 与 alpha `0.162.0-alpha.17.2` 的 schema 和原生空值处理已按 Codex 源码核验；`0.162.0-alpha.2` 对应 tag
-`rust-v0.162.0-alpha.2`、commit `74e804deeb1241d5fe699b31fb319f7d46454c42`；
-未知版本和用户已有值均保留。高优先级 project 配置或 CLI `-c` 仍可能覆盖它。字段
-ownership、正常升级/卸载入口和 fresh-session/Fresh Child 验收见 [Host 维护](docs/thaliris-host-maintenance.md)。
+~~~powershell
+py -3.11 $bootstrap update --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human update request>'
+py -3.11 $bootstrap status --manifest $manifest --manifest-sha256 $manifestSha256
+py -3.11 $bootstrap repair --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human repair request>'
+py -3.11 $bootstrap uninstall --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human uninstall request>'
+~~~
 
-可选等待指导把源码已核实的四个 Codex CLI 版本作为快速路径；其他成功报告版本的 CLI 使用同一隔离检查，确认 `developer_instructions` 字符串类型、实际 prompt 效果和错误类型拒绝。只有证据完整一致才会计划写入；明确矛盾报告 `CAPABILITY_INCOMPATIBLE`，证据缺失或含糊报告 `VERSION_SUPPORT_UNKNOWN`。指导只在字段缺失时加入；已有空值或自定义值保持原样。stable `0.162.0` 和 `0.162.1` 的原生 bounded-wait 契约为最短 10,000 ms、默认 30,000 ms、release hard maximum 3,600,000 ms；有效 per-session 上限以及 completion 是否重新进入当前 root 仍为 `UNAVAILABLE`/`UNKNOWN`。升级时，只有字段完整匹配可信旧回执中的精确片段才会自动迁移到当前文案；回执保留这些历史片段供恢复与卸载。用户编辑或无法验证的历史记录不会被覆盖。读写失败不阻断 Host 安装，写前先持久化 ownership journal；无法确认的结果保持 UNKNOWN。
+prepare 会验证并准备候选，不修改 Host。当前没有自动 latest 发现或无需 Python 的可执行程序。status 无法观察运行中的 Host 是否已加载 release 或完成重启，因此这些状态保持 UNKNOWN。非 Windows 平台需要为每条命令传入明确的 --cache 目录。release client 保留不属于它的 Host 字节；ownership 证据损坏时可能需要人工恢复。
 
+### 高级：源码开发
 
-setup 在创建候选目录前，通过 OS handle 解析自动发现的 Host LocalCache 物理 base，
-然后在创建 venv、安装包之前再次观察最终 runtime 目录。显式 `--runtime` 发生重定向时，
-报告应选择的物理路径，并且只清理由本次尝试创建的空 leaf；预先存在或非空目录保持原样。
-位置 anchor 与 Windows launcher 内嵌的 interpreter 必须绑定同一目录。setup 使用普通最终路径 `thaliris.exe runtime-check`，禁用 bytecode
-写入并验证实际 interpreter；维护选择在生成 contract 前重复该无副作用检查。
-setup 与安装切换前还会运行独立 PowerShell 预检。正常入口失效时的明确授权维护路径见 [启动器预检恢复](docs/host-preflight-recovery.md)。
-准备、contract 和最终 Host 安装使用同一目录。禁止复制、移动或重命名已安装 venv；
-旧 interpreter 仍存在时，重算 manifest 也不能批准 relocation。通过重定向检查后出现失败时
-保留候选，并在正确最终目录直接重新创建。
+源码开发与普通安装或更新分开。pyproject.toml 要求 Python >=3.11，并依赖 thaliris>=0.4.6,<0.5。默认 Core 配对只记录在 [release/core.lock.json](release/core.lock.json)；从该文件读取所选 commit，不要在 README 中复制另一份 revision：
 
-本地开发使用已审阅的 Core checkout：
+~~~powershell
+$coreCommit = (Get-Content release/core.lock.json -Raw | ConvertFrom-Json).commit
+$coreCommit
+~~~
 
-```sh
+准备好本地 Core 和 Adapter checkout 后，安装 Core 的 test extra 与 Adapter checkout，再指定 Core 源码目录并运行 Adapter 测试：
+
+~~~sh
 python -m pip install -e '../Thaliris[test]'
 python -m pip install --no-deps -e '.[test]'
-```
+~~~
 
-离线恢复 source-runner 测试需要设置 THALIRIS_CORE_SOURCE，指向包含
-src/thaliris/core.py 的 Core checkout 根目录。runner 会明确加载该源码 checkout，
-不会把已安装的 Core package 当作已审阅源码。PowerShell 中，在运行测试前设置：
+离线恢复 source-runner 测试要求 THALIRIS_CORE_SOURCE 指向包含 src/thaliris/core.py 的 Core checkout；runner 会明确加载该源码，而不把已安装 Core package 当作经过审阅的源码。PowerShell 中：
 
-```powershell
+~~~powershell
 $env:THALIRIS_CORE_SOURCE = (Resolve-Path '../Thaliris').Path
-pytest
-```
+python -m pytest
+~~~
 
-POSIX shell 中，先设置 THALIRIS_CORE_SOURCE=../Thaliris，再运行 pytest。
-CI 将该变量指向 shared-core checkout。
+POSIX shell 中，设置 THALIRIS_CORE_SOURCE=../Thaliris 后运行 python -m pytest。CI 的默认 Core 配对也从 release/core.lock.json 读取；手动触发的 workflow 可以选择其他 core_ref。源码和 Host 集成细节见 [Codex 集成说明](adapter/codex/README.md)及 [Host 维护说明](docs/thaliris-host-maintenance.md)。
 
-安装不等于 Host 启用或信任。参见 [集成说明](adapter/codex/README.md)、[authority](docs/thaliris-task-authority.md) 与 [恢复](docs/thaliris-runtime-recovery.md)。installer 创建不含 ensurepip 的专用环境，再通过 bootstrap 的 pip 安装两个已选择的包；pip、setuptools 和构建依赖留在 runtime 之外，无需手工修复 `.pth`。system site packages 禁用，可执行或扩展导入路径的 `.pth` 仍无例外地拒绝。也支持 `absolute-wheel-path#sha256=<reviewed-digest>` 形式的已校验本地 wheel。整个环境的文件（含共享 Core）被纳入 manifest；固定目录保持不可变，升级使用新的 runtime 目录。
+源码测试和磁盘安装都不能证明当前 Host 已加载或信任这些文件。项目指令的 authority 和恢复契约见 [authority](docs/thaliris-task-authority.md) 与[运行时恢复](docs/thaliris-runtime-recovery.md)。
 
 ## 项目任务的启动与恢复
 
@@ -271,7 +250,7 @@ Core 将该可选非空字符串作为不可变 intent 保存；适配器只接�
 
 ## CI 与平台兼容范围
 
-CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认使用 Core 固定 revision `31f8e6212adbd27be2f8af1f21811811b0882695`，仅手动 workflow 可显式改选 `core_ref`。POSIX runtime identity 检查仅接受 `lib64 -> lib` 的精确虚拟环境别名，并验证目标漂移会被拒绝。Hook transport 只把一个文档起始 UTF-8 BOM 当作传输标记；重复/错位 BOM 与无效 UTF-8/JSON 仍拒绝。Hook 诊断只输出有界 JSON boundary label，不输出 payload，也不推断更深根因。CI 和源测试不证明某个当前安装的 Codex 进程已经加载这些内容。
+CI 矩阵覆盖 Ubuntu 和 Windows 上的 Python 3.11、3.12、3.13；默认 Core 配对从 [release/core.lock.json](release/core.lock.json) 读取，仅手动 workflow 可显式改选 core_ref。POSIX runtime identity 检查仅接受 `lib64 -> lib` 的精确虚拟环境别名，并验证目标漂移会被拒绝。Hook transport 只把一个文档起始 UTF-8 BOM 当作传输标记；重复/错位 BOM 与无效 UTF-8/JSON 仍拒绝。Hook 诊断只输出有界 JSON boundary label，不输出 payload，也不推断更深根因。CI 和源测试不证明某个当前安装的 Codex 进程已经加载这些内容。
 
 ## 运行时提示词层
 

@@ -9,8 +9,35 @@ on:
         required: false
         type: string
         default: ""
+  workflow_call:
+    inputs:
+      core_ref:
+        description: "Optional Core compatibility ref; release callers use the reviewed pin by omitting this input."
+        required: false
+        type: string
+        default: ""
 jobs:
+  pairing:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.pin.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - id: pin
+        shell: python
+        env:
+          COMPATIBILITY_REF: ${{ inputs.core_ref }}
+        run: |
+          import json, os
+          from pathlib import Path
+          value = os.environ.get('COMPATIBILITY_REF') or json.loads(Path('release/core.lock.json').read_bytes())['commit']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('commit=' + value + '\n')
   test:
+    needs: pairing
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     strategy:
       fail-fast: false
@@ -26,7 +53,7 @@ jobs:
         with:
           repository: Iris0fTheValley/Thaliris
           path: shared-core
-          ref: ${{ inputs.core_ref || '2766a9ddee6671bd9154f2e067d630377a31799c' }}
+          ref: ${{ needs.pairing.outputs.commit }}
       - name: Selected Core identity
         run: 'git -C shared-core show -s --format="Core commit: %H%nSubject: %s" HEAD'
       - uses: actions/setup-python@v5

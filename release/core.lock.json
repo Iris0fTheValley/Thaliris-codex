@@ -1,0 +1,5 @@
+{
+  "repository": "Iris0fTheValley/Thaliris",
+  "commit": "973f0f73b79142783be1eff6e6a639743de310a0",
+  "reason": "Core 0.4.6 with explicit non-Git project lifecycle required by adapter acceptance."
+}

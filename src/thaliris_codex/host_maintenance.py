@@ -16,7 +16,9 @@ RECEIPT_NAME = "thaliris-ownership.json"
 FORMAT = "thaliris-host-maintenance-v1"
 RECEIPT_FORMAT = "thaliris-authorized-host-installation-v1"
 CATALOG_RECEIPT_FORMAT = "thaliris-authorized-host-installation-v2"
+RELEASE_RECEIPT_FORMAT = "thaliris-authorized-host-installation-v3"
 CATALOG_CAPABILITY = "receipt-owned-model-catalog-v1"
+RELEASE_CAPABILITY = "receipt-owned-release-binding-v1"
 
 
 def digest(value: bytes) -> str:
@@ -44,7 +46,8 @@ def selected_runtime(value: object) -> tuple[Path, bytes]:
 
 
 def _selected_runtime(value: object) -> tuple[Path, bytes]:
-    if not isinstance(value, dict) or set(value) != {"executable", "runtime_sha256", "source_pin"}:
+    fields = {"executable", "runtime_sha256", "source_pin"}
+    if not isinstance(value, dict) or set(value) not in (fields, fields | {"release_binding"}):
         raise ValueError("maintenance requires an independently selected runtime identity and immutable source pin")
     source = value["source_pin"]
     if not isinstance(source, str) or re.search(r"(?:@|/commit/)[0-9a-f]{40}(?:$|[#/])|sha256:[0-9a-f]{64}$", source) is None:
@@ -70,6 +73,9 @@ def _selected_runtime(value: object) -> tuple[Path, bytes]:
         url = source.removeprefix("git+").split("@" + match.group(1), 1)[0] if match else None
         if match is None or vcs.get("vcs") != "git" or vcs.get("commit_id") != match.group(1) or direct.get("url") != url:
             raise ValueError("approved source pin differs from installed immutable VCS provenance")
+    if "release_binding" in value:
+        from . import release_identity
+        release_identity.validate_selected(value, runtime)
     # Execute only after isolation, exact bytes and independent installed
     # provenance are checked. Rehashing a relocated venv supplies no admission.
     runtime_identity.console_smoke(exe.resolve(strict=True), contents)
@@ -117,6 +123,12 @@ def _contract_document(filename: str | Path | None, operation: str, home: Path, 
         raise ValueError("HOST_MAINTENANCE_ACTOR_DENIED")
     from . import catalog_recovery
     catalog_recovery.policy_from_intent(value)
+    if type(value.get("refresh_model_catalog", False)) is not bool:
+        raise ValueError("model catalog refresh intent must be boolean")
+    if value.get("model_catalog_source", "online") not in {"online", "bundled"}:
+        raise ValueError("model catalog source must be online or explicitly bundled")
+    if operation != "codex-install" and value.get("refresh_model_catalog", False):
+        raise ValueError("model catalog refresh requires codex-install intent")
     return value, raw
 
 
@@ -132,7 +144,8 @@ def validate_ownership(contents: bytes | None, installed: bytes | None, intent: 
         # Neither historical render hashes nor candidate equality supply it.
         return {"owned_bytes": intent.get("legacy_owned_bytes", {}), "hook_handlers": {}}
     record = json.loads(contents)
-    if not isinstance(record, dict) or record.get("format") not in {RECEIPT_FORMAT, CATALOG_RECEIPT_FORMAT} or (
+    if not isinstance(record, dict) or record.get("format") not in {RECEIPT_FORMAT, CATALOG_RECEIPT_FORMAT,
+                                                                    RELEASE_RECEIPT_FORMAT} or (
             record.get("runtime_sha256") != (digest(installed) if installed is not None else "ABSENT")):
         raise ValueError("installed ownership record does not match trusted current installation")
     if not re.fullmatch(r"[0-9a-f]{64}", record.get("maintenance_contract_sha256", "")):
@@ -155,21 +168,194 @@ def validate_ownership(contents: bytes | None, installed: bytes | None, intent: 
     mode_hint_config.validate(record.get(mode_hint_config.RECORD_KEY))
     wait_guidance_config.validate(record.get(wait_guidance_config.RECORD_KEY))
     model_catalog_config.validate(record.get(model_catalog_config.RECORD_KEY))
+    catalog_owned = record.get(model_catalog_config.RECORD_KEY) is not None
+    expected_capabilities = ([RELEASE_CAPABILITY] if record["format"] == RELEASE_RECEIPT_FORMAT else [])
+    if catalog_owned and record["format"] in {CATALOG_RECEIPT_FORMAT, RELEASE_RECEIPT_FORMAT}:
+        expected_capabilities.append(CATALOG_CAPABILITY)
     if record["format"] == CATALOG_RECEIPT_FORMAT and (
-            record.get(model_catalog_config.RECORD_KEY) is None or
-            record.get("required_capabilities") != [CATALOG_CAPABILITY]):
+            not catalog_owned or record.get("required_capabilities") != [CATALOG_CAPABILITY]):
         raise ValueError("invalid required model catalog receipt capability")
+    if record["format"] == RELEASE_RECEIPT_FORMAT and (
+            "release_binding" not in record or record.get("required_capabilities") != expected_capabilities):
+        raise ValueError("invalid required release receipt capability")
     if record["format"] == RECEIPT_FORMAT and "required_capabilities" in record:
         raise ValueError("legacy receipt cannot declare required capabilities")
     from . import catalog_recovery
     catalog_recovery.validate_policy(record.get(catalog_recovery.POLICY_KEY))
-    if record.get(catalog_recovery.POLICY_KEY) is not None and record["format"] != CATALOG_RECEIPT_FORMAT:
+    if record.get(catalog_recovery.POLICY_KEY) is not None and record["format"] not in {
+            CATALOG_RECEIPT_FORMAT, RELEASE_RECEIPT_FORMAT} or (
+            record.get(catalog_recovery.POLICY_KEY) is not None and not catalog_owned):
         raise ValueError("legacy ownership cannot authorize independent catalog recovery")
+    if record["format"] == RELEASE_RECEIPT_FORMAT:
+        from . import release_identity
+        manifest = release_identity.validate_binding(record["release_binding"])
+        if record.get("source_pin") != "sha256:" + manifest["artifacts"]["adapter"]["sha256"]:
+            raise ValueError("installed release binding differs from Adapter source pin")
+        if installed is None:
+            raise ValueError("release ownership requires an installed runtime")
     return record
+
+
+def selected_release_binding(selection: dict, runtime: bytes, previous: dict) -> dict | None:
+    binding = selection.get("release_binding")
+    if (binding is None and previous.get("format") == RELEASE_RECEIPT_FORMAT
+            and previous.get("runtime_sha256") == digest(runtime)
+            and previous.get("source_pin") == selection["source_pin"]):
+        binding = previous.get("release_binding")
+    if binding is not None:
+        from . import release_identity
+        release_identity.validate_selected(selection | {"release_binding": binding}, json.loads(runtime))
+    return binding
 
 
 def owned(record: dict, name: str, contents: bytes) -> bool:
     return record.get("owned_bytes", {}).get(name) == digest(contents)
+
+
+def surface_status(home: Path, record: dict) -> dict:
+    """Compare current Host surfaces with recorded ownership without rendering.
+
+    Only receipt hashes, owned hook entries and saved config fragments are
+    authoritative here. Unrelated user values in shared files remain outside
+    the comparison.
+    """
+    from . import lifecycle, host_preflight, roles, host_transition
+    from . import mode_hint_config, wait_guidance_config, model_catalog_config as catalog
+
+    owned_files: dict[str, str] = {}
+    preserved: list[str] = []
+    manual: list[str] = []
+    full_file_names = {lifecycle.HOST_HOOK_SCRIPT_NAME, lifecycle.HOST_RUN_SCRIPT_NAME,
+                       host_preflight.NAME, "AGENTS.md", "hooks.json"}
+
+    def mark(name: str, status: str) -> str:
+        if status == "USER_CHANGED_PRESERVED":
+            preserved.append(name)
+            manual.append(f"Preserve and review changed Host-owned surface: {name}")
+        return status
+
+    def receipt_path(name: str) -> Path | None:
+        if (not isinstance(name, str) or not name or name.startswith(("/", "\\"))
+                or "\\" in name or ":" in name):
+            return None
+        parts = name.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            return None
+        if name in full_file_names:
+            return home / name
+        if len(parts) == 2 and parts[0] == "agents" and host_transition._profile_name(name):
+            return home / name
+        # A receipt cannot direct diagnostics to arbitrary user paths.
+        return None
+
+    for name, expected in record.get("owned_bytes", {}).items():
+        if name == "AGENTS.md#global":
+            continue
+        path = receipt_path(name)
+        if path is None:
+            owned_files[name] = mark(name, "UNKNOWN")
+            manual.append(f"Unrecognized Host-owned path requires review: {name}")
+            continue
+        try:
+            safe(path)
+            actual = path.read_bytes() if path.exists() else None
+            owned_files[name] = mark(name, "MATCH" if actual is not None and digest(actual) == expected
+                                     else "USER_CHANGED_PRESERVED")
+        except (OSError, ValueError, RuntimeError):
+            owned_files[name] = mark(name, "UNKNOWN")
+            manual.append(f"Host-owned surface could not be read safely: {name}")
+
+    global_agents = "NOT_MANAGED"
+    expected_global = record.get("owned_bytes", {}).get("AGENTS.md#global")
+    if expected_global is not None:
+        try:
+            path = home / "AGENTS.md"
+            safe(path)
+            actual = _global_owned_bytes(path.read_bytes()) if path.exists() else None
+            global_agents = mark("AGENTS.md#global", "MATCH" if actual is not None and
+                                 digest(actual) == expected_global else "USER_CHANGED_PRESERVED")
+        except (OSError, ValueError, RuntimeError):
+            global_agents = "UNKNOWN"
+            manual.append("Host-owned AGENTS.md block could not be read safely")
+
+    hook_status = "NOT_MANAGED"
+    handlers = record.get("hook_handlers", {})
+    if any(entries for entries in handlers.values()):
+        try:
+            path = home / "hooks.json"
+            safe(path)
+            raw = path.read_bytes() if path.exists() else None
+            if raw is None:
+                hook_status = "USER_CHANGED_PRESERVED"
+            else:
+                hooks = json.loads(raw)
+                event_map = hooks.get("hooks", {}) if isinstance(hooks, dict) else None
+                hook_status = "MATCH"
+                if not isinstance(event_map, dict):
+                    hook_status = "USER_CHANGED_PRESERVED"
+                else:
+                    for event, expected_entries in handlers.items():
+                        actual_entries = event_map.get(event, [])
+                        if not isinstance(actual_entries, list):
+                            hook_status = "USER_CHANGED_PRESERVED"
+                            break
+                        remaining = list(actual_entries)
+                        for entry in expected_entries:
+                            try:
+                                index = remaining.index(entry)
+                            except ValueError:
+                                hook_status = "USER_CHANGED_PRESERVED"
+                                break
+                            del remaining[index]
+                        if hook_status != "MATCH":
+                            break
+            hook_status = mark("hooks.json#owned-handlers", hook_status)
+        except (OSError, ValueError, RuntimeError, TypeError):
+            hook_status = "UNKNOWN"
+            manual.append("Host-owned hooks.json handlers could not be read safely")
+
+    config_statuses = {mode_hint_config.RECORD_KEY: "NOT_MANAGED",
+                       wait_guidance_config.RECORD_KEY: "NOT_MANAGED",
+                       catalog.RECORD_KEY: "NOT_MANAGED"}
+    if any(record.get(key) is not None for key in config_statuses):
+        try:
+            raw, config = mode_hint_config.read(home)
+            mode_record = record.get(mode_hint_config.RECORD_KEY)
+            if mode_record is not None:
+                config_statuses[mode_hint_config.RECORD_KEY] = mark(
+                    mode_hint_config.RECORD_KEY,
+                    "MATCH" if mode_hint_config.matches(raw, config, mode_record) else "USER_CHANGED_PRESERVED")
+            wait_record = record.get(wait_guidance_config.RECORD_KEY)
+            if wait_record is not None:
+                matched = wait_guidance_config._matching_fragment(raw, config, wait_record)
+                config_statuses[wait_guidance_config.RECORD_KEY] = mark(
+                    wait_guidance_config.RECORD_KEY, "MATCH" if matched is not None else "USER_CHANGED_PRESERVED")
+            catalog_record = record.get(catalog.RECORD_KEY)
+            if catalog_record is not None:
+                backing = catalog.read_catalog(home)
+                config_matches = catalog.matches(raw, config, catalog_record)
+                backing_matches = backing is not None and digest(backing) == catalog_record["catalog_sha256"]
+                config_statuses[catalog.RECORD_KEY] = mark(
+                    catalog.RECORD_KEY, "MATCH" if config_matches and backing_matches else "USER_CHANGED_PRESERVED")
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError):
+            for key, value in record.items():
+                if key in config_statuses and value is not None and config_statuses[key] == "NOT_MANAGED":
+                    config_statuses[key] = "UNKNOWN"
+                    manual.append(f"Host-owned config fragment could not be read safely: {key}")
+
+    observed = list(owned_files.values()) + [global_agents, hook_status, *config_statuses.values()]
+    if "USER_CHANGED_PRESERVED" in observed:
+        overall = "USER_CHANGED_PRESERVED"
+    elif "UNKNOWN" in observed:
+        overall = "UNKNOWN"
+    elif any(status != "NOT_MANAGED" for status in observed):
+        overall = "MATCH"
+    else:
+        overall = "NO_MANAGED_HOST_SURFACES"
+    return {"status": overall, "owned_files": owned_files, "global_agents": global_agents,
+            "owned_hooks": hook_status, "owned_config_fragments": config_statuses,
+            "preserved_user_modifications": sorted(set(preserved)),
+            "manual_action_required": list(dict.fromkeys(manual))}
 
 
 def remove_recorded_hooks(original: dict, record: dict) -> dict:
@@ -404,7 +590,9 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
         record = ownership(home, prior, intent)
         hint_record, hint_status = mode_hint_config.plan_install(home, record)
         wait_guidance_record, wait_guidance_status, wait_guidance_previous_record = wait_guidance_config.plan_install(home, record)
-        catalog_record, catalog_status, catalog_bytes = catalog.plan_install(home, record, source=intent.get("model_catalog_source", "online"))
+        catalog_record, catalog_status, catalog_bytes = catalog.plan_install(
+            home, record, source=intent.get("model_catalog_source", "online"),
+            refresh=intent.get("refresh_model_catalog", False))
         if catalog_status["status"] not in {"PLANNED", "UPDATE_PLANNED", "MANAGED", "USER_CONFIG_PRESERVED", "USER_CATALOG_PRESERVED", "USER_CHANGED_PRESERVED"}:
             result = _failure(home, ValueError("native_model_catalog_compatibility:" + catalog_status["status"]))
             result.update(native_model_catalog_compatibility=catalog_status,
@@ -508,11 +696,13 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             # Reinstallation creates a fresh active integration. A completed
             # past restoration cannot authorize reinserting a later user deletion.
             recovery_policy = {key: value for key, value in recovery_policy.items() if key != "restored"}
-        receipt_format = CATALOG_RECEIPT_FORMAT if catalog_record is not None else RECEIPT_FORMAT
-        installation_changed = record.get("format") != receipt_format or recovery_policy != record.get(catalog_recovery.POLICY_KEY) or catalog_record != record.get(catalog.RECORD_KEY) or hint_status["status"] == "PLANNED" or wait_guidance_status["status"] in {"PLANNED", "MIGRATION_PLANNED"} or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
+        release_binding = selected_release_binding(intent["candidate"], runtime, record)
+        receipt_format = (RELEASE_RECEIPT_FORMAT if release_binding is not None else
+                          CATALOG_RECEIPT_FORMAT if catalog_record is not None else RECEIPT_FORMAT)
+        installation_changed = record.get("release_binding") != release_binding or record.get("format") != receipt_format or recovery_policy != record.get(catalog_recovery.POLICY_KEY) or catalog_record != record.get(catalog.RECORD_KEY) or hint_status["status"] == "PLANNED" or wait_guidance_status["status"] in {"PLANNED", "MIGRATION_PLANNED"} or bool(deletes) or prior is None or prior != runtime or RECEIPT_NAME not in before or any(
             before.get(name) != contents for name, contents in writes.items()
         )
-        receipt = {"format": CATALOG_RECEIPT_FORMAT if catalog_record is not None else RECEIPT_FORMAT, "runtime_sha256": digest(runtime),
+        receipt = {"format": receipt_format, "runtime_sha256": digest(runtime),
                    "execution_constraint": execution_constraint,
                    "maintenance_contract_sha256": intent["contract_sha256"] if installation_changed else record["maintenance_contract_sha256"],
                    "source_pin": intent["candidate"]["source_pin"] if installation_changed else record.get("source_pin", intent["candidate"]["source_pin"]),
@@ -521,6 +711,8 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
                                    if name not in {"AGENTS.md", "hooks.json", runtime_identity.MANIFEST_NAME, catalog.NAME}
                                    and not name.startswith("instruction_migrations/")},
                    "hook_handlers": hook_handlers}
+        if release_binding is not None:
+            receipt["release_binding"] = release_binding
         receipt["owned_bytes"]["AGENTS.md#global"] = digest(_global_owned_bytes(writes["AGENTS.md"]))
         if hint_record is not None:
             receipt[mode_hint_config.RECORD_KEY] = hint_record
@@ -528,9 +720,14 @@ def install(home: Path, executable, executable_sha256, execution_constraint, fil
             receipt[wait_guidance_config.RECORD_KEY] = wait_guidance_record
         if catalog_record is not None:
             receipt[catalog.RECORD_KEY] = catalog_record
-            receipt["required_capabilities"] = [CATALOG_CAPABILITY]
             if recovery_policy is not None:
                 receipt[catalog_recovery.POLICY_KEY] = recovery_policy
+        if receipt_format == RELEASE_RECEIPT_FORMAT:
+            receipt["required_capabilities"] = [RELEASE_CAPABILITY]
+            if catalog_record is not None:
+                receipt["required_capabilities"].append(CATALOG_CAPABILITY)
+        elif receipt_format == CATALOG_RECEIPT_FORMAT:
+            receipt["required_capabilities"] = [CATALOG_CAPABILITY]
         writes[RECEIPT_NAME] = (json.dumps(receipt, sort_keys=True, ensure_ascii=False) + "\n").encode()
         observed = _files(home)
         if catalog.read_catalog(home) is not None:

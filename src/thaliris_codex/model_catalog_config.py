@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import inspect
 import json
 from pathlib import Path
 import re
@@ -80,6 +81,57 @@ _KNOWN_TARGET_CONTEXT = {
 
 def digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def reuse_contract(source: str, evidence: dict) -> dict | None:
+    """Bind reuse to the actual executable and this transformation contract."""
+    cli_sha = evidence.get("cli_sha256")
+    if not isinstance(cli_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", cli_sha):
+        return None
+    try:
+        implementation = inspect.getsource(patch_catalog)
+    except (OSError, TypeError):
+        return None
+    transformation = {"format": "exact-target-line-v1", "target": TARGET,
+                      "contexts": _KNOWN_TARGET_CONTEXT,
+                      "implementation": implementation}
+    profile = _MODEL_PROFILES[source]
+    roster = {key: sorted(value) for key, value in profile.items()}
+    return {"format": "thaliris-catalog-reuse-v1", "cli_sha256": cli_sha,
+            "transformation_sha256": digest(json.dumps(transformation, sort_keys=True).encode()),
+            "roster_sha256": digest(json.dumps(roster, sort_keys=True).encode())}
+
+
+def current_cli_identity() -> dict | None:
+    """Observe direct executable bytes; launcher scripts cannot prove a binary."""
+    executable = shutil.which("codex")
+    if executable is None:
+        return None
+    path = Path(executable)
+    if path.suffix.lower() in {".cmd", ".bat", ".ps1", ".sh", ".py", ".js"}:
+        return None
+    try:
+        binary = path.read_bytes()
+        if binary.startswith(b"#!"):
+            return None
+        identity = digest(binary)
+        result = subprocess.run([executable, "--version"], capture_output=True, timeout=10, check=False)
+        version = result.stdout.decode("utf-8", "replace").strip()
+        if result.returncode or cache_client_version(version) is None or digest(path.read_bytes()) != identity:
+            return None
+        return {"cli_version": version, "cli_sha256": identity}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def compatible_owned_source(record: dict, source: str) -> bool:
+    if record.get("reuse_contract", {}).get("format") != "thaliris-catalog-reuse-v1":
+        return False
+    identity = current_cli_identity()
+    proof = reuse_contract(source, identity) if identity is not None else None
+    return (identity is not None and record["source"]["kind"] == source
+            and record["source"]["cli_version"] == identity["cli_version"]
+            and proof is not None and record["reuse_contract"] == proof)
 
 
 def cache_client_version(cli_version: str) -> str | None:
@@ -179,7 +231,8 @@ def fragment(home: Path, newline: str) -> str:
 def validate(record: object, home: Path | None = None) -> None:
     if record is None:
         return
-    if not isinstance(record, dict) or set(record) != {"path", "catalog_path", "prior", "fragment", "catalog_sha256", "source"}:
+    fields = {"path", "catalog_path", "prior", "fragment", "catalog_sha256", "source"}
+    if not isinstance(record, dict) or set(record) not in (fields, fields | {"reuse_contract"}):
         raise ValueError("invalid model catalog ownership record")
     if record["prior"] != {"present": False} or not all(isinstance(record[k], str) for k in ("path", "catalog_path", "fragment", "catalog_sha256")):
         raise ValueError("invalid model catalog ownership fields")
@@ -196,6 +249,18 @@ def validate(record: object, home: Path | None = None) -> None:
     source = record["source"]
     if not isinstance(source, dict) or source.get("kind") not in {"bundled", "online"} or not isinstance(source.get("cli_version"), str) or not re.fullmatch(r"[0-9a-f]{64}", source.get("upstream_sha256", "")):
         raise ValueError("invalid model catalog upstream provenance")
+    if "reuse_contract" in record:
+        proof = record["reuse_contract"]
+        if not isinstance(proof, dict):
+            raise ValueError("invalid model catalog reuse contract")
+        # An unrecognized reuse schema grants no reuse. Exact byte ownership is
+        # still independently valid and a real export can migrate its evidence.
+        if proof.get("format") == "thaliris-catalog-reuse-v1" and (
+                set(proof) != {"format", "cli_sha256", "transformation_sha256", "roster_sha256"}
+                or any(not isinstance(proof.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", proof[key])
+                       for key in ("cli_sha256", "transformation_sha256", "roster_sha256"))
+                or proof["cli_sha256"] != source.get("cli_sha256")):
+            raise ValueError("invalid model catalog reuse contract")
 
 
 def matches(raw: bytes, config: dict, record: dict) -> bool:
@@ -321,7 +386,7 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
                                "online_freshness": "VERIFIED" if source == "online" else "UNKNOWN"}
 
 
-def plan_install(home: Path, ownership: dict, *, source: str = "online") -> tuple[dict | None, dict, bytes | None]:
+def plan_install(home: Path, ownership: dict, *, source: str = "online", refresh: bool = False) -> tuple[dict | None, dict, bytes | None]:
     original_record = ownership.get(RECORD_KEY)
     validate(original_record, home)
     record = original_record
@@ -329,6 +394,8 @@ def plan_install(home: Path, ownership: dict, *, source: str = "online") -> tupl
     restored_field_reacquired = False
     if source not in {"online", "bundled"}:
         raise ValueError("model catalog source must be online or explicitly bundled")
+    if type(refresh) is not bool:
+        raise ValueError("model catalog refresh intent must be boolean")
     if original_record and original_record["source"]["kind"] == "online" and source == "bundled":
         return original_record, status("SOURCE_DOWNGRADE_PRESERVED"), None
     try:
@@ -373,6 +440,10 @@ def plan_install(home: Path, ownership: dict, *, source: str = "online") -> tupl
             return None, status("USER_CATALOG_PRESERVED"), None
         record = retained
         retained_backing_reclaimed = True
+    if (original_record and not refresh and not retained_backing_reclaimed and not restored_field_reacquired
+            and compatible_owned_source(original_record, source)):
+        return original_record, status("MANAGED", source=original_record["source"],
+                                       compatible_reuse=True), None
     try:
         upstream, evidence = export_upstream(home, source=source)
         if evidence.get("kind") != source:
@@ -388,6 +459,9 @@ def plan_install(home: Path, ownership: dict, *, source: str = "online") -> tupl
     updated = {"path": str((home / "config.toml").absolute()), "catalog_path": str((home / NAME).absolute()),
                "prior": {"present": False}, "fragment": record["fragment"] if record else fragment(home, newline),
                "catalog_sha256": digest(patched), "source": evidence | {"upstream_sha256": digest(upstream)}}
+    proof = reuse_contract(source, evidence)
+    if proof is not None:
+        updated["reuse_contract"] = proof
     validate(updated, home)
     if retained_backing_reclaimed:
         planned_status = "PLANNED"
@@ -395,7 +469,8 @@ def plan_install(home: Path, ownership: dict, *, source: str = "online") -> tupl
         planned_status = "UPDATE_PLANNED"
     else:
         planned_status = "MANAGED" if record and patched == current else "UPDATE_PLANNED" if record else "PLANNED"
-    facts = {"source": updated["source"], "template_compatibility": compatibility}
+    facts = {"source": updated["source"], "template_compatibility": compatibility,
+             "online_freshness": "VERIFIED" if source == "online" and evidence.get("online_freshness") == "VERIFIED" else "UNKNOWN"}
     if retained_backing_reclaimed:
         facts["retained_backing_reclaimed"] = True
     if restored_field_reacquired:
@@ -422,7 +497,7 @@ def apply(home: Path, record: dict | None, *, remove=False, allow_insert=False) 
         if current is None or digest(current) != record["catalog_sha256"]:
             return status("CATALOG_CHANGED_PRESERVED")
         if matched:
-            return status("MANAGED", source=record["source"], online_freshness="VERIFIED" if record["source"]["kind"] == "online" else "UNKNOWN")
+            return status("MANAGED", source=record["source"])
         if KEY in config or not allow_insert:
             return status("USER_CHANGED_PRESERVED")
         after = field._insert(raw, record["fragment"].encode())
@@ -433,7 +508,7 @@ def apply(home: Path, record: dict | None, *, remove=False, allow_insert=False) 
     _atomic_host_write(home / "config.toml", after)
     if read(home)[0] != after:
         raise ValueError("model catalog config write verification failed")
-    return status("RESTORED_ABSENT" if remove else "MANAGED", changed=True, source=record["source"], online_freshness="VERIFIED" if record["source"]["kind"] == "online" else "UNKNOWN")
+    return status("RESTORED_ABSENT" if remove else "MANAGED", changed=True, source=record["source"])
 
 
 def finish_install(home: Path, transition: dict) -> dict:
@@ -443,9 +518,17 @@ def finish_install(home: Path, transition: dict) -> dict:
     if selected["status"] not in {"PLANNED", "UPDATE_PLANNED", "MANAGED"}:
         return selected
     record = finish["model_catalog_record"]
+    # Finalization may be replayed after a committed transition. Historical
+    # reuse evidence cannot certify a Codex binary replaced in the meantime.
+    if selected.get("compatible_reuse") is True and not compatible_owned_source(record, record["source"]["kind"]):
+        return status("VERSION_SUPPORT_UNKNOWN")
     def report(result):
         if "template_compatibility" in selected:
             result["template_compatibility"] = selected["template_compatibility"]
+        if result["status"] == "MANAGED":
+            result["online_freshness"] = selected.get("online_freshness", "UNKNOWN")
+            if selected.get("compatible_reuse") is True:
+                result["compatible_reuse"] = True
         return result
     needs_insert = (
         selected["status"] == "PLANNED" or
@@ -490,6 +573,12 @@ def validate_transition(finish: dict, previous: dict, next_record: dict | None, 
     if selected not in allowed:
         raise ValueError("invalid model catalog planning status")
     status_record = finish.get("model_catalog_status", {})
+    if status_record.get("compatible_reuse") is True and (
+            selected != "MANAGED" or new is None or new != old or before.get(NAME) != after.get(NAME)
+            or new.get("reuse_contract") is None
+            or new["reuse_contract"] != reuse_contract(new["source"]["kind"], new["source"])
+            or status_record.get("online_freshness") != "UNKNOWN"):
+        raise ValueError("model catalog reuse lacks unchanged compatibility evidence")
     reclaimed = status_record.get("retained_backing_reclaimed") is True
     restored = status_record.get("restored_field_reacquired") is True
     if selected in {"PLANNED", "UPDATE_PLANNED", "MANAGED"}:

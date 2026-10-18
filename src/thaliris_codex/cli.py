@@ -110,6 +110,7 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--executable", required=True)
     plan.add_argument("--source-pin", required=True)
     plan.add_argument("--human-instruction", required=True)
+    plan.add_argument("--refresh-model-catalog", action="store_true", help="explicitly request an upstream catalog refresh")
     plan.add_argument("--execution-constraint", choices=roles.EXECUTION_CONSTRAINTS)
     plan.add_argument("--catalog-recovery-project-root", type=Path, help="propose SessionStart catalog restoration after loss of this project's activation marker; defaults to --root")
     plan.add_argument("--catalog-recovery-source-root", type=Path, help="also propose restoration when this explicitly selected source directory disappears")
@@ -370,6 +371,8 @@ def main(argv: list[str] | None = None) -> int:
                 "legacy_owned_bytes": {}}
             if args.operation == "codex-install":
                 intent.update(candidate=selected, execution_constraint=args.execution_constraint)
+                if args.refresh_model_catalog:
+                    intent["refresh_model_catalog"] = True
                 intent["catalog_recovery_project_root"] = str((args.catalog_recovery_project_root or root).resolve())
                 if args.catalog_recovery_source_root is not None:
                     intent["catalog_recovery_source_root"] = str(args.catalog_recovery_source_root.resolve())

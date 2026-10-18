@@ -193,6 +193,10 @@ def load(home, intent):
         catalog.validate_transition(finish, ownership, next_receipt.get(catalog.RECORD_KEY), before, after, home, install=True)
         if finish.get("model_catalog_status", {}).get("status") in {"PLANNED", "UPDATE_PLANNED", "MANAGED"} and finish["model_catalog_record"]["source"]["kind"] != intent.get("model_catalog_source", "online"):
             raise ValueError("Host transition model catalog source differs from maintenance selection")
+        if finish.get("model_catalog_status", {}).get("compatible_reuse") is True and intent.get("refresh_model_catalog", False):
+            raise ValueError("Host transition cannot reuse a catalog for explicit refresh")
+        if next_receipt.get("release_binding") != maintenance.selected_release_binding(intent["candidate"], approved, ownership):
+            raise ValueError("Host transition release binding differs from maintenance selection")
         mode_hint_config.validate(next_receipt.get(mode_hint_config.RECORD_KEY), home)
         wait_guidance_config.validate(next_receipt.get(wait_guidance_config.RECORD_KEY), home)
         if "mode_hint_record" in finish and finish["mode_hint_record"] != next_receipt.get(mode_hint_config.RECORD_KEY):

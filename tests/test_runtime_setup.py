@@ -17,8 +17,8 @@ from thaliris_codex import runtime_setup, runtime_identity, host_maintenance, ho
 
 def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False):
     """Pack current test source as a disposable fixture, not a release artifact."""
-    path = tmp_path / f"{name}-0.4.3-py3-none-any.whl"
-    info = f"{name}-0.4.3.dist-info"
+    path = tmp_path / f"{name}-0.4.6-py3-none-any.whl"
+    info = f"{name}-0.4.6.dist-info"
     with zipfile.ZipFile(path, "w") as wheel:
         for source in sorted(package.rglob("*")):
             if source.suffix not in {".py", ".md"} or not source.is_file():
@@ -30,7 +30,7 @@ def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False):
                     "    return 0 if sys.argv[1:] == ['version'] else 3\n")
             else:
                 wheel.write(source, relative)
-        wheel.writestr(info + "/METADATA", f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\nVersion: 0.4.3\n")
+        wheel.writestr(info + "/METADATA", f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\nVersion: 0.4.6\n")
         wheel.writestr(info + "/WHEEL", "Wheel-Version: 1.0\nGenerator: source-fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
         wheel.writestr(info + "/RECORD", "")
         if entry:

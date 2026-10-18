@@ -6,7 +6,46 @@ This report describes the Host-wide Codex model-catalog path. It is not a Thalir
 
 The `native_model_catalog` receipt records the selected catalog path, prior-absence state, exact managed fragment, catalog SHA-256, and source evidence (`kind`, `cli_version`, `upstream_sha256`, and freshness evidence). This separates three facts: a catalog bundled with a CLI build, a catalog actually fetched online, and the managed catalog derived from one of those sources. The managed file is a projection with an ownership receipt; it is not itself a fresh upstream response. Receipts that manage this required catalog use `thaliris-authorized-host-installation-v2` and explicitly declare the `receipt-owned-model-catalog-v1` capability; installations without a managed catalog remain on v1. The new reader still accepts the prior v1 receipt for compatibility; a successful authorized install/upgrade that manages the catalog writes the v2 form. An older reader that does not recognize v2 rejects install or uninstall before mutation instead of silently treating the catalog as unmanaged.
 
-The `codex-install` maintenance contract handles installation, upgrades and intentional low-frequency refresh. Online is the default source. Selecting `bundled` is explicit and leaves online freshness `ONLINE_FRESHNESS_UNKNOWN`; an existing online catalog is not silently downgraded. Source failures preserve the prior catalog with `UPSTREAM_REFRESH_FAILED_PRESERVED`. User-edited root configuration or catalog bytes are preserved with the appropriate `USER_*_PRESERVED` outcome, including `USER_CHANGED_PRESERVED`, rather than overwritten. If both managed catalog bytes and source provenance are unchanged, the operation writes no catalog, configuration or receipt bytes. Catalog changes use the existing version-journal and recovery path. A catalog compatibility failure returns `ok: false` with `TEMPLATE_INCOMPATIBILITY_PRESERVED`; an online-source failure returns `ok: false` with its preservation status. Both are decided before Host transition writes, preserving the existing Host generation. A preserved user-owned catalog can coexist with completion of other authorized Host work, but `catalog_goal_met` remains false and the result requires manual follow-up.
+The `codex-install` maintenance contract handles installation, upgrades and intentional low-frequency refresh. Online is the default source. Selecting `bundled` is explicit and leaves online freshness `UNKNOWN`; an existing online catalog is not silently downgraded. Source failures preserve the prior catalog with `UPSTREAM_REFRESH_FAILED_PRESERVED`. User-edited root configuration or catalog bytes are preserved with the appropriate `USER_*_PRESERVED` outcome, including `USER_CHANGED_PRESERVED`, rather than overwritten. Catalog changes use the existing version-journal and recovery path. A catalog compatibility failure returns `ok: false` with `TEMPLATE_INCOMPATIBILITY_PRESERVED`; a required online export failure returns `ok: false` with its preservation status. Both are decided before Host transition writes, preserving the existing Host generation. A preserved user-owned catalog can coexist with completion of other authorized Host work, but `catalog_goal_met` remains false and the result requires manual follow-up.
+
+### Compatible reuse and explicit refresh
+
+Ordinary installation and update reuse an already owned catalog when its exact
+configuration fragment and catalog bytes still match the receipt, the selected
+source matches, and its complete `reuse_contract` matches the current executable
+SHA-256, CLI version, transformation implementation and required roster contract.
+The transformation digest includes the exact target, known adjacent lines and
+transformation function; the roster digest includes both matched and known-absent
+model sets for the selected source. New receipts persist these identities.
+Legacy receipts remain readable, but missing or unknown reuse schemas, unavailable
+transformation source, uncertain executable identity and changed contracts require
+a real export and its usual validation. Launcher-script bytes cannot establish
+the identity of the underlying Codex binary and therefore do not enable reuse.
+Older readers reject the additional ownership field before mutation.
+
+Successful reuse reports `status: MANAGED`, `compatible_reuse: true`, and
+`catalog_goal_met: true`. These describe the compatible managed transformation;
+`online_freshness: UNKNOWN` describes the current operation's lack of a fresh
+online observation. The receipt's historical source evidence remains provenance.
+Applying an existing online receipt alone never establishes current freshness.
+Offline availability does not prevent an unrelated update when compatible reuse
+is proven, and a catalog-only no-op preserves catalog, config and receipt mtimes.
+
+The approved maintenance intent can set `refresh_model_catalog: true`. This
+bypasses reuse and requires a real export even if all identities match. A failed
+refresh preserves the old generation and reports freshness `UNKNOWN`. Only a
+successful online export with the existing fresh-cache checks can report
+`VERIFIED` for that operation. Bundled exports and bundled reuse always report
+`UNKNOWN`. Interrupted transitions retain the exact planned bytes; a journal
+claiming compatible reuse cannot satisfy an explicit refresh intent.
+
+Optional prompt-field capability checks retain their known-build fast path and
+isolated loopback probe for unknown builds. Persistent probe-result caching is
+deferred: the current mode-hint and wait-guidance ownership receipts do not
+record a probe observation, binary identity, capability implementation or
+isolation-environment evidence. Inferring support from those ownership records
+would weaken the evidence boundary. Unknown or present system configuration
+continues to prevent the probe; no cached support bypass is introduced.
 
 ### Project-loss recovery and retained backing data
 
@@ -34,11 +73,27 @@ The configuration writer checks the observed bytes again immediately before atom
 
 The human accepted this existing transaction boundary: preserve user changes already observed by the exact-byte recheck, retain the catalog backing file so a late reference cannot dangle, and disclose the remaining non-cooperating-writer interval. This is the scoped acceptance criterion, not a pending decision or a claim of exclusive-writer safety. The strict XFAIL records the simultaneous-writer limitation and remains visible in test results; it is not counted as a pass or hidden by weakening the preservation checks.
 
-## Candidate verification
+## Historical candidate verification
 
 The final local adapter suite completed with **1240 passed, 10 skipped, and 1 strict XFAIL**. The catalog unit module completed with **44 passed**. The lifecycle recovery module has 27 collected cases: **26 passed and the same 1 strict XFAIL**. That XFAIL is `test_noncooperating_config_writer_in_replace_window_remains_preserved`; it does not provide evidence for unobserved simultaneous edits in the compare-to-replace interval.
 
 The opt-in installed-runtime pair passed against a local mock Responses endpoint: the managed catalog and unpatched baseline each issued 15 requests, with parity for phase, model, effort and developer markers. The runtime also exercised the configured role profiles and nested Investigator Scanner. No Authorization header or external model request was observed. A `thaliris-codex 0.4.4` wheel built successfully, and zipimport loaded its packaged `catalog_recovery.py`. These checks cover the disposable installed runtime and package contents; they do not establish live Host installation or activation.
+
+### Current compatible-reuse candidate verification
+
+The catalog and Host maintenance contract modules passed **172 tests** using
+Python 3.11 with the explicitly selected local Core source. A subsequent focused
+run passed **36 tests**, including launcher-script rejection and stronger failed
+refresh byte/mtime checks. The broader focused group also passed with optional
+capability probes, mode hints, wait guidance, independent maintenance and catalog
+uninstall coverage. These verify offline runtime updates with catalog reuse,
+exact no-op mtimes, executable/version/roster/transformation/source invalidation,
+legacy evidence migration, real explicit refresh, operation-based freshness,
+user-edit preservation, journal tampering and changed-CLI replay refusal.
+Release-selection integration tests verify bundle validation precedes candidate
+execution and same-runtime maintenance preserves its verified release binding.
+This evidence does not establish a production Host installation, current Desktop
+loading or current online availability.
 
 ## Accepted content change
 
@@ -48,7 +103,7 @@ For each model, the managed change is narrowly limited to deleting this exact li
 - Avoid performing blocking sleep or wait calls longer than 60 seconds, as they may prevent you from communicating with the user for their duration.
 ```
 
-No replacement suggestion is inserted. Every other instruction, metadata field, model entry and capability is preserved. Compatibility is source-version and model-roster specific: the exact sentence must appear as one complete line in its observed neighboring context for known models. An absent, moved, rewritten, split/partial, embedded or repeated sentence is incompatible; a missing known model or a model known to omit the sentence that now contains it is also incompatible. Newly available models are accepted only with one exact full-line target. These cases return a compatibility status without planning new catalog bytes; the enclosing install returns `ok: false` and leaves the prior catalog, config, receipt and Host generation intact.
+No replacement suggestion is inserted. Every other instruction, metadata field, model entry and capability is preserved. Compatibility is source-content and model-roster specific: the exact sentence must appear as one complete line in its observed neighboring context for present known models. An absent, moved, rewritten, split/partial, embedded or repeated sentence is incompatible; a model known to omit the sentence that now contains it is also incompatible. Missing known models are accepted when the remaining catalog satisfies the transformation contract. Newly available models are accepted only with one exact full-line target. Incompatible cases return a compatibility status without planning new catalog bytes; the enclosing install returns `ok: false` and leaves the prior catalog, config, receipt and Host generation intact.
 
 ## Local source observation
 

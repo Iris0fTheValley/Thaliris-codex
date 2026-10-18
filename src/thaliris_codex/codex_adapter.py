@@ -823,7 +823,7 @@ def _activation_fields(
     }
 
 
-def _project_definition_facts(root: Path) -> dict[str, str]:
+def _project_definition_facts(root: Path, codex_home: Path | None = None) -> dict[str, str]:
     """Return explicit adapter-owned facts used by the startup contract."""
     root = core._repo_root(root)
     instruction = _effective_root_instruction_path(root)
@@ -851,7 +851,7 @@ def _project_definition_facts(root: Path) -> dict[str, str]:
             instruction_present = "NO"
             instruction_state = "UNKNOWN"
     activation = _project_activation_marker_present(root)
-    host_hooks = lifecycle.host_hooks_health(_codex_home())
+    host_hooks = lifecycle.host_hooks_health(_codex_home(codex_home))
     # Host integration is installed once in CODEX_HOME before a session.
     # Project init adds only the marker that lets its stable trampoline enter
     # the current executable on subsequent tool events in that same session.
@@ -871,7 +871,7 @@ def _project_definition_facts(root: Path) -> dict[str, str]:
         ),
         "project_activation_marker_present": activation,
         "project_local_profile_files_present": _project_local_profile_files_present(root),
-        "host_profile_definition_present": _host_profile_definition_present(),
+        "host_profile_definition_present": _host_profile_definition_present(codex_home),
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN,
         "host_hook_registration_present": host_hooks["hooks_configured"],
         "legacy_project_hook_registration_present": lifecycle.legacy_project_hook_registration_present(root),
@@ -2117,7 +2117,7 @@ def task_recover_state(
         "recovered": True,
         "next_action": "bootstrap-check, then a fresh attested task-start",
     }
-def bootstrap_check(root: Path) -> dict[str, object]:
+def bootstrap_check(root: Path, *, codex_home: Path | None = None) -> dict[str, object]:
     """Return the read-only facts needed by the external Codex bootstrap.
 
     This deliberately performs no initialization and creates no durable state;
@@ -2125,7 +2125,7 @@ def bootstrap_check(root: Path) -> dict[str, object]:
     necessary before handing control back to the Controller.
     """
     root = core._repo_root(root)
-    facts = _project_definition_facts(root)
+    facts = _project_definition_facts(root, codex_home)
     definition_recovery_status = (
         "READY" if facts["project_definition_present"] == "YES"
         else "EXPLICIT_CONFIRMATION_REQUIRED" if facts.get("managed_instruction_state") == "USER"

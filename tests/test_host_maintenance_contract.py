@@ -863,3 +863,55 @@ def test_malformed_transition_finalization_is_preserved_without_mutation(tmp_pat
     assert not result["ok"]
     assert result["status"] == "HOST_TRANSITION_PENDING"
     assert snapshot(home) == before
+
+
+@pytest.mark.parametrize("refresh", [True, "yes", 1, None])
+def test_refresh_intent_requires_install_and_boolean(tmp_path, pinned_test_thaliris, refresh):
+    exe, _ = pinned_test_thaliris
+    home = tmp_path / "home"
+    path = intent(tmp_path, home, exe, "codex-uninstall")
+    value = json.loads(path.read_bytes())
+    value["refresh_model_catalog"] = refresh
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="refresh"):
+        maintenance.contract(path, "codex-uninstall", home)
+
+
+def test_release_selection_validated_before_candidate_smoke(tmp_path, monkeypatch, pinned_test_thaliris):
+    from thaliris_codex import release_identity
+    exe, _ = pinned_test_thaliris
+    value = json.loads(intent(tmp_path, tmp_path / "home", exe).read_bytes())["candidate"]
+    value["release_binding"] = {"test": "selected bundle"}
+    calls = []
+    def validate(selected, runtime):
+        calls.append("bundle")
+        assert selected == value
+        assert runtime["package_dir"]
+    monkeypatch.setattr(release_identity, "validate_selected", validate)
+    monkeypatch.setattr(runtime_identity, "console_smoke", lambda *_args: calls.append("smoke"))
+    maintenance.selected_runtime(value)
+    assert calls == ["bundle", "smoke"]
+    def reject(*_args):
+        raise ValueError("release Core mismatch")
+    monkeypatch.setattr(release_identity, "validate_selected", reject)
+    calls.clear()
+    with pytest.raises(ValueError, match="release Core mismatch"):
+        maintenance.selected_runtime(value)
+    assert calls == []
+
+
+def test_same_runtime_reuses_only_release_receipt_binding(tmp_path, monkeypatch, pinned_test_thaliris):
+    from thaliris_codex import release_identity
+    exe, _ = pinned_test_thaliris
+    selected = json.loads(intent(tmp_path, tmp_path / "home", exe).read_bytes())["candidate"]
+    raw = runtime_identity.manifest_bytes(exe)
+    binding = {"test": "existing verified binding"}
+    previous = {"format": maintenance.RELEASE_RECEIPT_FORMAT,
+                "runtime_sha256": maintenance.digest(raw), "source_pin": selected["source_pin"],
+                "release_binding": binding}
+    calls = []
+    monkeypatch.setattr(release_identity, "validate_selected", lambda selection, runtime: calls.append(selection))
+    assert maintenance.selected_release_binding(selected, raw, previous) == binding
+    assert calls == [selected | {"release_binding": binding}]
+    assert maintenance.selected_release_binding(selected, raw, previous | {"runtime_sha256": "0" * 64}) is None
+    assert maintenance.selected_release_binding(selected, raw, {**previous, "format": maintenance.RECEIPT_FORMAT}) is None

@@ -1657,6 +1657,8 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 return _permission_deny("THALIRIS_FENCED_ACTOR")
             tool = payload.get("tool_name") or payload.get("tool")
             normalized = _tool_basename(tool) if isinstance(tool, str) else ""
+            if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
+                return _permission_deny("THALIRIS_RELEASE_MAINTENANCE_REQUIRES_HUMAN_TERMINAL: automated maintenance must use the existing exact approved contract route.")
             if payload.get("readonly") is True and not (
                 _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload)
             ) and (
@@ -3731,6 +3733,141 @@ def _compound_host_maintenance_attempt(payload: dict[str, Any], *, shell_dialect
     return False
 
 
+def _release_maintenance_attempt(payload: dict[str, Any]) -> bool:
+    """Deny-only classification of public release entrypoints in shell calls.
+
+    High-level planning is internal to the human terminal interface. Managed
+    automation retains the existing exact-contract maintenance admission route
+    until a reviewed native authority transport exists for the higher-level CLI.
+    The shell lexer also finds calls in compounds and executable substitutions;
+    quoted strings/comments cannot manufacture a call.
+    """
+    command = _bash_command(payload)
+    if command is None:
+        return False
+    for segment in _unsupported_shell_command_prefixes(command, shell_dialect=_maintenance_shell_dialect(payload)):
+        try:
+            tokens = [part.strip("\"'") for part in shlex.split(segment, posix=False)]
+        except ValueError:
+            continue
+        if tokens[:1] == ["&"]:
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        executable = tokens[0].replace("\\", "/").rsplit("/", 1)[-1].casefold()
+        arguments = tokens[1:]
+        if executable in {"thaliris-release", "thaliris-release.exe", "thaliris-release.cmd"}:
+            release_args = arguments
+        elif re.fullmatch(r"(?:pythonw?(?:3(?:\.\d+)?)?|pyw?)(?:\.exe)?", executable):
+            entrypoint = _python_release_entrypoint(
+                arguments, launcher=executable in {"py", "py.exe", "pyw", "pyw.exe"})
+            if entrypoint is None:
+                continue
+            release_args = entrypoint
+        elif executable == "thaliris-bootstrap.py":
+            release_args = arguments
+        else:
+            continue
+        # argparse help exits before any action. Other executable segments are
+        # inspected independently, so a help probe cannot hide a second call.
+        if any(part in {"-h", "--help"} for part in release_args):
+            continue
+        index = 0
+        scalar = {"--manifest", "--manifest-sha256", "--artifacts", "--cache", "--home", "--project",
+                  "--human-instruction", "--resume"}
+        while index < len(release_args):
+            token = release_args[index]
+            if token in scalar:
+                index += 2
+                continue
+            if token in {"install", "update", "repair", "uninstall"}:
+                return True
+            index += 1
+    return False
+
+
+def _python_release_entrypoint(arguments: list[str], *, launcher: bool) -> list[str] | None:
+    """Return arguments after a recognized release module or bootstrap script.
+
+    Python permits grouped short flags, attached values for ``-W``/``-X``, and
+    arguments to several switches. Walk those forms before deciding which
+    token is the script/module so a switch value is never mistaken for code.
+    The scanner is deny-only: unknown interpreter syntax is left unclassified.
+    """
+    no_value = frozenset("bBdEiIOqRsSuvxP")
+    with_value = frozenset({"c", "m", "W", "X"})
+    index = 0
+    while index < len(arguments):
+        token = arguments[index]
+        if token == "--":
+            # The interpreter's option terminator is followed by a script
+            # filename, never by an option such as ``-m``.
+            if index + 1 >= len(arguments):
+                return None
+            script = arguments[index + 1].replace("\\", "/").rsplit("/", 1)[-1].casefold()
+            return arguments[index + 2:] if script == "thaliris-bootstrap.py" else None
+        if launcher and (re.fullmatch(r"-3(?:\.\d+)?(?:-(?:32|64))?", token)
+                         or token.startswith("-V:") and len(token) > 3):
+            index += 1
+            continue
+        if token == "--check-hash-based-pycs":
+            if index + 1 >= len(arguments):
+                return None
+            index += 2
+            continue
+        if token in {"--help", "--version", "-h", "-V"}:
+            return None
+        if not token.startswith("-") or token == "-":
+            script = token.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+            return arguments[index + 1:] if script == "thaliris-bootstrap.py" else None
+        if token.startswith("--"):
+            # This covers the attached-value spelling without treating the
+            # value as an executable path. Unknown long options stay unknown.
+            if token.startswith("--check-hash-based-pycs="):
+                index += 1
+                continue
+            return None
+
+        flags = token[1:]
+        if not flags:
+            return None
+        position = 0
+        while position < len(flags):
+            flag = flags[position]
+            if flag in {"h", "V"}:
+                return None
+            if flag in no_value:
+                position += 1
+                continue
+            if flag in with_value:
+                attached = flags[position + 1:]
+                if flag == "m":
+                    if attached:
+                        return arguments[index + 1:] if attached == "thaliris_codex.release_manager" else None
+                    if index + 1 >= len(arguments):
+                        return None
+                    return arguments[index + 2:] if arguments[index + 1] == "thaliris_codex.release_manager" else None
+                # -c executes code; -W/-X consume one value. Attached and
+                # separate values remain opaque even when they contain text
+                # that resembles a module or maintenance action.
+                if flag == "c":
+                    return None
+                if attached:
+                    position = len(flags)
+                else:
+                    if index + 1 >= len(arguments):
+                        return None
+                    index += 1
+                    position = len(flags)
+                break
+            # Some Python options take one argument, and py launcher options
+            # beyond the documented version selectors cannot safely be
+            # guessed here.
+            return None
+        index += 1
+    return None
+
+
 def _maintenance_shell_dialect(payload: dict[str, Any]) -> str:
     """Resolve known explicit executor shells before using the host default."""
     tool_input = payload.get("tool_input")
@@ -4732,6 +4869,8 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     cwd_root = _hook_repository_root(root or Path.cwd(), payload)
     root = repository_association.resolve(payload, cwd_root) or cwd_root
     normalized = _tool_basename(tool)
+    if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
+        return _permission_deny("THALIRIS_RELEASE_MAINTENANCE_REQUIRES_HUMAN_TERMINAL: automated maintenance must use the existing exact approved contract route.")
     # Plain direct argparse help is read-only. Check its shell syntax before
     # managed-state admission so expressions or redirections cannot use the
     # help exemption to run before native invocation.
