@@ -9,8 +9,9 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolated_repository_navigation(tmp_path, monkeypatch):
-    from thaliris_codex import repository_association
+    from thaliris_codex import repository_association, maintenance_capability
     monkeypatch.setattr(repository_association, "directory", lambda: tmp_path.parent / (tmp_path.name + "-navigation"))
+    monkeypatch.setattr(maintenance_capability, "directory", lambda: tmp_path.parent / (tmp_path.name + "-maintenance"))
 
 
 @pytest.fixture

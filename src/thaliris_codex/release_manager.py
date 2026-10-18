@@ -92,10 +92,10 @@ def validate_candidate(record: dict, binding: dict) -> dict:
     return selected
 
 
-def prepare(cache: Path, binding: dict, wheels: dict[str, Path]) -> dict:
+def find_saved_candidate(cache: Path, binding: dict) -> dict | None:
+    """A record is only an index: every hit passes the complete verifier anew."""
     identity.validate_binding(binding)
     cache = _safe(cache)
-    cache.mkdir(parents=True, exist_ok=True)
     for record_path in sorted(cache.glob("candidate-*.json")):
         try:
             runtime_identity._safe_file(record_path)
@@ -103,6 +103,17 @@ def prepare(cache: Path, binding: dict, wheels: dict[str, Path]) -> dict:
         except (OSError, ValueError, RuntimeError, TypeError, KeyError, subprocess.SubprocessError):
             # Drift is a cache miss. Preserve the original runtime and record.
             continue
+    return None
+
+
+def prepare(cache: Path, binding: dict, wheels) -> dict:
+    """Acquire archives lazily, only after all saved candidates miss validation."""
+    selected = find_saved_candidate(cache, binding)
+    if selected is not None:
+        return selected
+    cache = _safe(cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    wheels = wheels() if callable(wheels) else wheels
     leaf = "runtime-" + uuid.uuid4().hex
     artifacts = binding["manifest"]["artifacts"]
     result = runtime_setup.create(cache / leaf,
@@ -116,9 +127,10 @@ def prepare(cache: Path, binding: dict, wheels: dict[str, Path]) -> dict:
     return selected
 
 
-def status(home: Path, cache: Path, binding: dict | None, project: Path) -> dict:
+def status(home: Path, cache: Path | None, binding: dict | None, project: Path) -> dict:
     """Diagnostics do not mint ownership, future-reader trust or live loading."""
     result = {"ok": True, "available_release": binding, "prepared_candidates": [],
+              "cache_inventory": "OBSERVED" if cache is not None else "UNKNOWN",
               "installed_disk": "ABSENT", "loaded_host": "UNKNOWN", "restart_required": "UNKNOWN",
               "project_definition": "UNKNOWN", "project_host_relation": "UNKNOWN",
               "project_host_relation_reason": "insufficient_verified_reader_facts",
@@ -130,7 +142,7 @@ def status(home: Path, cache: Path, binding: dict | None, project: Path) -> dict
                                 "preserved_user_modifications": [], "manual_action_required": []}}
     validated_installed_executable: str | None = None
     installed_reader_expected: str | None = None
-    for path in sorted(_safe(cache).glob("candidate-*.json")):
+    for path in sorted(_safe(cache).glob("candidate-*.json")) if cache is not None else []:
         try:
             runtime_identity._safe_file(path)
             record = json.loads(path.read_bytes())
@@ -147,7 +159,7 @@ def status(home: Path, cache: Path, binding: dict | None, project: Path) -> dict
                 raise ValueError("invalid Host transition journal; preserve for review")
             result["pending_transition"] = {key: transition.get(key, "UNKNOWN")
                 for key in ("phase", "operation", "contract_sha256")}
-        for path in sorted(cache.glob("maintenance-*.json")):
+        for path in sorted(cache.glob("maintenance-*.json")) if cache is not None else []:
             runtime_identity._safe_file(path)
             raw = path.read_bytes()
             intent = json.loads(raw)
@@ -211,6 +223,11 @@ def status(home: Path, cache: Path, binding: dict | None, project: Path) -> dict
         relation, reason, evidence = _project_host_relation(result["project_definition"], installed_reader_expected)
         result["project_host_relation"] = relation if selected_reader_verified else "UNKNOWN"
         result["project_host_relation_reason"] = reason if selected_reader_verified else "selected_reader_provenance_unavailable"
+        if binding is None and installed_reader_expected is not None:
+            actual = _sha256_fact(result["project_definition"].get("managed_instruction_sha256"))
+            if actual is not None:
+                result["project_host_relation"] = "MATCH" if actual == installed_reader_expected else "DIFFERENT"
+                result["project_host_relation_reason"] = "local_project_compared_with_verified_installed_reader"
         result["project_host_relation_evidence"] = evidence
         if selected_reader_verified and relation == "HOST_UPDATE_REQUIRED":
             result["manual_action_required"].append(
@@ -224,7 +241,7 @@ def status(home: Path, cache: Path, binding: dict | None, project: Path) -> dict
 
 def maintain(action: str, selected: dict, home: Path, project: Path, cache: Path,
              instruction: str, *, resume: Path | None = None, actor: dict | None = None,
-             refresh_model_catalog: bool = False) -> dict:
+             refresh_model_catalog: bool = False, admission: dict | None = None) -> dict:
     """No broad legacy adoption or repair permission is inferred from action."""
     if action not in {"install", "update", "repair", "uninstall"}:
         raise ValueError("unknown Host maintenance action")
@@ -234,6 +251,9 @@ def maintain(action: str, selected: dict, home: Path, project: Path, cache: Path
                   actor.get("readonly") is True or actor.get("fenced") is True or actor.get("abandoned") is True):
         raise ValueError("HOST_MAINTENANCE_ACTOR_DENIED")
     operation = "codex-uninstall" if action == "uninstall" else "codex-install"
+    if admission is not None:
+        from . import maintenance_capability as capability
+        capability.check_dispatch(admission, admission["scope"])
     if resume:
         # The original durable bytes, including instruction and prior identity,
         # are replayed. No replacement plan may approve a partial generation.
@@ -256,11 +276,17 @@ def maintain(action: str, selected: dict, home: Path, project: Path, cache: Path
         if operation == "codex-install":
             intent["candidate"] = selected
             intent["refresh_model_catalog"] = refresh_model_catalog
+        if admission is not None:
+            intent["agent_maintenance_observation"] = {key: admission[key] for key in
+                ("provenance", "host_actor_assurance", "session", "prompt_epoch",
+                 "source_prompt_sha256", "scope")}
         _safe(cache).mkdir(parents=True, exist_ok=True)
         contract = cache / ("maintenance-" + uuid.uuid4().hex + ".json")
         _write_new(contract, intent)
     try:
         host_maintenance.contract(contract, operation, home, actor=actor)
+        if admission is not None:
+            capability.check_dispatch(admission, admission["scope"])
         outcome = _run(selected["executable"], [operation, "--maintenance-contract", str(contract)], home=home, project=project)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         outcome = {"ok": False, "error": str(exc), "manual_action_required": [str(exc)],
@@ -269,11 +295,11 @@ def maintain(action: str, selected: dict, home: Path, project: Path, cache: Path
             "loaded_host": "UNKNOWN"}
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("action", choices=["prepare", "install", "update", "repair", "uninstall", "status"])
-    parser.add_argument("--manifest", required=True, help="manifest file or HTTPS URL")
-    parser.add_argument("--manifest-sha256", required=True, help="externally trusted manifest digest")
+    parser.add_argument("--manifest", help="manifest file or HTTPS URL (optional for local status)")
+    parser.add_argument("--manifest-sha256", help="externally trusted manifest digest")
     parser.add_argument("--artifacts", type=Path, help="already verified/staged wheel directory")
     parser.add_argument("--cache", type=Path, help="final physical runtime/state directory")
     parser.add_argument("--home", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
@@ -281,34 +307,72 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--human-instruction", default="")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--refresh-model-catalog", action="store_true")
+    parser.add_argument("--current-user-intent", action="store_true",
+                        help="model selects the actual current user maintenance request; Hook evidence is still required")
+    parser.add_argument("--standalone-maintenance", action="store_true",
+                        help="explicit bootstrap baseline only when no managed installation exists")
+    parser.add_argument("--maintenance-capability", help=argparse.SUPPRESS)
+    parser.add_argument("--maintenance-session-hash", help=argparse.SUPPRESS)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argument_parser()
     args = parser.parse_args(argv)
     try:
         if args.resume and args.action not in {"install", "update", "repair", "uninstall"}:
             raise ValueError("--resume applies only to Host maintenance")
         home, project = args.home.absolute(), args.project.absolute()
-        # Observe selected manifest without building a runtime for status.
-        raw = (release_acquire.download(args.manifest, limit=1024 * 1024) if args.manifest.startswith("https://")
-               else Path(args.manifest).read_bytes())
-        binding = identity.binding(raw, args.manifest_sha256)
-        cache = _safe(args.cache) if args.cache else runtime_setup.default_runtime_directory(
-            "git+https://github.com/" + identity.REPOSITORY + "@" + binding["manifest"]["adapter_commit"]).parent
+        admission = None
+        if args.action in {"install", "update", "repair", "uninstall"}:
+            from . import maintenance_capability as capability
+            if args.maintenance_capability:
+                admission = capability.consume(args.maintenance_capability, args.maintenance_session_hash,
+                    capability.scope(args), capability.updater_identity(home))
+            elif args.standalone_maintenance and not args.current_user_intent:
+                capability.standalone_allowed(home)
+                if not args.human_instruction.strip():
+                    raise ValueError("standalone maintenance requires the actual human instruction")
+            else:
+                raise ValueError("HOST_MAINTENANCE_CAPABILITY_REQUIRED: request maintenance through the current Hook or use an exact contract")
+        elif args.maintenance_capability or args.maintenance_session_hash or args.standalone_maintenance or args.current_user_intent:
+            raise ValueError("maintenance evidence applies only to maintenance actions")
+        if bool(args.manifest) != bool(args.manifest_sha256):
+            raise ValueError("--manifest and --manifest-sha256 must be supplied together")
+        if args.action != "status" and not args.manifest:
+            raise ValueError("select a trusted --manifest and --manifest-sha256")
+        binding = None
+        if args.manifest:
+            raw = (release_acquire.download(args.manifest, limit=1024 * 1024) if args.manifest.startswith("https://")
+                   else Path(args.manifest).read_bytes())
+            binding = identity.binding(raw, args.manifest_sha256)
+        if args.cache:
+            cache = _safe(args.cache)
+        else:
+            try:
+                cache = runtime_setup.default_runtime_root()
+            except (OSError, ValueError):
+                if args.action != "status":
+                    raise
+                cache = None  # unavailable cache discovery cannot hide local Host facts
         if args.action == "status":
             out = status(home, cache, binding, project)
         elif args.resume:
-            out = maintain(args.action, {}, home, project, cache, args.human_instruction, resume=args.resume.absolute())
+            out = maintain(args.action, {}, home, project, cache, args.human_instruction,
+                           resume=args.resume.absolute(), admission=admission)
         else:
             if args.action != "prepare" and not args.human_instruction.strip():
                 raise ValueError("maintenance requires --human-instruction with the actual human request")
-            if args.artifacts:
-                wheels = {name: args.artifacts.absolute() / artifact["filename"]
-                          for name, artifact in binding["manifest"]["artifacts"].items()}
-            else:
-                _, wheels = release_acquire.acquire(args.manifest, args.manifest_sha256,
-                    cache / ("download-" + uuid.uuid4().hex))
-            selected = prepare(cache, binding, wheels)
+            def acquire_wheels():
+                if args.artifacts:
+                    return {name: args.artifacts.absolute() / artifact["filename"]
+                            for name, artifact in binding["manifest"]["artifacts"].items()}
+                return release_acquire.acquire(args.manifest, args.manifest_sha256,
+                    cache / ("download-" + uuid.uuid4().hex))[1]
+            selected = prepare(cache, binding, acquire_wheels)
             out = ({"ok": True, "selected": selected, "host_installed": False} if args.action == "prepare" else
                    maintain(args.action, selected, home, project, cache, args.human_instruction,
-                            refresh_model_catalog=args.refresh_model_catalog))
+                            refresh_model_catalog=args.refresh_model_catalog, admission=admission))
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         out = {"ok": False, "error": str(exc), "loaded_host": "UNKNOWN", "manual_action_required": [str(exc)]}
     print(json.dumps(out))

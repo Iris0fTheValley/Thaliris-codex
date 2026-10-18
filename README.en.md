@@ -142,32 +142,23 @@ The Codex model catalog is Host-wide configuration (`model_catalog_json`), separ
 
 ## Installation and local development
 
-### Recommended: a published release
+### Normal use: ask Codex to maintain Thaliris
 
-No Thaliris Codex release has been published from this source state. The commands below are templates for the first release; the tag workflow has not run, and the six platform gates, GitHub attestations and published release are unverified. On Windows, the normal client requires only system Python 3.11+. Select a specific release tag, download that tag's thaliris-bootstrap.py, and verify the bootstrap independently before running it. Obtain the matching release.json SHA-256 from a separately trusted source; do not take the digest from the same unauthenticated manifest. See the [release lifecycle](docs/release-lifecycle.md) for attestation constraints, offline bundles and lifecycle limits.
+Users ask “install Thaliris”, “update Thaliris”, “repair this installation” or “check Thaliris”. The root agent checks local facts, selects a trusted exact release, verifies candidates and invokes the verified updater under the current user maintenance intent. Users need not handle manifests, digests, Core/Adapter pairing, wheels or maintenance contracts.
 
-~~~powershell
-$tag = '<selected-release-tag>'
-$releaseUrl = "https://github.com/Iris0fTheValley/Thaliris-codex/releases/download/$tag"
-$manifest = "$releaseUrl/release.json"
-$manifestSha256 = '<64-character SHA-256 from an independently trusted source>'
-$bootstrap = Join-Path $PWD 'thaliris-bootstrap.py'
-Invoke-WebRequest -Uri "$releaseUrl/thaliris-bootstrap.py" -OutFile $bootstrap
+A supporting Hook issues a short-lived, single-use operation capability bound to the session, latest observed prompt epoch, action, Host/home, release input, updater and original resume contract. Known children/delegates, readonly, fenced/abandoned actors, mismatched scope, expiry and replay are refused. An instruction string or command spelling alone cannot grant permission. This is model-selected governance with mechanical Hook checks; host_actor_assurance remains UNKNOWN, not shared-OS human or universal Controller authentication.
 
-# Independently verify the downloaded bootstrap before running it.
-py -3.11 $bootstrap install --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human installation request>'
-~~~
-
-Before update, reset $tag, $releaseUrl, $manifest, $manifestSha256 and $bootstrap for the target release, download its thaliris-bootstrap.py and verify that bootstrap independently. Then run update below. For status, repair and uninstall, use the selected release and its trusted digest. Status reports disk and candidate facts; repair retries the selected release under the same ownership rules; uninstall uses the selected release's uninstaller. Every action requires both trust inputs, and maintenance actions require the actual human instruction:
+The installed updater provides local read-only status without release input, network access or candidate creation:
 
 ~~~powershell
-py -3.11 $bootstrap update --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human update request>'
-py -3.11 $bootstrap status --manifest $manifest --manifest-sha256 $manifestSha256
-py -3.11 $bootstrap repair --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human repair request>'
-py -3.11 $bootstrap uninstall --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human uninstall request>'
+thaliris-release status
 ~~~
 
-prepare verifies a candidate without changing the Host. Automatic latest discovery and a Python-free executable are not provided. Status cannot observe whether a running Host loaded the release or restarted, so those facts remain UNKNOWN. On non-Windows platforms, pass an explicit --cache directory. The release client preserves unowned Host bytes; damaged ownership evidence may require manual recovery.
+A trusted manifest/digest pair optionally adds release comparison. Ordinary updates fully revalidate saved candidates before acquiring wheels; only a miss acquires artifacts and creates a new immutable runtime. Host mutation still uses exact contracts, ownership and transition/recovery, preserving user edits. Loaded Host/restart facts remain UNKNOWN without native evidence.
+
+No release from this source state has been published; public attestation and native activation are unverified. Trusted automatic latest discovery remains deferred: the agent must select independently trusted exact release inputs, never treat a same-origin checksum as authentication. An older Hook requires the existing explicitly authorized exact-contract transition route. Python-free delivery is also deferred.
+
+The standalone thaliris-bootstrap.py is for first installation, missing updater and independent recovery. It requires system Python 3.11+ and separately trusted bootstrap/release inputs; it does not implement a second candidate verifier or serve ordinary cache hits. Explicit CLI first installation uses --standalone-maintenance only with no managed installation; it cannot replace integrated capability evidence or authorize overwriting damaged ownership. See the [release lifecycle](docs/release-lifecycle.md) for agent protocol, maintainer interfaces and recovery limits.
 
 ### Advanced: source development
 

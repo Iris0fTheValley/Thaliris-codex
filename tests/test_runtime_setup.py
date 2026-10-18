@@ -38,6 +38,26 @@ def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False):
     return str(path) + "#sha256=" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_pipless_installed_updater_can_create_new_immutable_runtime(tmp_path):
+    import thaliris
+    import thaliris_codex
+    core_source = source_wheel(tmp_path, "thaliris", Path(thaliris.__file__).parent)
+    adapter_source = source_wheel(tmp_path, "thaliris_codex", Path(thaliris_codex.__file__).parent, entry=True)
+    first = runtime_setup.create(tmp_path / "first-final-runtime", core_source, adapter_source)
+    executable = Path(first["executable"])
+    before = runtime_identity.manifest_bytes(executable)
+    python = executable.parent / ("python.exe" if os.name == "nt" else "python")
+    second = tmp_path / "second-final-runtime"
+    result = subprocess.run([str(python), "-I", "-B", "-m", "thaliris_codex.runtime_setup",
+        "--runtime", str(second), "--core-source", core_source, "--adapter-source", adapter_source],
+        env=runtime_identity.child_environment(), capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert json.loads(result.stdout)["ok"] is True
+    assert runtime_identity.manifest_bytes(executable) == before
+    assert not list(second.rglob("pip-*.dist-info"))
+    assert not list(second.rglob("*.pyc"))
+
+
 @pytest.mark.parametrize("project_kind", ["git", "nongit"])
 def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, monkeypatch, project_kind):
     import thaliris

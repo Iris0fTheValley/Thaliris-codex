@@ -133,32 +133,23 @@ Codex 模型目录属于 Host 全局配置（`model_catalog_json`），与项目
 
 ## 安装与本地开发
 
-### 常规安装与更新：已发布版本
+### 常规：在 Codex 中请求维护
 
-截至此源码状态，Thaliris Codex 尚无已发布的 release。以下是首个 release 发布后使用的命令模板；tag workflow 尚未运行，六个平台门禁、GitHub attestations 和实际发布结果均未验证。Windows 用户只需已安装的系统 Python 3.11+。先选定明确的 release tag，下载该 tag 的 thaliris-bootstrap.py，并在执行前独立验证 bootstrap。另从独立可信渠道取得该版本 release.json 的 SHA-256；不要从同一份未认证 manifest 读取这个 digest。详细 trust 流程、离线用法和生命周期边界见[发行版生命周期](docs/release-lifecycle.md)。
+正常用户直接说“安装 Thaliris”“更新 Thaliris”“修复当前安装”或“检查当前状态”。root agent 负责读取本地状态、选择可信的精确 release、验证候选，并在本次用户维护意图下调用已验证 updater。用户不需要学习 manifest、digest、Core/Adapter 配对、wheel 或 maintenance contract。
 
-~~~powershell
-$tag = '<selected-release-tag>'
-$releaseUrl = "https://github.com/Iris0fTheValley/Thaliris-codex/releases/download/$tag"
-$manifest = "$releaseUrl/release.json"
-$manifestSha256 = '<64-character SHA-256 from an independently trusted source>'
-$bootstrap = Join-Path $PWD 'thaliris-bootstrap.py'
-Invoke-WebRequest -Uri "$releaseUrl/thaliris-bootstrap.py" -OutFile $bootstrap
+支持本功能的 Hook 为一次明确 action 签发短期、单次消费 capability，绑定当前 session、最新观察到的 prompt epoch、Host/home、release input、updater 和原始 resume contract。child/delegated、readonly、fenced/abandoned 及不匹配、过期、重放调用被拒绝；instruction 字符串或命令拼写不能自行授权。该机制是模型选择加 Hook 机械约束，host_actor_assurance 仍为 UNKNOWN，不认证共享 OS 上的人类或万能 Controller。
 
-# Independently verify the downloaded bootstrap before running it.
-py -3.11 $bootstrap install --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human installation request>'
-~~~
-
-更新时，先将 $tag、$releaseUrl、$manifest、$manifestSha256 和 $bootstrap 设置为新 release，再下载并独立验证该 release 的 bootstrap。然后用新 manifest 和可信 digest 执行 update。status 报告磁盘与候选状态；repair 在相同的 ownership 规则下重试选定 release；uninstall 执行选定 release 的卸载器。所有操作都需要两个 trust inputs，maintenance 操作还需要实际的人类请求：
+已安装 updater 的本地只读入口无需 release 输入、联网或创建候选：
 
 ~~~powershell
-py -3.11 $bootstrap update --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human update request>'
-py -3.11 $bootstrap status --manifest $manifest --manifest-sha256 $manifestSha256
-py -3.11 $bootstrap repair --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human repair request>'
-py -3.11 $bootstrap uninstall --manifest $manifest --manifest-sha256 $manifestSha256 --human-instruction '<the actual human uninstall request>'
+thaliris-release status
 ~~~
 
-prepare 会验证并准备候选，不修改 Host。当前没有自动 latest 发现或无需 Python 的可执行程序。status 无法观察运行中的 Host 是否已加载 release 或完成重启，因此这些状态保持 UNKNOWN。非 Windows 平台需要为每条命令传入明确的 --cache 目录。release client 保留不属于它的 Host 字节；ownership 证据损坏时可能需要人工恢复。
+指定可信 manifest/digest 时可额外比较 release。普通更新先完整重验已保存 candidate，只有 miss 才获取 wheels 和创建新 immutable runtime。所有 Host mutation 继续使用 exact contract、ownership 与 transition/recovery；用户修改默认保留。loaded Host/restart 无真实 native evidence 时仍为 UNKNOWN。
+
+截至此源码状态，尚未发布本轮 release，也未验证其公开 attestation 或 native activation。自动可信 latest discovery 仍未实现，agent 必须使用独立可信的精确 release input；同源 checksum 不建立信任。旧版 Hook 的初次迁移仍走现有显式授权 exact-contract 路径。无需 Python 的安装器也未实现。
+
+独立 thaliris-bootstrap.py 用于首次安装、updater 缺失或独立 recovery，依赖系统 Python 3.11+ 与预先可信的 bootstrap/release input；不承担普通 candidate-hit 路径，也不复制 runtime verifier。首次无受管安装时的显式 CLI 使用 --standalone-maintenance；它不能替代 integrated capability 或授权覆盖损坏的 ownership。完整 agent 协议、maintainer CLI 与恢复边界见[发行版生命周期](docs/release-lifecycle.md)。
 
 ### 高级：源码开发
 

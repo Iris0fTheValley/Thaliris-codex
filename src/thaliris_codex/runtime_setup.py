@@ -10,13 +10,17 @@ relocated. The public final-path console must pass before setup returns success.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import uuid
 import venv
 
@@ -59,8 +63,8 @@ def _host_package_family() -> str:
     return family
 
 
-def default_runtime_directory(adapter_source: str) -> Path:
-    """Choose a new final runtime under the current Host's physical LocalCache."""
+def default_runtime_root() -> Path:
+    """Discover the physical cache root without creating a candidate or directory."""
     if os.name != "nt":
         raise ValueError("automatic runtime discovery is supported for the Windows Codex Host; pass --runtime explicitly")
     local_app_data = os.environ.get("LOCALAPPDATA")
@@ -72,9 +76,15 @@ def default_runtime_directory(adapter_source: str) -> Path:
         physical_base = runtime_identity.physical_directory(logical_base)
     except (OSError, ValueError) as exc:
         raise ValueError("current Codex Host LocalCache is unavailable; pass --runtime explicitly") from exc
+    return physical_base / "Thaliris" / "runtimes"
+
+
+def default_runtime_directory(adapter_source: str) -> Path:
+    """Choose a new final runtime under the current Host's physical LocalCache."""
+    root = default_runtime_root()
     source_identity = hashlib.sha256(_source(adapter_source).encode("utf-8")).hexdigest()[:12]
     leaf = f"codex-{source_identity}-{uuid.uuid4().hex[:12]}"
-    return physical_base / "Thaliris" / "runtimes" / leaf
+    return root / leaf
 
 
 def _source(value: str) -> str:
@@ -230,6 +240,43 @@ def _owned_directory_physical_path(directory: _OwnedDirectory) -> Path:
     return directory.physical_path()
 
 
+@contextmanager
+def _installer_python():
+    """A pinned updater has no pip; bootstrap it outside every pinned runtime."""
+    if importlib.util.find_spec("pip") is not None:
+        yield sys.executable
+        return
+    with tempfile.TemporaryDirectory(prefix="thaliris-install-tools-") as temporary:
+        tools = Path(temporary) / "tools"
+        venv.EnvBuilder(with_pip=True, symlinks=False).create(tools)
+        yield str(tools / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
+
+
+def _release_console(interpreter: Path) -> None:
+    """Render the public updater with isolation BEFORE any package import.
+
+    Only a newly and exclusively created candidate is touched. The ordinary
+    thaliris launcher ABI stays unchanged; all wrapper bytes enter its manifest.
+    """
+    directory = interpreter.parent
+    generated = directory / ("thaliris-release.exe" if os.name == "nt" else "thaliris-release")
+    if not generated.exists():
+        return  # legacy/source fixture without this optional console
+    runtime_identity._safe_file(generated)
+    if os.name == "nt":
+        runtime_identity._assert_launcher_binding(generated)
+        wrapper = directory / "thaliris-release.cmd"
+        with wrapper.open("xb") as stream:
+            # ASCII source avoids cmd code-page corruption for Unicode user
+            # directories. The containing runtime and final path are pinned by
+            # the unchanged primary launcher, location anchor and full manifest.
+            stream.write(b'@"%~dp0python.exe" -I -B -m thaliris_codex.release_manager %*\r\n')
+        generated.unlink()  # our just-generated console; never an existing runtime
+    else:
+        generated.write_text('#!/bin/sh\nexec ' + shlex.quote(str(interpreter)) +
+            ' -I -B -m thaliris_codex.release_manager "$@"\n', encoding="utf-8", newline="\n")
+
+
 def create(directory: Path, core_source: str, adapter_source: str) -> dict:
     if sys.version_info < (3, 11):
         raise ValueError("Host runtime setup requires Python 3.11+")
@@ -260,9 +307,11 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
         venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
         interpreter = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         environment = runtime_identity.child_environment()
-        subprocess.run([sys.executable, "-I", "-B", "-m", "pip", "--isolated", "--python", str(interpreter),
-                        "install", "--no-deps", "--no-compile", *sources],
-                       env=environment, check=True, stdout=sys.stderr)
+        with _installer_python() as installer:
+            subprocess.run([installer, "-I", "-B", "-m", "pip", "--isolated", "--python", str(interpreter),
+                            "install", "--no-deps", "--no-compile", *sources],
+                           env=environment, check=True, stdout=sys.stderr)
+        _release_console(interpreter)
         executable = interpreter.parent / ("thaliris.exe" if os.name == "nt" else "thaliris")
         contents = runtime_identity.manifest_bytes(executable)
         # Check runtime dependency versions without installing package-manager

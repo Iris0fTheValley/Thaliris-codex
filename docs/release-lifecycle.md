@@ -6,14 +6,59 @@ and installer. Package versions describe compatibility; they never establish a
 release or installation identity. The existing `thaliris codex-maintenance-plan`,
 `codex-install` and `codex-uninstall` interfaces remain available.
 
-## Human terminal interface
+## Normal agent-driven maintenance
+
+The normal user request is "install/update/repair/check Thaliris" in Codex.
+The root model chooses the actual maintenance instruction and trusted exact
+release input, checks local status, and invokes the verified installed updater.
+Users need not handle manifests, wheels, candidates or maintenance contracts.
+Release selection remains a separate trust decision: unsigned `latest` and a
+same-origin checksum are not trust roots. Automatic trusted discovery is deferred.
+
+For integrated maintenance the model supplies `--current-user-intent`, the actual
+`--human-instruction`, and explicit absolute `--home`, `--project`, `--cache` and
+trusted release inputs to the installed `thaliris-release` console, or its exact
+Python with `-I -B -m thaliris_codex.release_manager`. The Hook admits only one
+standalone, unambiguous invocation of its verified installed updater. It rejects
+known children/delegates, readonly, fenced and abandoned actors; unsupported
+entrypoint spellings, compounds, injected tokens and duplicate arguments fail closed.
+The flag and instruction alone never grant permission.
+
+The Hook observes each valid `UserPromptSubmit` as a new epoch, including identical
+prompts and prompts beyond the legacy telemetry ring. It stores hashes, never prompt
+text, separately under `~/.thaliris/host-maintenance`. It does no language/keyword
+classification. The Hook issues a ten-minute single-use execution capability bound
+to the latest observed prompt, session, action, home, project/cache, release input
+and digest, behavior flags, instruction hash, installed/updater identity, Hook
+ABI/spec/protocol and exact resume-contract hash. The process consumes it atomically
+before preparation. Replay, cross-session/scope use and changed evidence fail closed.
+It rechecks prompt epoch, fences, updater/installed identity and resume bytes before
+dispatch; a new prompt before dispatch requires a fresh operation. Once the exact
+Host transaction starts, later input does not safely interrupt or undo it: its
+journal and original contract remain the recovery authority.
+
+This is **Hook-observed, model-selected shared-OS governance**, not authentication
+of a human or a universal Controller. `host_actor_assurance` remains `UNKNOWN`.
+Native actor fields that are absent cannot distinguish an otherwise identical
+delegate; a Hook epoch proves the latest observed prompt event, not an independently
+attested native user-turn identity. Those limitations are not promoted to guarantees.
+Damaged/missing observations, restrictions or fence evidence grant no capability.
+
+All mutation still uses the selected candidate's exact maintenance plan, ownership
+receipt and recoverable transition. An observation is audit metadata, never legacy
+adoption or an overwrite grant. Existing standalone exact-contract maintenance stays
+available. An older installed Hook still rejects the new high-level path; transition
+to a supporting Hook uses that existing explicitly authorized exact-contract route.
+Disk updates never prove the running Desktop loaded the new Hook.
+
+## Explicit CLI and standalone bootstrap/recovery
 
 System Python 3.11 or newer is the only client prerequisite. Obtain and trust
 `thaliris-bootstrap.py` from a selected release first. Obtain that release's
 `release.json` SHA-256 from an independently trusted selection, then run:
 
 ```powershell
-py -3.11 thaliris-bootstrap.py install --manifest https://github.com/Iris0fTheValley/Thaliris-codex/releases/download/RELEASE/release.json --manifest-sha256 TRUSTED_DIGEST --human-instruction "Install this exact Thaliris release into my Codex home."
+py -3.11 thaliris-bootstrap.py install --manifest https://github.com/Iris0fTheValley/Thaliris-codex/releases/download/RELEASE/release.json --manifest-sha256 TRUSTED_DIGEST --standalone-maintenance --human-instruction "Install this exact Thaliris release into my Codex home."
 ```
 
 Replace `RELEASE` and `TRUSTED_DIGEST` with the actual selected tag and 64-digit
@@ -24,7 +69,14 @@ executable `.pth` files. No checkout, manual pip/venv setup or project pytest ru
 is needed. The base Python standard library and operating system remain trust
 dependencies. A standalone executable that works without system Python is deferred.
 
-Use the same interface with these actions:
+Bootstrap is for first installation, missing updater and recovery. It does not
+duplicate candidate verification or provide the normal cache-hit updater path.
+`--standalone-maintenance` explicitly selects baseline instruction governance only
+when no managed installation exists; it cannot replace missing integrated evidence.
+It grants no attested session or actor identity. With damaged installed ownership,
+use the preserved exact-contract recovery route rather than a broad bootstrap repair.
+
+The installed updater supports these actions:
 
 | Action | Behavior |
 | --- | --- |
@@ -33,7 +85,7 @@ Use the same interface with these actions:
 | `update` | Select the requested release and apply the same owned-byte installation contract. |
 | `repair` | Reuse/reconstruct a verified candidate and retry installation under the same ownership rules. |
 | `uninstall` | Execute the selected release's uninstaller, preserving unowned bytes and runtime/recovery evidence. |
-| `status` | Read available release, candidate validity, installed disk identity, project generation facts and pending transition facts. |
+| `status` | Read local candidate, runtime/ownership/surface, project and pending facts; an optional release adds comparison. |
 
 `thaliris-release` (installed console) and
 `python -I -B -m thaliris_codex.release_manager` expose the same actions after a
@@ -42,6 +94,18 @@ project whose definition facts are diagnosed, and `--cache` selects the final
 physical runtime/state directory. Windows defaults use the current Codex package's
 physical LocalCache; other platforms require `--cache`. A staged/offline bundle
 can use a local manifest path and `--artifacts DIRECTORY`.
+
+`thaliris-release status` needs no manifest, digest, wheel download, candidate
+creation or pip environment. An explicit `--manifest` and `--manifest-sha256` pair
+adds comparison without changing local facts. Cache-root discovery is independent
+of allocating a new runtime leaf. If native cache discovery is unavailable, local
+Host facts still work and `cache_inventory` is `UNKNOWN`; an explicit `--cache`
+can supply that inventory. On a miss the installed updater creates pip tools
+only in a disposable environment; pip never enters an immutable runtime.
+Runtime preparation renders the public updater console to start Python with
+`-I -B` before imports, including from a plain terminal. That wrapper is created
+only inside the new candidate and included in its complete manifest. The primary
+launcher ABI and final-path/location checks are unchanged.
 
 Maintenance actions save the exact low-level contract and return `saved_contract`.
 If maintenance becomes pending, resume with `--resume SAVED_CONTRACT` and an actual
@@ -53,13 +117,10 @@ permission for broad overwrite or legacy adoption. Resolve those reported manual
 actions explicitly. `--refresh-model-catalog` requests an actual upstream refresh;
 ordinary same-release maintenance keeps the default catalog lifecycle behavior.
 
-The high-level maintenance interface currently runs from a human terminal.
-Managed shell automation is denied for public install/update/repair/uninstall
-console, module and bootstrap forms, including compound calls. Automated Host
-maintenance retains the existing checked, standalone exact-contract route and its
-actor guards. Missing actor fields never establish Controller identity. A future
-high-level native authority transport needs separate review; changing command
-spelling or the human-instruction string supplies no such authority.
+Resume requests receive a new operation capability bound to the original contract
+bytes; consumed capabilities are never reusable. If updater/installed evidence is
+damaged or unavailable during a partial transition, use the independent exact-contract
+recovery interface. A high-level capability does not reauthorize a partial generation.
 
 ## Identity and reuse
 
@@ -75,6 +136,8 @@ manifest and permanent-location anchor. Version equality cannot substitute.
 Successful candidates have separate complete records outside their runtime.
 Every reuse validates the original physical path, saved complete release binding,
 saved runtime SHA-256, Core and Adapter provenance, console smoke and Host preflight.
+The installed updater performs this search before acquiring wheels. A verified hit
+skips both wheel acquisition and runtime construction; only a miss invokes acquisition.
 Drift produces a cache miss and a new UUID directory; it never mutates the old
 runtime. Failed attempts and concurrent attempts likewise retain distinct leaves.
 Repeated updates use the installer to evaluate exact bytes and ownership; there

@@ -1658,7 +1658,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
             tool = payload.get("tool_name") or payload.get("tool")
             normalized = _tool_basename(tool) if isinstance(tool, str) else ""
             if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
-                return _permission_deny("THALIRIS_RELEASE_MAINTENANCE_REQUIRES_HUMAN_TERMINAL: automated maintenance must use the existing exact approved contract route.")
+                return _release_maintenance_output(root, payload, managed_hook_abi)
             if payload.get("readonly") is True and not (
                 _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload)
             ) and (
@@ -1725,6 +1725,8 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
             return _session_start_output(root, payload)
         if event == "UserPromptSubmit":
             _best_effort_record(_record_prompt_telemetry, root, payload)
+            from . import maintenance_capability
+            _best_effort_record(maintenance_capability.observe_prompt, _host_home_path(), payload, managed_hook_abi)
             return ""
         if event == "PostToolUse":
             tool = payload.get("tool_name") or payload.get("tool")
@@ -3736,9 +3738,8 @@ def _compound_host_maintenance_attempt(payload: dict[str, Any], *, shell_dialect
 def _release_maintenance_attempt(payload: dict[str, Any]) -> bool:
     """Deny-only classification of public release entrypoints in shell calls.
 
-    High-level planning is internal to the human terminal interface. Managed
-    automation retains the existing exact-contract maintenance admission route
-    until a reviewed native authority transport exists for the higher-level CLI.
+    This classifier grants nothing. Only the separate strict scope parser and
+    current Hook observation can issue an operation capability.
     The shell lexer also finds calls in compounds and executable substitutions;
     quoted strings/comments cannot manufacture a call.
     """
@@ -3784,6 +3785,63 @@ def _release_maintenance_attempt(payload: dict[str, Any]) -> bool:
                 return True
             index += 1
     return False
+
+
+def _release_maintenance_output(root: Path, payload: dict[str, Any], hook_abi: str | None) -> str:
+    """One narrow native operation observation; actor assurance remains UNKNOWN."""
+    from . import maintenance_capability as capability, release_manager
+    try:
+        capability.restrictions(payload)
+        command = _bash_command(payload)
+        parsed_command = command.strip() if command is not None else None
+        if parsed_command and parsed_command.startswith("& ") and _maintenance_shell_dialect(payload) == "powershell":
+            parsed_command = parsed_command[2:].lstrip()
+        segments = _split_command_separators(parsed_command) if parsed_command is not None else None
+        if segments is None or len(segments) != 1 or any(c in command for c in ("$", "`", "#", "\n", "\r")):
+            raise ValueError("maintenance requires one exact standalone invocation")
+        tokens = [part[1:-1] if len(part) >= 2 and part[0] == part[-1] and part[0] in "\"'" else part
+                  for part in shlex.split(command, posix=False)]
+        if tokens[:1] == ["&"] and _maintenance_shell_dialect(payload) == "powershell":
+            tokens = tokens[1:]
+        if not tokens or not Path(tokens[0]).is_absolute():
+            raise ValueError("select the absolute verified updater executable")
+        home = _host_home_path().absolute()
+        updater = capability.updater_identity(home)
+        if os.path.normcase(tokens[0]) == os.path.normcase(updater["console"]):
+            arguments = tokens[1:]
+        elif (os.path.normcase(tokens[0]) == os.path.normcase(updater["python"]) and
+                tokens[1:5] == ["-I", "-B", "-m", "thaliris_codex.release_manager"]):
+            arguments = tokens[5:]
+        else:
+            raise ValueError("unapproved release entrypoint or interpreter options")
+        # No argument abbreviation, duplicates, injected evidence or implicit cwd.
+        options = [part.split("=", 1)[0] for part in arguments if part.startswith("--")]
+        if (len(options) != len(set(options)) or
+                any(part in options for part in ("--maintenance-capability", "--maintenance-session-hash", "--standalone-maintenance")) or
+                not {"--home", "--cache", "--project", "--current-user-intent"}.issubset(options)):
+            raise ValueError("maintenance scope must be explicit and unambiguous")
+        try:
+            parser = release_manager.argument_parser()
+            def reject_arguments(_message):
+                raise ValueError("unsupported release maintenance arguments")
+            parser.error = reject_arguments
+            args = parser.parse_args(arguments)
+        except SystemExit as exc:
+            raise ValueError("unsupported release maintenance arguments") from exc
+        if args.home.absolute() != home:
+            raise ValueError("maintenance home differs from current Hook home")
+        for value in (args.home, args.cache, args.project, args.artifacts, args.resume):
+            if value is not None and not value.is_absolute():
+                raise ValueError("maintenance paths must be absolute")
+        if args.manifest and not args.manifest.startswith("https://") and not Path(args.manifest).is_absolute():
+            raise ValueError("maintenance manifest path must be absolute")
+        request = capability.scope(args)
+        token = capability.issue(home, payload, request, updater, hook_abi,
+                                 root=root, task_id=core.selected_task(root))
+        return _updated_command_output(payload, "--maintenance-capability " + token +
+            " --maintenance-session-hash " + token.split(".")[1])
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError):
+        return _permission_deny("THALIRIS_RELEASE_MAINTENANCE_CAPABILITY_REQUIRED: current user intent, exact session/scope and verified updater evidence are required.")
 
 
 def _python_release_entrypoint(arguments: list[str], *, launcher: bool) -> list[str] | None:
@@ -4146,6 +4204,10 @@ def _control_state_target(payload: dict[str, Any]) -> str | None:
     # guard on a shared OS, not a sandbox or proof of unknown actor identity.
     from . import host_maintenance
     normalized = material.replace("\\\\", "/").replace("\\", "/").casefold()
+    from . import maintenance_capability
+    capability_directory = maintenance_capability.directory().as_posix().casefold()
+    if capability_directory in normalized or ".thaliris/host-maintenance" in normalized:
+        return capability_directory
     home = _host_home_path()
     paths = [home / name for name in (runtime_identity.MANIFEST_NAME,
         host_maintenance.RECEIPT_NAME, "thaliris-host-transition.json", "thaliris-host-maintenance.lock", "AGENTS.md", "hooks.json", "config.toml",
@@ -4882,7 +4944,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     root = repository_association.resolve(payload, cwd_root) or cwd_root
     normalized = _tool_basename(tool)
     if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
-        return _permission_deny("THALIRIS_RELEASE_MAINTENANCE_REQUIRES_HUMAN_TERMINAL: automated maintenance must use the existing exact approved contract route.")
+        return _release_maintenance_output(root, payload, managed_hook_abi)
     # Plain direct argparse help is read-only. Check its shell syntax before
     # managed-state admission so expressions or redirections cannot use the
     # help exemption to run before native invocation.

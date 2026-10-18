@@ -84,7 +84,7 @@ jobs:
           subprocess.run([sys.executable, '-m', 'pip', 'install', 'pytest'], check=True)
           subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-deps', *map(str, Path('bundle').glob('*.whl'))], check=True)
       - name: Exact artifact fresh-install, reuse and integrity gates
-        run: python -m pytest --import-mode=importlib tests/test_release_lifecycle.py tests/test_release_bundle.py
+        run: python -m pytest --import-mode=importlib tests/test_release_lifecycle.py tests/test_maintenance_capability.py tests/test_release_bundle.py
         env:
           THALIRIS_RELEASE_BUNDLE: ${{ github.workspace }}/bundle
   publish:

@@ -219,7 +219,7 @@ def test_release_maintenance_shell_forms_are_denied_for_automation(tmp_path, com
     payload = {"tool_name": "exec_command", "agent_id": "child", "agent_type": "thaliris-implementer",
                "tool_input": {"cmd": command, "shell": "powershell"}}
     assert lifecycle._release_maintenance_attempt(payload)
-    assert "THALIRIS_RELEASE_MAINTENANCE_REQUIRES_HUMAN_TERMINAL" in lifecycle._pre_tool_output(payload, tmp_path)
+    assert "THALIRIS_RELEASE_MAINTENANCE_CAPABILITY_REQUIRED" in lifecycle._pre_tool_output(payload, tmp_path)
 
 
 @pytest.mark.parametrize("command", [
