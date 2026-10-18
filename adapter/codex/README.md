@@ -66,8 +66,20 @@ exact native Agent-to-Task mapping or an active handoff with a known role. Missi
 session, turn or profile fields remain `UNKNOWN`; by themselves they do not block ordinary
 work or qualify managed control. Provided identity contradictions block dependent actions.
 A known read-only role remains denied Bash/MCP mutations even when Authority or optional
-fields are incomplete. Current real Host stability of identity fields across SubagentStart
-and PreToolUse is UNKNOWN; synthetic event tests do not prove a Host protocol guarantee.
+fields are incomplete. The isolated `0.162.0-alpha.17.2` CLI observation corroborated
+SubagentStart and child PreToolUse identity; other Host/session behavior remains UNKNOWN.
+Synthetic event tests do not prove a Host protocol guarantee.
+
+Managed Start binding requires a corroborated native child ID even for a fresh owner.
+Current V2 `task_name` results supply navigation only. On the exact observed
+`0.162.0-alpha.17.2` CLI, the adapter reads official `thread/items/list` for the exact
+parent native thread and spawn turn: a unique `subAgentActivity(kind=started)` item
+must have `id` equal to the Hook's spawn `tool_use_id` and a valid `agentThreadId`.
+The returned path is checked for consistency without becoming identity proof. Missing
+or conflicting evidence leaves the child unbound. The legacy exact `{agent_id,nickname}`
+response remains supported independently. No session-file tail, UI reader, polling,
+model call or production Host configuration mutation supplies this edge. See the
+[observed native lifecycle contract](../../docs/codex-native-lifecycle-20261018.md).
 
 An active child may receive follow-up evidence or correction within its existing Workstream.
 Communication cannot change its role or task goal. After a child returns FINAL, new work
@@ -222,6 +234,10 @@ cleanup; even an exact call match proves neither no child nor termination. Such 
 keep the reservation pending and cannot justify explicit pending recovery. Use exact
 native terminal evidence or the existing Controller dependency disposition/fence path.
 Timeout and not_found prove neither completion nor execution closure.
+Status callbacks with native call IDs must match an allowed PreToolUse recorded
+by the same task, actor, session, turn, tool and call. Reused sessions require this
+correlation even for sparse results; an old task's delayed status cannot consume
+a new reservation through a matching task name. Missing evidence remains UNKNOWN.
 
 First continue independent work that should take priority, then decide whether a necessary
 dependency needs waiting. This applies at every authorized parent layer, including an

@@ -1143,21 +1143,26 @@ def lifecycle(root: Path) -> dict[str, object]:
 
 
 def spawn_start(root: Path, agent_id: str, agent_type: str = "worker") -> None:
-    assert handle_hook(root, "PreToolUse", hook_payload(
+    request = hook_payload(
         tool_name="spawn_agent",
         tool_input={"fork_turns": "none", "agent_type": agent_type, "message": f"task for {agent_id}"},
-    )) == ""
+    )
+    assert handle_hook(root, "PreToolUse", request) == ""
+    handle_hook(root, "PostToolUse", {**request, "tool_response": {"agent_id": agent_id, "nickname": None}})
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id=agent_id, agent_type=agent_type)) == ""
 
 
 def spawn_start_with_host_task_name(root: Path, task_name: str, agent_id: str) -> None:
+    from unittest.mock import patch
+    from thaliris_codex import codex_app_server
     spawn = hook_payload(tool_name="spawn_agent", tool_input={
         "fork_turns": "none", "agent_type": "worker", "message": "handoff",
     })
     assert handle_hook(root, "PreToolUse", spawn) == ""
-    assert handle_hook(root, "PostToolUse", {
-        **spawn, "tool_response": json.dumps({"task_name": task_name}),
-    }) == ""
+    with patch.object(codex_app_server, "native_spawn_identity", return_value=agent_id):
+        assert handle_hook(root, "PostToolUse", {
+            **spawn, "tool_response": json.dumps({"task_name": task_name}),
+        }) == ""
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id=agent_id, agent_type="worker")) == ""
 
 
@@ -1166,10 +1171,14 @@ def stop(root: Path, agent_id: str, agent_type: str = "worker") -> None:
 
 
 def reconcile(root: Path, agent_id: str, status: object) -> None:
-    assert handle_hook(root, "PostToolUse", hook_payload(
+    call = hook_payload(
         tool_name="list_agents",
-        tool_response={"agents": [{"agent_name": agent_id, "agent_status": status}]},
-    )) == ""
+        tool_use_id="list-status-" + agent_id,
+    )
+    assert handle_hook(root, "PreToolUse", call) == ""
+    assert handle_hook(root, "PostToolUse", {**call,
+        "tool_response": {"agents": [{"agent_name": agent_id, "agent_status": status}]},
+    }) == ""
 
 
 def test_subagent_start_binds_explicit_handoff_without_injecting_projection(tmp_path: Path) -> None:
@@ -1199,6 +1208,7 @@ def test_subagent_start_binds_explicit_handoff_without_injecting_projection(tmp_
         tool_input={"fork_turns": "none", "agent_type": "worker", "message": handoff},
     )
     assert handle_hook(root, "PreToolUse", spawn) == ""
+    handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"agent_id": "child-one", "nickname": None}})
     start_output = handle_hook(
         root,
         "SubagentStart",
@@ -1857,6 +1867,7 @@ def test_all_exact_bound_roles_pass_active_child_lifecycle(tmp_path: Path, agent
         "session_id": payload["session_id"], "turn_id": payload["turn_id"],
         "agent_id": f"{agent_type}-child", "agent_type": agent_type,
     }
+    handle_hook(root, "PostToolUse", {**payload, "tool_response": {"agent_id": child["agent_id"], "nickname": None}})
     assert handle_hook(root, "SubagentStart", child) == ""
     assert handle_hook(root, "PreToolUse", {
         **child, "tool_name": "Bash", "tool_input": {"command": "Get-Content README.md"},
@@ -2641,10 +2652,11 @@ def test_exact_spawn_error_keeps_pending_without_native_creation_or_terminal_pro
     assert lifecycle(root)["pending_authorized_spawn"]["handoff_id"] == handoff_id
     handle_hook(root, "SubagentStart", hook_payload(agent_id="created-before-error", agent_type="worker"))
     child = lifecycle(root)["children"][-1]
-    assert child["managed"] is True and child["handoff_id"] == handoff_id
+    assert child["managed"] is False and child["handoff_id"] is None
+    assert lifecycle(root)["pending_authorized_spawn"]["handoff_id"] == handoff_id
     assert not lifecycle_module.native_execution_closed(root)
     reconcile(root, "created-before-error", {"completed": None})
-    assert lifecycle_module.native_execution_closed(root)
+    assert not lifecycle_module.native_execution_closed(root)
 
 
 def test_legacy_generic_spawn_failed_evidence_stays_inert_and_preserved(tmp_path):
@@ -2685,6 +2697,7 @@ def test_bound_child_consumes_its_pending_spawn_reservation(tmp_path: Path) -> N
     })
     assert handle_hook(root, "PreToolUse", spawn) == ""
     handoff_id = lifecycle(root)["pending_authorized_spawn"]["handoff_id"]
+    handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"agent_id": "bound-child", "nickname": None}})
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id="bound-child", agent_type="worker")) == ""
     state = lifecycle(root)
     assert state["pending_authorized_spawn"] is None
@@ -2717,6 +2730,7 @@ def test_lifecycle_binds_matching_identity_and_stop(tmp_path: Path) -> None:
     assert state["children"][0]["managed"] is False
     assert state["pending_authorized_spawn"] is not None
 
+    handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"agent_id": "reviewer-1", "nickname": None}})
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id="reviewer-1", agent_type="thaliris-reviewer")) == ""
     running = lifecycle(root)["children"][-1]
     assert running["managed"] is True and running["native_terminal_status"] is None
@@ -2904,6 +2918,7 @@ def test_missing_stop_native_completed_proves_execution_closure(tmp_path: Path) 
         "fork_turns": "none", "agent_type": "worker", "message": "implement",
     })
     assert handle_hook(root, "PreToolUse", spawn) == ""
+    handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"agent_id": "worker-1", "nickname": None}})
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id="worker-1", agent_type="worker")) == ""
     assert handle_hook(root, "PostToolUse", hook_payload(
         tool_name="list_agents",
@@ -3210,6 +3225,7 @@ def test_native_completed_parent_keeps_active_descendant_and_unbound_child_fail_
         "fork_turns": "none", "agent_type": "thaliris-investigator", "message": "selected discovery",
     })
     assert handle_hook(root, "PreToolUse", nested) == ""
+    handle_hook(root, "PostToolUse", {**nested, "tool_response": {"agent_id": "scanner", "nickname": None}})
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id="scanner", agent_type="thaliris-investigator")) == ""
     reconcile(root, "parent", {"completed": "result"})
     assert not lifecycle_module.native_execution_closed(root)
@@ -3540,10 +3556,12 @@ def test_subagent_start_identity_collision_preserves_reservation(tmp_path: Path)
     spawn_start(root, "reused-id")
     stop(root, "reused-id")
     reconcile(root, "reused-id", {"completed": "first result"})
-    assert handle_hook(root, "PreToolUse", hook_payload(
+    second = hook_payload(
         tool_name="spawn_agent",
         tool_input={"fork_turns": "none", "agent_type": "worker", "message": "second handoff"},
-    )) == ""
+    )
+    assert handle_hook(root, "PreToolUse", second) == ""
+    handle_hook(root, "PostToolUse", {**second, "tool_response": {"agent_id": "reused-id", "nickname": None}})
 
     assert handle_hook(root, "SubagentStart", hook_payload(agent_id="reused-id", agent_type="worker")) == ""
     state = lifecycle(root)

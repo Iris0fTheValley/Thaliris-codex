@@ -91,6 +91,7 @@ def _spawn(root: Path, role: str, agent: str, *, parent: dict[str, object] | Non
     decision = lifecycle.handle_hook(root, "PreToolUse", request)
     assert not decision or json.loads(decision)["hookSpecificOutput"].get("permissionDecision") != "deny", decision
     child = _identity(role, agent)
+    lifecycle.handle_hook(root, "PostToolUse", {**request, "tool_response": {"agent_id": agent, "nickname": None}})
     assert lifecycle._record_subagent_start(root, child)
     lifecycle.handle_hook(root, "PostToolUse", {**request, "tool_response": {"task_name": f"/root/{agent}"}})
     task_id = core.task_show(root)["state"]["task_id"]
@@ -523,7 +524,7 @@ def _protected_evidence_bytes(root, task_id):
     return {path: path.read_bytes() if path.exists() else None for path in paths}
 
 
-def test_preselection_cli_registers_requirements_and_opaque_first_observation_before_ack(evidence_task, capsys):
+def test_preselection_cli_registers_requirements_before_first_corroborated_observation(evidence_task, capsys):
     root, task_id = evidence_task
     selection = {"role": "implementer", "expected_agent_type": "thaliris-implementer",
                  "candidate": "C4", "requirement_refs": ["R1"]}
@@ -544,18 +545,23 @@ def test_preselection_cli_registers_requirements_and_opaque_first_observation_be
     assert "next_evidence_dispatch" not in pending
     assert core.task_get(root, handoff_id)["object"]["candidate"] == "C4"
     child = _identity("implementer", "opaque-before-ack")
-    assert lifecycle._record_subagent_start(root, child)
+    assert not lifecycle._record_subagent_start(root, child)
+    lifecycle.handle_hook(root, "PostToolUse", {**request,
+        "tool_response": {"agent_id": child["agent_id"], "nickname": None}})
+    assert lifecycle._bound_managed_child(root, child)
     codex_adapter.task_observe(root, "implementer", handoff_id, lifecycle._identity_hash(child["agent_id"]),
         observation_json=json.dumps(_observation("O-before-ack")))
     assert core.task_get(root, "O-before-ack")["object"]["requirement_refs"] == ["R1"]
     assert task_authority.check(root) is not None
-    # Parent PostToolUse acknowledgement has not happened; the bound child can
-    # already dispatch its Scanner, which inherits exact lineage and empty refs.
+    # After native identity corroboration, the first observation and Scanner
+    # retain preselected provenance without a second Controller association.
     scanner_request = {**_opaque_request("investigator"), **child}
     assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", scanner_request)
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
     scanner_handoff = ledger["pending_authorized_spawn"]["handoff_id"]
     scanner = _identity("investigator", "opaque-scanner-before-ack")
+    lifecycle.handle_hook(root, "PostToolUse", {**scanner_request,
+        "tool_response": {"agent_id": scanner["agent_id"], "nickname": None}})
     assert lifecycle._record_subagent_start(root, scanner)
     command = f'thaliris --root "{root}" task-observe --role investigator --observation-json ' + "'" + json.dumps(_observation("O-scanner-first"), separators=(",", ":")) + "'"
     raw, _ = _invoke_hook_command(root, scanner, command, readonly=True)

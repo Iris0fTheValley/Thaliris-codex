@@ -99,7 +99,15 @@ def test_reconnect_and_daemon_turn_changes_preserve_authority(workspace, monkeyp
              "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "Implement the accepted repair",
                  **_model_selection("implementer")}}
     assert lifecycle.handle_hook(workspace, "PreToolUse", spawn, lifecycle.MANAGED_HOOK_ABI) == ""
+    lifecycle.handle_hook(workspace, "PostToolUse", {**spawn,
+        "tool_response": {"agent_id": "new-child", "nickname": None}})
     assert lifecycle._record_subagent_start(workspace, {"session_id": "reconnected", "turn_id": "child-turn", "agent_id": "new-child", "agent_type": "thaliris-implementer"})
+    status_call = {"cwd": str(workspace), "session_id": "reconnected", "turn_id": "new-turn",
+        "tool_name": "list_agents", "tool_use_id": "reconnected-status-call"}
+    lifecycle.handle_hook(workspace, "PreToolUse", status_call)
+    lifecycle.handle_hook(workspace, "PostToolUse", {**status_call,
+        "tool_response": {"agents": [{"agent_name": "new-child", "agent_status": {"completed": "done"}}]}})
+    assert lifecycle.native_execution_closed(workspace)
 
 
 @pytest.mark.parametrize("role", ["thaliris-implementer", "thaliris-reviewer", "thaliris-verifier", "unknown-delegate"])
@@ -170,7 +178,7 @@ def test_default_delegation_guidance_does_not_gate_ordinary_execution(workspace)
 @pytest.mark.parametrize("new_task", [False, True])
 def test_completed_executor_cannot_write_after_task_close_or_new_task(workspace, new_task):
     started = start(workspace)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="old-implementer")
     actor = {"session_id": "first", "turn_id": "implementer-turn",
         "agent_id": "old-implementer", "agent_type": "thaliris-implementer"}
     assert lifecycle._record_subagent_start(workspace, actor)
@@ -187,7 +195,7 @@ def test_completed_executor_cannot_write_after_task_close_or_new_task(workspace,
 
 def test_completed_executor_identity_cannot_write_during_active_task_without_role_fields(workspace):
     started = start(workspace)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="old-implementer")
     actor = {"session_id": "first", "turn_id": "implementer-turn",
         "agent_id": "old-implementer", "agent_type": "thaliris-implementer"}
     assert lifecycle._record_subagent_start(workspace, actor)
@@ -220,7 +228,7 @@ def test_missing_legacy_lifecycle_is_unknown_and_deleted_anchored_lifecycle_is_r
 
 def test_disposition_without_native_identity_fence_cannot_clear_execution_risk(workspace):
     started = start(workspace)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="executor")
     actor = {"session_id": "first", "turn_id": "implementer-turn",
         "agent_id": "executor", "agent_type": "thaliris-implementer"}
     assert lifecycle._record_subagent_start(workspace, actor)
@@ -235,7 +243,7 @@ def test_disposition_without_native_identity_fence_cannot_clear_execution_risk(w
 
 def test_healthy_hook_blocks_reviewer_git_commit_and_host_profile_patches(workspace):
     start(workspace)
-    _spawn(workspace, role="reviewer")
+    _spawn(workspace, role="reviewer", native_agent_id="reviewer")
     child = {"cwd": str(workspace), "session_id": "first", "turn_id": "reviewer-turn",
         "agent_id": "reviewer", "agent_type": "thaliris-reviewer", "tool_name": "Bash",
         "tool_input": {"command": "git commit -m changed"}}
@@ -257,7 +265,7 @@ def test_healthy_hook_blocks_reviewer_git_commit_and_host_profile_patches(worksp
 
 def test_damaged_agent_navigation_keeps_known_reviewer_peer_message_denied(workspace):
     started = start(workspace)
-    _spawn(workspace, role="reviewer")
+    _spawn(workspace, role="reviewer", native_agent_id="reviewer")
     child = {"session_id": "first", "turn_id": "reviewer-turn", "agent_id": "reviewer",
         "agent_type": "thaliris-reviewer"}
     assert lifecycle._record_subagent_start(workspace, child)
@@ -293,6 +301,8 @@ def test_controller_direct_auxiliary_close_requires_native_completed_independent
     }}
     assert lifecycle.handle_hook(workspace, "PreToolUse", spawn, lifecycle.MANAGED_HOOK_ABI) == ""
     child = {**identity, "agent_id": "reviewer-id", "agent_type": "thaliris-reviewer"}
+    lifecycle.handle_hook(workspace, "PostToolUse", {**spawn,
+        "tool_response": {"agent_id": child["agent_id"], "nickname": None}})
     assert lifecycle.handle_hook(workspace, "SubagentStart", child) == ""
     if with_stop:
         assert lifecycle.handle_hook(workspace, "SubagentStop", child) == ""
@@ -434,11 +444,14 @@ def test_unknown_actor_invalid_contract_is_not_admitted(workspace, capsys):
     assert not core._state_path(workspace).exists()
 
 
-def _spawn(root, message="Selected repair", call="dispatch-1", role="implementer"):
+def _spawn(root, message="Selected repair", call="dispatch-1", role="implementer", native_agent_id=None):
     value = {"session_id": "first", "turn_id": "controller-turn", "tool_use_id": call,
         "tool_name": "spawn_agent", "tool_input": {"agent_type": "thaliris-" + role,
         "fork_turns": "none", "message": message, **_model_selection(role)}}
     assert lifecycle.handle_hook(root, "PreToolUse", value, lifecycle.MANAGED_HOOK_ABI) == ""
+    if native_agent_id is not None:
+        lifecycle.handle_hook(root, "PostToolUse", {**value,
+            "tool_response": {"agent_id": native_agent_id, "nickname": None}})
     return value
 
 
@@ -470,9 +483,9 @@ def test_unknown_dependency_disposition_preserves_task_and_allows_mode_cas(works
 
 def test_two_bound_workstreams_run_before_either_is_final(workspace):
     started = start(workspace)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="child-1")
     assert lifecycle._record_subagent_start(workspace, {"session_id": "first", "turn_id": "child-1-turn", "agent_id": "child-1", "agent_type": "thaliris-implementer"})
-    _spawn(workspace, message="Independent worktree repair", call="dispatch-2")
+    _spawn(workspace, message="Independent worktree repair", call="dispatch-2", native_agent_id="child-2")
     assert lifecycle._record_subagent_start(workspace, {"session_id": "first", "turn_id": "child-2-turn", "agent_id": "child-2", "agent_type": "thaliris-implementer"})
     ledger = json.loads(lifecycle._lifecycle_path(workspace, started["task_id"]).read_text(encoding="utf-8"))
     assert len(ledger["children"]) == 2
@@ -481,7 +494,7 @@ def test_two_bound_workstreams_run_before_either_is_final(workspace):
 
 def test_disposed_child_stays_fenced_after_mode_change_and_late_result(workspace):
     started = start(workspace)
-    _spawn(workspace, role="reviewer")
+    _spawn(workspace, role="reviewer", native_agent_id="reviewer")
     assert lifecycle._record_subagent_start(workspace, {"session_id": "first", "turn_id": "review-turn", "agent_id": "reviewer", "agent_type": "thaliris-reviewer"})
     path = lifecycle._lifecycle_path(workspace, started["task_id"])
     child = json.loads(path.read_text(encoding="utf-8"))["children"][0]
@@ -618,7 +631,7 @@ def test_native_ordinary_completion_shapes_do_not_release_managed_reservation(wo
 @pytest.mark.parametrize("damage", [False, True])
 def test_known_managed_child_cannot_downgrade_peer_messaging_by_omitting_profile(workspace, damage):
     start(workspace)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="child")
     child = {"session_id": "first", "turn_id": "child-turn", "agent_id": "child", "agent_type": "thaliris-implementer"}
     assert lifecycle._record_subagent_start(workspace, child)
     child.pop("agent_type")
@@ -645,7 +658,7 @@ def test_stale_active_task_and_foreign_cwd_do_not_require_recovery_for_native_re
 @pytest.mark.parametrize("missing", ["session_id", "turn_id", "agent_type"])
 def test_known_implementer_missing_auxiliary_fields_keeps_ordinary_write_only(workspace, missing):
     started = start(workspace)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="child")
     actor = {"session_id": "first", "turn_id": "child-turn", "agent_id": "child", "agent_type": "thaliris-implementer"}
     assert lifecycle._record_subagent_start(workspace, actor)
     actor.pop(missing)
@@ -661,7 +674,7 @@ def test_known_implementer_missing_auxiliary_fields_keeps_ordinary_write_only(wo
     ("agent_type", "thaliris-reviewer"), ("agent_type", "unknown-profile")])
 def test_known_implementer_provided_identity_conflicts_keep_write_denied(workspace, key, value, damage):
     start(workspace)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="child")
     actor = {"session_id": "first", "turn_id": "child-turn", "agent_id": "child", "agent_type": "thaliris-implementer"}
     assert lifecycle._record_subagent_start(workspace, actor)
     if damage:
@@ -675,7 +688,7 @@ def test_known_implementer_provided_identity_conflicts_keep_write_denied(workspa
 @pytest.mark.parametrize("damage", [False, True])
 def test_known_reviewer_readonly_survives_missing_or_conflicting_profile_and_authority(workspace, profile, damage):
     start(workspace)
-    _spawn(workspace, role="reviewer")
+    _spawn(workspace, role="reviewer", native_agent_id="child")
     actor = {"session_id": "first", "turn_id": "child-turn", "agent_id": "child", "agent_type": "thaliris-reviewer"}
     assert lifecycle._record_subagent_start(workspace, actor)
     actor.pop("agent_type")
@@ -705,7 +718,7 @@ def test_native_agent_association_claim_never_overwrites_existing_bytes(workspac
             "task_id": first["task_id"], "agent_id_hash": identity}))
     raw = target.read_bytes() if target.is_file() else None
     assert not lifecycle._claim_agent_association(workspace, second["task_id"], identity)
-    _spawn(workspace)
+    _spawn(workspace, native_agent_id="collision-child")
     path = lifecycle._lifecycle_path(workspace, second["task_id"])
     pending = json.loads(path.read_bytes())["pending_authorized_spawn"]
     assert not lifecycle._record_subagent_start(workspace, {"session_id": "first", "turn_id": "child-turn",
@@ -731,6 +744,8 @@ def test_interleaved_spawn_callback_cannot_upgrade_foreign_native_identity(works
         "tool_name": "spawn_agent", "tool_input": {"agent_type": "thaliris-implementer", "fork_turns": "none", "message": "A handoff",
             **_model_selection("implementer")}}
     assert lifecycle.handle_hook(workspace, "PreToolUse", call_a) == ""
+    lifecycle.handle_hook(workspace, "PostToolUse", {**call_a,
+        "tool_response": {"agent_id": "native-X", "nickname": None}})
     assert lifecycle.handle_hook(workspace, "SubagentStart", {**child_b, "session_id": "fresh-session", "turn_id": "A-child-turn"}) == ""
     map_path = lifecycle._association_path(workspace, lifecycle._identity_hash("native-X"), "agent")
     original_map = map_path.read_bytes()

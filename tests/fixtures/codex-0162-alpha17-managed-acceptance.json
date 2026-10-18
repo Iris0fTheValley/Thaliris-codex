@@ -1,0 +1,189 @@
+{
+  "cli_version": "codex-cli 0.162.0-alpha.17.2",
+  "observed_date": "2026-10-18",
+  "candidate_source_sha256": {
+    "src/thaliris_codex/lifecycle.py": "96f5d0b93fa6a4e390e9bf344d33743c28937dedb5af100b8db83ce014e79a55",
+    "src/thaliris_codex/codex_adapter.py": "82a0c0000dba430c73900a8a529b4e06132efb439edc278d512bda38eba97f03",
+    "src/thaliris_codex/codex_app_server.py": "93fc453595473d4c0e133dd67d9d8f5c86f34040eecaa81a68ae4b887ed01882"
+  },
+  "runtime_package_matches_candidate_source": true,
+  "adapter_source_wheel_sha256": "b7a2f811e8a6f1a7396c14b2415efcf96bb97b75ab3df1a725d48a8c219d3098",
+  "runtime_manifest_sha256": "346b3b290853f35be1a009f09ac4caaed8ec37a2f92f6f7351001d7a17f71ad2",
+  "same_native_root_session_reused": true,
+  "reused_session_requires_dispatch_id": true,
+  "tasks": [
+    {
+      "run": 1,
+      "task_id_hash": "cd48276640e1c13cbb2e76f0dec73dc7605948d1dd429faed8c5de17d85e4237",
+      "owner_session_id_hash": "72f9e5e7813368e59cbf2d83d550653214a30d2c6009d82910945e68197e4063",
+      "pending_reservation": false,
+      "children": [
+        {
+          "role": "implementer",
+          "depth": 1,
+          "agent_id_hash": "8c511bfa18dcdff4b7004d368eba9edac2cb6baa91caf2b7971b331a43bd0a34",
+          "parent_agent_id_hash": null,
+          "managed": true,
+          "handoff_bound": true,
+          "native_identity_source": "app_server_subagent_activity",
+          "spawn_tool_use_id_hash": "3984d6333d69fe0dd60a4553ea43a123771265e8df523de83d6b46cc470feb25",
+          "spawn_turn_id_hash": "6b9580e660b7f1e4abc270610e9a86a28f59ffe9bf67c5a2851c434fd4f9ae03",
+          "turn_id_hash": "9821aca92dde2b16da36caa92fdee198b69cb44a867790e586814a409dfddeda",
+          "native_terminal_status": "completed",
+          "native_terminal_source": "list_agents",
+          "handoff_id_hash": "6309520c1ecbf68869564028668f34cdbbe8f90d17b4436575e7e20d6271f42c",
+          "root_handoff_id_hash": "6309520c1ecbf68869564028668f34cdbbe8f90d17b4436575e7e20d6271f42c"
+        },
+        {
+          "role": "investigator",
+          "depth": 2,
+          "agent_id_hash": "7ed30efdc7c8e9ce0d486454ba0ef2951651d2baf7a8d1eeb1f47d60ffc3c861",
+          "parent_agent_id_hash": "8c511bfa18dcdff4b7004d368eba9edac2cb6baa91caf2b7971b331a43bd0a34",
+          "managed": true,
+          "handoff_bound": true,
+          "native_identity_source": "app_server_subagent_activity",
+          "spawn_tool_use_id_hash": "156cd43a33d57ce00db2b742f9a2168ffbb47acbbd543db8dd9cbfb9921253c8",
+          "spawn_turn_id_hash": "9821aca92dde2b16da36caa92fdee198b69cb44a867790e586814a409dfddeda",
+          "turn_id_hash": "98c2b79902e2bda5be1d3942f02c1db9ff51a255db0f57d60c5832c12e7f932e",
+          "native_terminal_status": "completed",
+          "native_terminal_source": "list_agents",
+          "handoff_id_hash": "24159ddfa71e2c1b9548d3684cc37dea95e69284545e50f1caec4486c5e981e3",
+          "root_handoff_id_hash": "6309520c1ecbf68869564028668f34cdbbe8f90d17b4436575e7e20d6271f42c"
+        }
+      ],
+      "observation_provenance": [
+        {
+          "role": "implementer",
+          "candidate": "C-probe-1",
+          "handoff_id_hash": "6309520c1ecbf68869564028668f34cdbbe8f90d17b4436575e7e20d6271f42c",
+          "requirement_refs": [
+            "R-probe"
+          ],
+          "native_actor": "8c511bfa18dcdff4b7004d368eba9edac2cb6baa91caf2b7971b331a43bd0a34"
+        },
+        {
+          "role": "investigator",
+          "candidate": "C-probe-1",
+          "handoff_id_hash": "24159ddfa71e2c1b9548d3684cc37dea95e69284545e50f1caec4486c5e981e3",
+          "requirement_refs": [],
+          "native_actor": "7ed30efdc7c8e9ce0d486454ba0ef2951651d2baf7a8d1eeb1f47d60ffc3c861"
+        }
+      ],
+      "allowed_marker_sha256": "439968ee21be656d82e377b93053abf13c08f87f7ab4784d0f27ad4aedbb9b5d"
+    },
+    {
+      "run": 2,
+      "task_id_hash": "0daa02a146cb3a2183feb74e941f17df181969ec125c9e6ae01b6ec0be7d3f5f",
+      "owner_session_id_hash": "72f9e5e7813368e59cbf2d83d550653214a30d2c6009d82910945e68197e4063",
+      "pending_reservation": false,
+      "children": [
+        {
+          "role": "implementer",
+          "depth": 1,
+          "agent_id_hash": "5ccb08c87d89943cfa4e1c21865b1716af4fbe06975fd04b746fd9107de9427e",
+          "parent_agent_id_hash": null,
+          "managed": true,
+          "handoff_bound": true,
+          "native_identity_source": "app_server_subagent_activity",
+          "spawn_tool_use_id_hash": "acaf27949fee37788e2f924ca895cae7ff7c77f8cb458bb5193fa781317d36d4",
+          "spawn_turn_id_hash": "a187be3157ab976285d8c8192adaf2c2ac93ec528c78f375aade407866e2c11e",
+          "turn_id_hash": "f2e8f288634e0323022072171780b578dd837d040a2e61ca19c2a985db541a1f",
+          "native_terminal_status": "completed",
+          "native_terminal_source": "list_agents",
+          "handoff_id_hash": "92fd1383bb5f9b264c76cc33cabf202f1cf201f9c5620526e41acc7dbb9ddd8b",
+          "root_handoff_id_hash": "92fd1383bb5f9b264c76cc33cabf202f1cf201f9c5620526e41acc7dbb9ddd8b"
+        },
+        {
+          "role": "investigator",
+          "depth": 2,
+          "agent_id_hash": "0efe97f56d71027294f3a18e4066a1489c080c87d5c38a7c14e7ea4c5bdfcd66",
+          "parent_agent_id_hash": "5ccb08c87d89943cfa4e1c21865b1716af4fbe06975fd04b746fd9107de9427e",
+          "managed": true,
+          "handoff_bound": true,
+          "native_identity_source": "app_server_subagent_activity",
+          "spawn_tool_use_id_hash": "49798dca670c22f573eeb46218cfd7e908ea7602ecbb10eeccc12d015f4cc2ec",
+          "spawn_turn_id_hash": "f2e8f288634e0323022072171780b578dd837d040a2e61ca19c2a985db541a1f",
+          "turn_id_hash": "f9ed5b12a75e30c8f5ab73f3b10ebfbd86b643bf720debd6ceb7b5c468db227f",
+          "native_terminal_status": "completed",
+          "native_terminal_source": "list_agents",
+          "handoff_id_hash": "2a117bb8f8772b13a1966a7a74637b5558cb4c9cf1693bccf91232b932c37a3e",
+          "root_handoff_id_hash": "92fd1383bb5f9b264c76cc33cabf202f1cf201f9c5620526e41acc7dbb9ddd8b"
+        }
+      ],
+      "observation_provenance": [
+        {
+          "role": "implementer",
+          "candidate": "C-probe-2",
+          "handoff_id_hash": "92fd1383bb5f9b264c76cc33cabf202f1cf201f9c5620526e41acc7dbb9ddd8b",
+          "requirement_refs": [
+            "R-probe"
+          ],
+          "native_actor": "5ccb08c87d89943cfa4e1c21865b1716af4fbe06975fd04b746fd9107de9427e"
+        },
+        {
+          "role": "investigator",
+          "candidate": "C-probe-2",
+          "handoff_id_hash": "2a117bb8f8772b13a1966a7a74637b5558cb4c9cf1693bccf91232b932c37a3e",
+          "requirement_refs": [],
+          "native_actor": "0efe97f56d71027294f3a18e4066a1489c080c87d5c38a7c14e7ea4c5bdfcd66"
+        }
+      ],
+      "allowed_marker_sha256": "439968ee21be656d82e377b93053abf13c08f87f7ab4784d0f27ad4aedbb9b5d"
+    }
+  ],
+  "controlled_stale_callback_replay": {
+    "evidence_kind": "controlled_deterministic_replay",
+    "source_hook_capture_sha256": "64ec53810a0e467a36947b4181228a9897ef38bf7a4273e5b2685665d9d0de05",
+    "source_official_thread_snapshot_sha256": "efd78d24713617f10b60feccd56bb0d51ce04742963370cec98b98aa118fd595",
+    "source_artifact_digests_match_native_contract_receipt": true,
+    "candidate_runtime_native_reader_used_exact_captured_activity_item": true,
+    "captured_edge_correlations_verified_in_memory": {
+      "root_session": true,
+      "parent_turn": true,
+      "spawn_call": true,
+      "child_actor": true,
+      "task_path": true
+    },
+    "stale_task_a_callbacks_replayed_after_task_b_same_name_reservation": [
+      "spawn PostToolUse",
+      "SubagentStart",
+      "list_agents PostToolUse",
+      "wait_agent PostToolUse",
+      "interrupt_agent PostToolUse",
+      "SubagentStop"
+    ],
+    "assertions": {
+      "task_b_pending_reservation_byte_identical": true,
+      "task_b_handoff_evidence_identical": true,
+      "task_b_core_state_byte_identical": true,
+      "task_b_authority_byte_identical": true,
+      "old_task_a_actor_not_authorized_in_task_b": true,
+      "wrong_call_turn_session_callbacks_preserved_reservation": true,
+      "wrong_profile_start_not_managed": true,
+      "readonly_investigator_write_denied": true
+    },
+    "recovered_callback_fields": {
+      "wait_call_ids": true,
+      "interrupt_call_id": true,
+      "list_call_id": false,
+      "child_turn_id": false,
+      "payload_text": false
+    },
+    "substitutions": [
+      "The captured probe-child profile was replaced with thaliris-focused-implementer to exercise a supported writable role; the observed model and effort were retained.",
+      "A disposable UUID supplied the child turn because the captured value was hashed only.",
+      "A disposable call ID supplied the list_agents call because its captured value was hashed only and absent from the official snapshot.",
+      "The selected handoff message, task-name input reconstructed from the exact official path, and status text used placeholders because their captured payload values were hashed only."
+    ],
+    "real_fresh_and_reused_managed_acceptance_is_separate": true,
+    "naturally_emitted_stale_race": false,
+    "raw_native_identities_or_payload_text_recorded": false
+  },
+  "scope": "Disposable Codex home, fake user authority store, immutable runtime and workspace; no production Host configuration changes, UI state or session-file tailing.",
+  "limits": [
+    "No production Desktop activation is claimed",
+    "Other CLI versions remain unverified",
+    "Current close_agent tool was unavailable",
+    "Turn-specific completion notification subscription remains UNKNOWN"
+  ]
+}

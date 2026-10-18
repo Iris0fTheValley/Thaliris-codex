@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -50,10 +51,10 @@ class CodexAppServer:
     not establish a subscription to Desktop's managed-child turn notifications.
     """
 
-    def __init__(self, codex_home: Path, timeout_seconds: float = 45.0) -> None:
+    def __init__(self, codex_home: Path, timeout_seconds: float = 45.0, *, executable: str | None = None) -> None:
         self.codex_home = codex_home.resolve(strict=True)
         self.timeout_seconds = timeout_seconds
-        executable = shutil.which("codex")
+        executable = executable or shutil.which("codex")
         if executable is None:
             raise CodexAppServerError("codex CLI was not found on PATH")
         self.executable = str(Path(executable).resolve(strict=True))
@@ -202,6 +203,75 @@ class CodexAppServer:
 
 def _app_server_client(codex_home: Path) -> CodexAppServer:
     return CodexAppServer(codex_home)
+
+
+def _native_lifecycle_client(codex_home: Path) -> CodexAppServer:
+    # Hooks inherit the invoking CLI location. This selects the reader, never
+    # task authority; initialize must still corroborate its requested home.
+    executable = os.environ.get("CODEX_CLI_PATH") or shutil.which("codex")
+    return CodexAppServer(codex_home, executable=executable)
+
+
+def native_spawn_identity(codex_home: Path, payload: dict[str, Any], task_name: str) -> str | None:
+    """Read the official call-to-child edge, without names as identity proof.
+
+    alpha.17.2 emits a subAgentActivity started item whose id is the native
+    spawn call id. Its agentThreadId corroborates SubagentStart.agent_id.
+    This is a read of the exact parent turn, not a subscription, status poll,
+    session-file reader, child-authored bearer, or model invocation.
+    """
+    thread = payload.get("agent_id") or payload.get("session_id")
+    turn, call = payload.get("turn_id"), payload.get("tool_use_id")
+    if not all(isinstance(value, str) and value for value in (thread, turn, call, task_name)):
+        return None
+    try:
+        # Native thread/turn identities are UUIDs; accepting a task path here
+        # would silently turn navigation into identity evidence.
+        uuid.UUID(thread)
+        uuid.UUID(turn)
+        with _native_lifecycle_client(codex_home) as client:
+            facts = client.connection_facts()
+            if (facts.get("cli_version") != "codex-cli 0.162.0-alpha.17.2"
+                    or facts.get("daemon_home_matches_requested") != "YES"):
+                return None
+            cursor = None
+            seen_cursors: set[str] = set()
+            matches = []
+            while True:
+                params = {"threadId": thread, "turnId": turn,
+                          "limit": 64, "sortDirection": "desc"}
+                if cursor is not None:
+                    params["cursor"] = cursor
+                page = _request(client, "thread/items/list", params)
+                entries = page.get("data")
+                if not isinstance(entries, list):
+                    return None
+                for entry in entries:
+                    if not isinstance(entry, dict) or entry.get("turnId") != turn:
+                        return None
+                    item = entry.get("item")
+                    if not isinstance(item, dict):
+                        return None
+                    if item.get("id") == call:
+                        matches.append(item)
+                cursor = page.get("nextCursor")
+                if cursor is None:
+                    break
+                if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+                    return None
+                seen_cursors.add(cursor)
+            if len(matches) != 1:
+                return None
+            item = matches[0]
+            child = item.get("agentThreadId")
+            if (item.get("type") != "subAgentActivity" or item.get("kind") != "started"
+                    or item.get("agentPath") != task_name or not isinstance(child, str)
+                    or child == thread):
+                return None
+            uuid.UUID(child)
+            return child
+    except (OSError, ValueError, TypeError, CodexAppServerError, subprocess.SubprocessError):
+        return None
 
 
 def _request(client: Any, method: str, params: dict[str, Any]) -> dict[str, Any]:

@@ -31,6 +31,8 @@ def test_parent_workspace_routes_spawn_start_wait_and_readonly_to_exact_task(evi
     routed = json.loads(raw)["hookSpecificOutput"]["updatedInput"]
     assert routed["model"] == "gpt-6-luna" and routed["reasoning_effort"] == "max"
     child = {**_identity("investigator", "parent-workspace-child"), "cwd": str(root.parent)}
+    lifecycle.handle_hook(root.parent, "PostToolUse", {**request,
+        "tool_response": {"agent_id": child["agent_id"], "nickname": None}})
     lifecycle.handle_hook(root.parent, "SubagentStart", child)
     lifecycle.handle_hook(root.parent, "PostToolUse", {**request, "tool_response": {"task_name": "/root/parent-workspace-child"}})
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)

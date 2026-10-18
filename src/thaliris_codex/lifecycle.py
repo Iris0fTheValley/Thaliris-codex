@@ -1529,6 +1529,8 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
                 return _permission_deny("THALIRIS_CHILD_TASK_ASSOCIATION_CONFLICT") if event == "PreToolUse" else ""
             selected = requested
         core.select_task(root, selected)
+        if event == "PreToolUse" and selected is not None and payload.get("agent_id") is not None:
+            _best_effort_record(_observe_child_turn_reuse, root, payload)
         if event == "PreToolUse" and selected is not None:
             agent_hash = _identity_hash(payload.get("agent_id"))
             if agent_hash is not None:
@@ -1568,7 +1570,17 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
                         _best_effort_record(_record_bound_role_session_denial, root, payload,
                             {"field_status": statuses, "identity_hashes": hashes})
                         return _permission_deny("THALIRIS_BOUND_ROLE_SESSION_REQUIRED: supplied fields contradict this exact known handoff identity")
-        return _handle_hook_selected(root, event, payload, managed_hook_abi)
+        output = _handle_hook_selected(root, event, payload, managed_hook_abi)
+        if event == "PreToolUse" and normalized in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}:
+            # Interpret the actual decision, rather than the presence of prose
+            # or an updated input, before retaining a callback correlation.
+            try:
+                decision = json.loads(output).get("hookSpecificOutput", {}).get("permissionDecision") if output else None
+            except (ValueError, TypeError, AttributeError):
+                decision = "deny"
+            if decision != "deny":
+                _best_effort_record(_record_native_status_call, root, payload, normalized)
+        return output
     except (OSError, ValueError, TypeError, KeyError):
         if event == "PreToolUse" and (_managed_control_dependency(payload, root) or _controller_actor_assurance(payload) == "CHILD" and _obvious_write_attempt(payload)):
             return _permission_deny("THALIRIS_TASK_ASSOCIATION_UNKNOWN: managed control requires an explicit intact task association")
@@ -1710,6 +1722,9 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 return _child_pre_tool_output(root, payload)
             _best_effort_record(_record_child_runtime_event, root, payload, event)
             tool = payload.get("tool_name") or payload.get("tool")
+            if (event == "PostToolUse" and isinstance(tool, str)
+                    and _tool_basename(tool) in _OBSERVED_EXECUTION_TOOL_NAMES + _COLLABORATION_TOOL_NAMES):
+                _best_effort_record(_record_execution_observation, root, payload)
             if event == "PostToolUse" and isinstance(tool, str) and _bound_managed_child(root, payload):
                 _best_effort_record(_reconcile_lifecycle_post_tool, root, payload, _tool_basename(tool))
             return ""
@@ -1732,6 +1747,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
             tool = payload.get("tool_name") or payload.get("tool")
             if isinstance(tool, str) and _tool_basename(tool) in _COLLABORATION_TOOL_NAMES:
                 _best_effort_record(_record_runtime_event, root, payload, event, tool)
+                _best_effort_record(_record_execution_observation, root, payload)
                 if _controller_actor_assurance(payload) == "CONTROLLER" or task_authority.check(root) is not None:
                     _best_effort_record(_reconcile_lifecycle_post_tool, root, payload, _tool_basename(tool))
                 if _tool_basename(tool) in _DELEGATION_TOOL_NAMES:
@@ -2020,6 +2036,9 @@ def _record_runtime_event(root: Path, payload: dict[str, Any], event: str, tool:
         if tool not in raw_tools and len(raw_tools) < 16:
             raw_tools.append(tool)
         if event == "PreToolUse":
+            pretools = state.setdefault("pretool_tools_observed", [])
+            if normalized not in pretools:
+                pretools.append(normalized)
             tool_input = _delegation_input(payload)
             state.pop("pre_dispatch_rewrite", None)
             state["pre_dispatch_isolation"] = (
@@ -2232,7 +2251,7 @@ def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) 
     pending = value.get("pending_authorized_spawn")
     if pending is not None and (
         not isinstance(pending, dict)
-        or (set(pending) - {"native_agent_id_hash"}) not in (
+        or (set(pending) - {"native_agent_id_hash", "native_identity_source"}) not in (
             {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"},
             {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash"},
         )
@@ -2247,6 +2266,8 @@ def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) 
         or type(pending.get("created_at_ns")) is not int
         or ("native_agent_id_hash" in pending and (not isinstance(pending["native_agent_id_hash"], str)
             or re.fullmatch(r"[0-9a-f]{64}", pending["native_agent_id_hash"]) is None))
+        or ("native_identity_source" in pending and pending["native_identity_source"] not in {
+            "legacy_spawn_response", "app_server_subagent_activity"})
         or ("spawn_turn_id_hash" in pending and pending["spawn_turn_id_hash"] is not None
             and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
         or not _valid_parent_metadata(pending)
@@ -2942,8 +2963,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
             and pending.get("role") == role
             and pending.get("expected_agent_type") == native_agent_type
             and pending.get("session_id_hash") == session_id_hash
-            and pending.get("native_agent_id_hash", child_hash) == child_hash
-            and ("native_agent_id_hash" in pending or not _dispatch_identity_required(root, state, session_id_hash))
+            and pending.get("native_agent_id_hash") == child_hash
             and _pending_parent_live(state, pending)
             and constrained_model_status in {None, "MATCH"}
         )
@@ -2971,6 +2991,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "started": state["sequence"],
                 "native_terminal_status": None,
                 "task_name_hash": pending.get("task_name_hash") if bound else None,
+                "native_identity_source": pending.get("native_identity_source") if bound else None,
                 **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")},
             }
             if constrained_model_status is not None:
@@ -2988,6 +3009,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "handoff_id": pending["handoff_id"], "task_revision": pending["task_revision"],
                 "producer": pending["producer"], "payload_hash": pending["payload_hash"],
                 "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
+                "native_identity_source": pending.get("native_identity_source"),
                 **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")}})
             state["pending_authorized_spawn"] = None
         elif (prior.get("managed") is True and prior.get("handoff_bound") is True
@@ -3099,6 +3121,43 @@ def _record_native_history(child: dict[str, Any], status: object, source: object
         del history[:-16]
 
 
+def _observe_child_turn_reuse(root: Path, payload: dict[str, Any]) -> None:
+    """A real child PreToolUse can expose reuse without a second Start hook.
+
+    This only records execution risk. It never changes the handoff's original
+    turn, its selected authority, or the permissions of a reused native actor.
+    """
+    task_id = _active_task_id(root)
+    session, turn = _session_id_hash(payload), _turn_id_hash(payload)
+    native_type = _native_spawn_agent_type({"tool_input": payload})
+    if task_id is None or session is None or turn is None or native_type is None:
+        return
+    with task_authority._lock(root):
+        task_authority.check(root)
+        if _session_fenced(root, session) or _abandoned_child_fenced(root, payload):
+            return
+        path = _lifecycle_path(root, task_id)
+        state = _load_lifecycle(path, task_id)
+        matches = [child for child in state["children"] if isinstance(child, dict)
+            and child.get("agent_id_hash") == _identity_hash(payload.get("agent_id"))
+            and child.get("managed") is True and child.get("handoff_bound") is True
+            and child.get("management_disposition") != "ABANDONED_DEPENDENCY"
+            and child.get("agent_type") == native_type and child.get("session_id_hash") == session
+            and child.get("turn_id_hash") != turn]
+        if len(matches) != 1:
+            return
+        child = matches[0]
+        if not child.get("native_turn_identity_unknown"):
+            _record_native_history(child, child.get("native_terminal_status"), child.get("native_terminal_source"))
+            child["native_terminal_status"] = None
+            child["native_terminal_source"] = "PreToolUse"
+        _record_native_history(child, "started", "PreToolUse", turn)
+        child["native_turn_identity_unknown"] = True
+        child["native_status_conflict"] = True
+        _runtime_metadata(state, payload)
+        _write_capture(path, state)
+
+
 def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status: str, source: str) -> bool:
     """Record supported legacy thread statuses; never accept a model result."""
     if child.get("management_disposition") == "ABANDONED_DEPENDENCY":
@@ -3176,6 +3235,72 @@ def _record_pending_terminal(state: dict[str, Any], name: str, status: str, sour
     return True
 
 
+def _native_status_call_key(payload: dict[str, Any], tool: str) -> dict[str, Any] | None:
+    if not all(isinstance(payload.get(key), str) and payload[key] for key in ("session_id", "turn_id", "tool_use_id")):
+        return None
+    return {"tool": tool, "session_id_hash": _session_id_hash(payload),
+            "turn_id_hash": _turn_id_hash(payload),
+            "agent_id_hash": _identity_hash(payload.get("agent_id")),
+            "tool_use_id_hash": _identity_hash(payload["tool_use_id"])}
+
+
+def _record_native_status_call(root: Path, payload: dict[str, Any], tool: str) -> None:
+    """Associate a status callback with the task that admitted its native call."""
+    task_id = _active_task_id(root)
+    key = _native_status_call_key(payload, tool)
+    if task_id is None or key is None:
+        return
+    with task_authority._lock(root):
+        path = _lifecycle_path(root, task_id)
+        state = _load_lifecycle(path, task_id)
+        if _session_fenced(root, key["session_id_hash"]):
+            return
+        if payload.get("agent_id") is not None or payload.get("agent_type") is not None:
+            if _bound_child_record(state, payload) is None:
+                return
+        elif (task_authority.check(root) is None
+                and active_controller_owner(root, task_id) != key["session_id_hash"]):
+            return
+        calls = state.setdefault("native_status_calls", [])
+        if key not in calls:
+            calls.append(key)
+            del calls[:-MAX_RAW_RECORDS]
+            _write_capture(path, state)
+
+
+def _corroborate_dispatch_identity(root: Path, task_id: str, state: dict[str, Any],
+                                   pending: dict[str, Any], agent_id: str, source: str) -> None:
+    """Apply an exact native call-to-child edge to an already checked dispatch."""
+    agent_hash = _identity_hash(agent_id)
+    if (not _pending_parent_live(state, pending)
+            or pending.get("native_agent_id_hash", agent_hash) != agent_hash
+            or not _claim_agent_association(root, task_id, agent_hash)):
+        collisions = state.setdefault("identity_collisions", [])
+        if len(collisions) < 16:
+            collisions.append({"source": source, "agent_id_hash": agent_hash})
+        return
+    pending["native_agent_id_hash"] = agent_hash
+    pending["native_identity_source"] = source
+    prior = next((child for child in state["children"] if isinstance(child, dict)
+        and child.get("agent_id_hash") == agent_hash and child.get("managed") is False
+        and not _native_execution_terminal(child) and not child.get("native_status_conflict")
+        and child.get("native_terminal_status") != "not_found"
+        and child.get("management_disposition") != "ABANDONED_DEPENDENCY"
+        and child.get("agent_type") == pending["expected_agent_type"]
+        and child.get("role") == pending["role"]
+        and child.get("session_id_hash") == pending["session_id_hash"]
+        and isinstance(child.get("turn_id_hash"), str)
+        and child.get("execution_constraint_model_status") in {None, "MATCH"}), None)
+    if prior is not None:
+        prior.update({"managed": True, "handoff_bound": True,
+            "handoff_id": pending["handoff_id"], "task_revision": pending["task_revision"],
+            "producer": pending["producer"], "payload_hash": pending["payload_hash"],
+            "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
+            "native_identity_source": source,
+            **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")}})
+        state["pending_authorized_spawn"] = None
+
+
 def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: str) -> None:
     """Use naturally returned, identity-bound native statuses to repair liveness.
 
@@ -3209,6 +3334,15 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
         elif session_hash is None or (task_authority.check(root) is None and active_controller_owner(root, task_id) != session_hash):
             return
         changed = observed = False
+        if (tool in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}
+                and (_native_status_call_key(payload, tool) is not None
+                     or _dispatch_identity_required(root, state, session_hash))):
+            key = _native_status_call_key(payload, tool)
+            calls = state.get("native_status_calls", [])
+            if key is None or not isinstance(calls, list) or calls.count(key) != 1:
+                return
+            calls.remove(key)
+            changed = True
         if tool == "spawn_agent":
             pending = state.get("pending_authorized_spawn")
             # A native tool error may follow thread creation and best-effort
@@ -3218,27 +3352,8 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     and response["agent_id"] and (response["nickname"] is None or isinstance(response["nickname"], str))):
                 agent_hash = _identity_hash(response["agent_id"])
                 if isinstance(pending, dict) and _spawn_parent_matches(root, pending, payload):
-                    if (pending.get("native_agent_id_hash", agent_hash) != agent_hash
-                            or not _claim_agent_association(root, task_id, agent_hash)):
-                        # Conflicting spawn results cannot rewrite the first identity.
-                        collisions = state.setdefault("identity_collisions", [])
-                        if len(collisions) < 16:
-                            collisions.append({"source": "spawn_agent", "agent_id_hash": agent_hash})
-                    else:
-                        pending["native_agent_id_hash"] = agent_hash
-                        prior = next((child for child in state["children"] if isinstance(child, dict)
-                            and child.get("agent_id_hash") == agent_hash and child.get("managed") is False
-                            and not _native_execution_terminal(child) and not child.get("native_status_conflict")
-                            and child.get("native_terminal_status") != "not_found"
-                            and child.get("agent_type") == pending["expected_agent_type"]
-                            and child.get("session_id_hash") == pending["session_id_hash"]), None)
-                        if prior is not None:
-                            prior.update({"managed": True, "handoff_bound": True,
-                                "handoff_id": pending["handoff_id"], "task_revision": pending["task_revision"],
-                                "producer": pending["producer"], "payload_hash": pending["payload_hash"],
-                                "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
-                                **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")}})
-                            state["pending_authorized_spawn"] = None
+                    _corroborate_dispatch_identity(root, task_id, state, pending,
+                        response["agent_id"], "legacy_spawn_response")
                     changed = True
                 else:
                     candidates = [child for child in state["children"] if isinstance(child, dict)
@@ -3249,11 +3364,18 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         latest["native_status_conflict"] = True
                         changed = True
             task_name = response.get("task_name")
-            if isinstance(task_name, str) and task_name:
+            if set(response) == {"task_name"} and isinstance(task_name, str) and task_name:
                 name_hash = _identity_hash(task_name)
                 pending = state.get("pending_authorized_spawn")
-                if isinstance(pending, dict) and pending.get("task_name_hash") is None and _spawn_parent_matches(root, pending, payload):
+                if (isinstance(pending, dict) and _spawn_parent_matches(root, pending, payload)
+                        and pending.get("task_name_hash") in {None, name_hash}):
                     pending["task_name_hash"] = name_hash
+                    if "native_agent_id_hash" not in pending and _pending_parent_live(state, pending):
+                        from . import codex_app_server
+                        agent_id = codex_app_server.native_spawn_identity(_host_home_path(), payload, task_name)
+                        if agent_id is not None:
+                            _corroborate_dispatch_identity(root, task_id, state, pending,
+                                agent_id, "app_server_subagent_activity")
                     changed = True
                 else:
                     candidates = [
@@ -3491,25 +3613,64 @@ def _record_execution_observation(root: Path, payload: dict[str, Any]) -> None:
     tool = payload.get("tool_name") or payload.get("tool")
     response_field = next((key for key in ("tool_response", "tool_result", "result", "output") if key in payload), None)
     response = payload.get(response_field) if response_field is not None else None
+    decoded = _post_tool_response(payload)
     item: dict[str, Any] = {
         "tool": _tool_basename(tool) if isinstance(tool, str) else "UNKNOWN",
         "response_field": response_field,
         "response_type": type(response).__name__,
+        "decoded_response_type": type(decoded).__name__,
+        "native_response_contract": _native_response_contract(_tool_basename(tool) if isinstance(tool, str) else "", decoded),
+        "observed_at_ns": time.time_ns(),
         "outcome": _codex_bash_outcome(response) if isinstance(tool, str) and _tool_basename(tool) == "Bash" else _execution_outcome(response),
     }
-    if isinstance(response, dict):
-        item["response_keys"] = sorted(str(key) for key in response)[:16]
-        nested = response.get("result")
+    if isinstance(decoded, dict):
+        item["response_keys"] = sorted(str(key) for key in decoded)[:16]
+        nested = decoded.get("result")
         if isinstance(nested, dict):
             item["nested_result_keys"] = sorted(str(key) for key in nested)[:16]
+        if isinstance(decoded.get("agents"), list):
+            item["agent_entry_keys"] = sorted({str(key) for entry in decoded["agents"]
+                if isinstance(entry, dict) for key in entry})[:16]
     with task_authority._lock(root):
         path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         _runtime_metadata(state, payload)
         observed = state.setdefault("execution_observations", [])
-        if isinstance(observed, list) and len(observed) < 8:
+        if isinstance(observed, list):
+            # Retain the latest shape of each known tool. An initial burst of
+            # shell calls must not permanently hide later collaboration wire.
+            observed[:] = [entry for entry in observed
+                if isinstance(entry, dict) and entry.get("tool") != item["tool"]]
             observed.append(item)
+            del observed[:-MAX_RAW_RECORDS]
         _write_capture(path, state)
+
+
+def _native_response_contract(tool: str, response: object) -> str:
+    """Classify observed wire independently of unrelated wait capabilities."""
+    if tool in {"followup_task", "send_message"} and response == "":
+        return "CURRENT_V2"
+    if not isinstance(response, dict):
+        return "UNKNOWN"
+    if tool == "spawn_agent":
+        if set(response) == {"task_name"} and isinstance(response["task_name"], str) and response["task_name"]:
+            return "CURRENT_V2"
+        if (set(response) == {"agent_id", "nickname"} and isinstance(response["agent_id"], str)
+                and response["agent_id"] and (response["nickname"] is None or isinstance(response["nickname"], str))):
+            return "LEGACY_V1"
+    if tool == "wait_agent" and type(response.get("timed_out")) is bool:
+        if set(response) == {"message", "timed_out"} and isinstance(response["message"], str):
+            return "CURRENT_V2"
+        if set(response) == {"status", "timed_out"} and isinstance(response["status"], dict):
+            return "LEGACY_V1"
+    if (tool == "list_agents" and set(response) == {"agents"} and isinstance(response["agents"], list)
+            and all(isinstance(entry, dict) and isinstance(entry.get("agent_name"), str)
+                and _native_terminal_status(entry.get("agent_status")) is not None for entry in response["agents"])):
+        return "CURRENT_V2"
+    if (tool == "interrupt_agent" and set(response) == {"previous_status"}
+            and _native_terminal_status(response["previous_status"]) is not None):
+        return "CURRENT_V2"
+    return "UNKNOWN"
 
 
 def _post_tool_succeeded(response: object) -> bool:

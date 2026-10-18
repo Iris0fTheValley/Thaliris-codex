@@ -73,6 +73,12 @@ def state(root):
     return lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task), task)
 
 
+def native_return(root, request, agent):
+    """Explicit legacy identity evidence for synthetic role-policy fixtures."""
+    lifecycle.handle_hook(root, "PostToolUse", {**request,
+        "tool_response": {"agent_id": agent, "nickname": None}})
+
+
 def start(root, role="implementer", agent="executor", actor=None):
     model_pair = roles.ROLE_MODEL_ROUTING_DEFAULTS.get(role)
     request = spawn(actor, role, **(
@@ -81,6 +87,7 @@ def start(root, role="implementer", agent="executor", actor=None):
     ))
     assert lifecycle.handle_hook(root, "PreToolUse", request) == ""
     child = identity(role, agent)
+    native_return(root, request, agent)
     assert lifecycle._record_subagent_start(root, child)
     lifecycle.handle_hook(root, "PostToolUse", {**request, "tool_response": {"task_name": f"/root/{agent}"}})
     return child
@@ -88,7 +95,9 @@ def start(root, role="implementer", agent="executor", actor=None):
 
 def finish(root, child, observer=None, status="completed"):
     lifecycle.handle_hook(root, "SubagentStop", child)
-    lifecycle.handle_hook(root, "PostToolUse", {**(observer or event()), "tool_name": "list_agents", "tool_response": {
+    call = {**(observer or event()), "tool_name": "list_agents", "tool_use_id": "list-status-" + child["agent_id"]}
+    lifecycle.handle_hook(root, "PreToolUse", call)
+    lifecycle.handle_hook(root, "PostToolUse", {**call, "tool_response": {
         "agents": [{"agent_name": f'/root/{child["agent_id"]}', "agent_status": {status: "result"}}],
     }})
 
@@ -281,6 +290,7 @@ def test_nested_message_with_missing_parent_task_name_and_ambiguous_target(activ
     request = spawn(role="implementer")
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
     parent = identity()
+    native_return(active, request, parent["agent_id"])
     assert lifecycle._record_subagent_start(active, parent)
     assert state(active)["children"][0]["task_name_hash"] is None
     scanner = start(active, "investigator", "scanner", parent)
@@ -338,6 +348,7 @@ def test_start_consumes_only_exact_reservation_and_requires_own_identity(active)
         assert state(active)["pending_authorized_spawn"] is not None
     # A previously rejected identity is never rebound; use a fresh native ID.
     scanner = identity("investigator", "fresh-scanner")
+    native_return(active, spawn(parent), scanner["agent_id"])
     assert lifecycle._record_subagent_start(active, scanner)
     for key in ("agent_id", "agent_type", "turn_id", "session_id"):
         assert "deny" in lifecycle.handle_hook(active, "PreToolUse", {**scanner, key: "wrong", "tool_name": "apply_patch", "tool_input": {}})
@@ -351,23 +362,27 @@ def test_parent_stop_before_scanner_start_is_not_terminal_evidence(active):
     assert "terminal_state" not in parent_record
     assert parent_record["native_terminal_status"] is None
     assert isinstance(parent_record["stop_observed"], int)
+    native_return(active, spawn(parent), "scanner")
     assert lifecycle._record_subagent_start(active, identity("investigator", "scanner"))
     assert state(active)["pending_authorized_spawn"] is None
     finish(active, parent)
     assert not lifecycle.native_execution_closed(active)
 
 
-def test_spawn_return_is_correlated_to_authorized_parent(active):
+def test_spawn_return_is_correlated_to_authorized_parent(active, monkeypatch):
+    from thaliris_codex import codex_app_server
     parent = start(active)
     request = spawn(parent)
     request["tool_use_id"] = "nested-spawn-call"
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
     scanner = identity("investigator", "scanner")
-    assert lifecycle._record_subagent_start(active, scanner)
+    assert not lifecycle._record_subagent_start(active, scanner)
     for wrong in ({**event()}, {**parent, "turn_id": "wrong"}, parent):
         lifecycle.handle_hook(active, "PostToolUse", {**wrong, "tool_name": "spawn_agent", "tool_response": {"task_name": "/wrong"}})
         assert state(active)["children"][-1]["task_name_hash"] is None
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args: "scanner")
     lifecycle.handle_hook(active, "PostToolUse", {**request, "tool_response": {"task_name": "/root/scanner"}})
+    assert state(active)["children"][-1]["handoff_bound"] is True
     assert state(active)["children"][-1]["task_name_hash"] == lifecycle._identity_hash("/root/scanner")
 
 
@@ -395,6 +410,7 @@ def test_scanner_slot_reuse_preserves_exact_parent_and_allows_bound_root_sibling
     assert lifecycle.handle_hook(active, "PreToolUse", spawn(parent)) == ""
     assert "UNBOUND_DISPATCH_PENDING" in lifecycle.handle_hook(active, "PreToolUse", spawn(parent))
     scanner = identity("investigator", "first-scanner")
+    native_return(active, spawn(parent), scanner["agent_id"])
     assert lifecycle._record_subagent_start(active, scanner)
     lifecycle.handle_hook(active, "PostToolUse", {**spawn(parent), "tool_response": {"task_name": "/root/first-scanner"}})
     lifecycle.handle_hook(active, "SubagentStop", scanner)
@@ -464,6 +480,7 @@ def test_native_model_selection_preserves_managed_handoff(active, overrides):
     request = spawn(role="implementer", **selection)
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
     assert state(active)["pending_authorized_spawn"]["expected_agent_type"] == "thaliris-implementer"
+    native_return(active, request, "executor")
     assert lifecycle._record_subagent_start(active, identity())
     assert state(active)["children"][0]["handoff_bound"] is True
 
@@ -517,6 +534,7 @@ def test_partial_managed_model_selection_preserves_native_omission_semantics(act
 
     # Retire the pending reservation by binding its expected child before making
     # the next independent dispatch.
+    native_return(active, model_only, "executor")
     assert lifecycle._record_subagent_start(active, identity())
     effort_only = spawn(role="reviewer", use_route_defaults=False, reasoning_effort="medium")
     output = json.loads(lifecycle.handle_hook(active, "PreToolUse", effort_only))["hookSpecificOutput"]
@@ -530,6 +548,7 @@ def test_null_model_fields_are_native_omissions_and_bad_values_do_not_reserve(ac
     output = json.loads(lifecycle.handle_hook(active, "PreToolUse", omitted))["hookSpecificOutput"]
     assert output["updatedInput"]["model"] == "gpt-6-luna"
     assert output["updatedInput"]["reasoning_effort"] == "max"
+    native_return(active, omitted, "investigator-child")
     assert lifecycle._record_subagent_start(active, identity("investigator", "investigator-child"))
 
     for field, value in (("model", ""), ("model", 6), ("reasoning_effort", []), ("reasoning_effort", " ")):
@@ -623,6 +642,7 @@ def test_controller_selects_static_exceptional_profile(active, role):
     request["tool_input"]["agent_type"] = profile
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""
     parent = {**identity(role), "agent_type": profile}
+    native_return(active, request, parent["agent_id"])
     assert lifecycle._record_subagent_start(active, parent)
     assert state(active)["children"][0]["role"] == role
     if role == "focused-implementer":

@@ -44,7 +44,9 @@ def _shell_entry(root, monkeypatch):
     """
     script = root / "test-cli.py"
     script.write_text(
-        "from pathlib import Path\nfrom thaliris_codex import cli, task_authority\n"
+        "from pathlib import Path\nimport sys\n"
+        f"sys.path[:0]={[str(Path(cli.__file__).parents[1]), str(Path(core.__file__).parents[1])]!r}\n"
+        "from thaliris_codex import cli, task_authority\n"
         f"task_authority.directory=lambda: Path({str(task_authority.directory())!r})\n"
         "raise SystemExit(cli.main())\n", encoding="utf-8")
     runner = root / "thaliris.cmd"
@@ -73,11 +75,15 @@ def test_first_opaque_and_nested_observations_through_real_shell(evidence_task, 
     request = _opaque_request()
     assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", request)
     parent = _identity("implementer", "shell-parent")
+    lifecycle.handle_hook(root, "PostToolUse", {**request,
+        "tool_response": {"agent_id": parent["agent_id"], "nickname": None}})
     assert lifecycle._record_subagent_start(root, parent)
     runner, script = _shell_entry(root, monkeypatch)
     nested_request = {**_opaque_request("investigator"), **parent}
     assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", nested_request)
     scanner = _identity("investigator", "shell-scanner")
+    lifecycle.handle_hook(root, "PostToolUse", {**nested_request,
+        "tool_response": {"agent_id": scanner["agent_id"], "nickname": None}})
     assert lifecycle._record_subagent_start(root, scanner)
     for child, identifier in ((parent, "O-shell-parent"), (scanner, "O-shell-scanner")):
         body = _observation(identifier)

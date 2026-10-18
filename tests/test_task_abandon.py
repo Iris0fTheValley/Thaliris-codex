@@ -302,6 +302,11 @@ def test_owner_abort_fences_bound_old_child_identity_but_retains_owner(tmp_path)
     path = lifecycle._lifecycle_path(tmp_path, expected["task_id"])
     lifecycle.record_task_start_owner(tmp_path, expected["task_id"], hashlib.sha256(b"old-controller-session").hexdigest())
     child = {"session_id": "old-controller-session", "turn_id": "old-child-turn", "agent_id": "old-child", "agent_type": "thaliris-implementer"}
+    lifecycle.handle_hook(tmp_path, "PostToolUse", {
+        "session_id": "old-controller-session", "turn_id": "turn", "tool_name": "spawn_agent",
+        "tool_use_id": "old-native-call", "tool_input": {"agent_type": "thaliris-implementer",
+            "fork_turns": "none", "message": "old handoff"},
+        "tool_response": {"agent_id": "old-child", "nickname": None}})
     assert lifecycle.handle_hook(tmp_path, "SubagentStart", child) == ""
     expected["lifecycle_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
     result = _abandon(tmp_path, expected, _proof(tmp_path, "old-controller-session"))
@@ -335,8 +340,12 @@ def test_owner_abort_fences_bound_old_child_identity_but_retains_owner(tmp_path)
     assert current["children"][-1]["handoff_bound"] is True
     assert current["children"][-1]["agent_id_hash"] == lifecycle._identity_hash("fresh-child-id")
     assert lifecycle.handle_hook(tmp_path, "SubagentStop", fresh_child) == ""
-    lifecycle.handle_hook(tmp_path, "PostToolUse", {
+    status_call = {
         "session_id": "old-controller-session", "turn_id": "fresh-turn", "tool_name": "list_agents",
+        "tool_use_id": "fresh-status-call",
+    }
+    lifecycle.handle_hook(tmp_path, "PreToolUse", status_call)
+    lifecycle.handle_hook(tmp_path, "PostToolUse", {**status_call,
         "tool_response": {"agents": [{"agent_name": "fresh-child-id", "agent_status": {"completed": "done"}}]},
     })
     child_state = json.loads(fresh_path.read_text(encoding="utf-8"))["children"][-1]

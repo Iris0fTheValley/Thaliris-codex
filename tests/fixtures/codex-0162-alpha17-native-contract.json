@@ -1,0 +1,668 @@
+{
+  "cli_version": "codex-cli 0.162.0-alpha.17.2",
+  "observed_date": "2026-10-18",
+  "source": "Actual isolated native CLI Hook callbacks and official app-server read, with initialize CODEX_HOME agreement",
+  "privacy": "Payload text, paths and native identity strings are omitted; preserved equality uses SHA256 hashes only",
+  "hook_shapes": [
+    {
+      "event": "SessionStart",
+      "tool": null,
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "source",
+        "transcript_path"
+      ],
+      "input_keys": []
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "collaborationspawn_agent",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "agent_type",
+        "fork_turns",
+        "message",
+        "task_name"
+      ]
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "collaborationspawn_agent",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "agent_type",
+        "fork_turns",
+        "message",
+        "task_name"
+      ],
+      "response_shape": {
+        "encoded_json": {
+          "task_name": {
+            "length": 20,
+            "sha256": "a89007cf139eab6ec41e8881ec97b901f914284ef25bd6ffd63dd6abdf0669e8",
+            "type": "str"
+          }
+        }
+      }
+    },
+    {
+      "event": "SubagentStart",
+      "tool": null,
+      "keys": [
+        "agent_id",
+        "agent_type",
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": []
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "collaborationwait_agent",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "timeout_ms"
+      ]
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "Bash",
+      "keys": [
+        "agent_id",
+        "agent_type",
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "command"
+      ]
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "Bash",
+      "keys": [
+        "agent_id",
+        "agent_type",
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "command"
+      ],
+      "response_shape": {
+        "length": 113,
+        "sha256": "a7b03e450e26b06acf25d5f8df455253864f44fec4d27efbc881b1cf78d91381",
+        "type": "str"
+      }
+    },
+    {
+      "event": "SubagentStop",
+      "tool": null,
+      "keys": [
+        "agent_id",
+        "agent_transcript_path",
+        "agent_type",
+        "cwd",
+        "hook_event_name",
+        "last_assistant_message",
+        "model",
+        "permission_mode",
+        "session_id",
+        "stop_hook_active",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": []
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "collaborationwait_agent",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "timeout_ms"
+      ],
+      "response_shape": {
+        "encoded_json": {
+          "message": {
+            "length": 15,
+            "sha256": "8a95e88cb4b940f185946ff75cd0200c248bae1e0856fe2547db4324edb992ef",
+            "type": "str"
+          },
+          "timed_out": false
+        }
+      }
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "collaborationlist_agents",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": []
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "collaborationlist_agents",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [],
+      "response_shape": {
+        "encoded_json": {
+          "agents": [
+            {
+              "agent_name": {
+                "length": 5,
+                "sha256": "94a6b447580330f9f2b609422537b04239ff3a39df9137e32efd559f1a2935cb",
+                "type": "str"
+              },
+              "agent_status": "running"
+            },
+            {
+              "agent_name": {
+                "length": 20,
+                "sha256": "a89007cf139eab6ec41e8881ec97b901f914284ef25bd6ffd63dd6abdf0669e8",
+                "type": "str"
+              },
+              "agent_status": {
+                "completed": {
+                  "length": 11,
+                  "sha256": "47adeceb108ff576faed2dea84e6dd1ed31b9b58e91a2763fbfad4b80061990a",
+                  "type": "str"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "collaborationfollowup_task",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "message",
+        "target"
+      ]
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "collaborationfollowup_task",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "message",
+        "target"
+      ],
+      "response_shape": {
+        "length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "type": "str"
+      }
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "collaborationsend_message",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "message",
+        "target"
+      ]
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "collaborationsend_message",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "message",
+        "target"
+      ],
+      "response_shape": {
+        "length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "type": "str"
+      }
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "collaborationlist_agents",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [],
+      "response_shape": {
+        "encoded_json": {
+          "agents": [
+            {
+              "agent_name": {
+                "length": 5,
+                "sha256": "94a6b447580330f9f2b609422537b04239ff3a39df9137e32efd559f1a2935cb",
+                "type": "str"
+              },
+              "agent_status": "running"
+            },
+            {
+              "agent_name": {
+                "length": 20,
+                "sha256": "a89007cf139eab6ec41e8881ec97b901f914284ef25bd6ffd63dd6abdf0669e8",
+                "type": "str"
+              },
+              "agent_status": {
+                "completed": {
+                  "length": 12,
+                  "sha256": "879d893751e5f43f3607b1657be973341e0d25dbce727e599f0b08053e77210f",
+                  "type": "str"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "collaborationinterrupt_agent",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "target"
+      ]
+    },
+    {
+      "event": "PostToolUse",
+      "tool": "collaborationinterrupt_agent",
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "model",
+        "permission_mode",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "tool_response",
+        "tool_use_id",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": [
+        "target"
+      ],
+      "response_shape": {
+        "encoded_json": {
+          "previous_status": {
+            "completed": {
+              "length": 12,
+              "sha256": "879d893751e5f43f3607b1657be973341e0d25dbce727e599f0b08053e77210f",
+              "type": "str"
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": "Stop",
+      "tool": null,
+      "keys": [
+        "cwd",
+        "hook_event_name",
+        "last_assistant_message",
+        "model",
+        "permission_mode",
+        "session_id",
+        "stop_hook_active",
+        "transcript_path",
+        "turn_id"
+      ],
+      "input_keys": []
+    }
+  ],
+  "causal_edge": {
+    "spawn_hook_call_hash": "37595f9167e335d81c8ade78b552e66125c0b14c19ee8b9860dc169f6c9a1896",
+    "activity_item_id_hash": "37595f9167e335d81c8ade78b552e66125c0b14c19ee8b9860dc169f6c9a1896",
+    "activity_child_thread_hash": "eed2400e31092bd6dd25a709bcd22d0e6b024e1a44dc2a242a13d5f385be8318",
+    "start_hook_agent_hash": "eed2400e31092bd6dd25a709bcd22d0e6b024e1a44dc2a242a13d5f385be8318",
+    "activity_kind": "started",
+    "activity_agent_path_hash": "a89007cf139eab6ec41e8881ec97b901f914284ef25bd6ffd63dd6abdf0669e8",
+    "spawn_returned_task_name_hash": "a89007cf139eab6ec41e8881ec97b901f914284ef25bd6ffd63dd6abdf0669e8"
+  },
+  "official_schema": {
+    "subAgentActivity": {
+      "properties": {
+        "agentPath": {
+          "type": "string"
+        },
+        "agentThreadId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/SubAgentActivityKind"
+        },
+        "type": {
+          "enum": [
+            "subAgentActivity"
+          ],
+          "title": "SubAgentActivityThreadItemType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentPath",
+        "agentThreadId",
+        "id",
+        "kind",
+        "type"
+      ],
+      "title": "SubAgentActivityThreadItem",
+      "type": "object"
+    },
+    "ThreadItemEntry": {
+      "properties": {
+        "completedAtMs": {
+          "description": "Unix timestamp (milliseconds) when the item completed, if recorded by the producer.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "item": {
+          "$ref": "#/definitions/ThreadItem"
+        },
+        "startedAtMs": {
+          "description": "Unix timestamp (milliseconds) when the item started, if recorded by the producer.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "turnId": {
+          "description": "Turn containing this item.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "ThreadItemsListParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "definitions": {
+        "SortDirection": {
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "type": "string"
+        },
+        "ThreadItemsListAnchor": {
+          "description": "An exclusive item position within the requested visible turn.",
+          "oneOf": [
+            {
+              "properties": {
+                "itemId": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "item"
+                  ],
+                  "title": "ItemThreadItemsListAnchorType",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "itemId",
+                "type"
+              ],
+              "title": "ItemThreadItemsListAnchor",
+              "type": "object"
+            }
+          ]
+        },
+        "ThreadItemsListCursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/definitions/ThreadItemsListAnchor"
+            }
+          ],
+          "description": "Starting position for an item-history page."
+        }
+      },
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadItemsListCursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque continuation cursor or an exclusive item anchor in the requested visible turn. An item anchor requires a non-empty `turnId`; ascending (the default) returns items after it, and descending returns items before it. Continue with the returned string cursor."
+        },
+        "limit": {
+          "description": "Optional item page size.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sortDirection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SortDirection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional item pagination direction; defaults to ascending."
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "description": "Optional turn id to filter by. When omitted, returns items across the thread.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "title": "ThreadItemsListParams",
+      "type": "object"
+    },
+    "HookEventName": {
+      "enum": [
+        "preToolUse",
+        "permissionRequest",
+        "postToolUse",
+        "preCompact",
+        "postCompact",
+        "sessionStart",
+        "sessionEnd",
+        "userPromptSubmit",
+        "subagentStart",
+        "subagentStop",
+        "stop",
+        "interrupt"
+      ],
+      "type": "string"
+    }
+  },
+  "original_evidence_sha256": {
+    "hook-shapes.jsonl": "64ec53810a0e467a36947b4181228a9897ef38bf7a4273e5b2685665d9d0de05",
+    "official-thread-read.json": "efd78d24713617f10b60feccd56bb0d51ce04742963370cec98b98aa118fd595",
+    "ThreadItemsListResponse.json": "a0585ad6714e2e995036bc9edce120b1eebf33f7767f81f7a1055777d030c2a1"
+  }
+}

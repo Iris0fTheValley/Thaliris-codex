@@ -185,6 +185,8 @@ def test_child_cannot_replace_execution_policy(constrained):
     request = spawn("focused-implementer")
     assert lifecycle.handle_hook(root, "PreToolUse", request) == ""
     child = child_event("focused-implementer")
+    lifecycle.handle_hook(root, "PostToolUse", {**request,
+        "tool_response": {"agent_id": child["agent_id"], "nickname": None}})
     assert lifecycle._record_subagent_start(root, child)
     result = lifecycle.handle_hook(root, "PreToolUse", dict(child, tool_name="Bash", tool_input=dict(
         command='thaliris task-start other --authority-contract replacement.json')))
@@ -196,10 +198,14 @@ def test_nested_scanner_inherits_policy_and_exact_parent(constrained):
     root, _ = constrained
     assert lifecycle.handle_hook(root, "PreToolUse", spawn("focused-implementer")) == ""
     parent = child_event("focused-implementer", agent_id="parent", turn_id="parent-turn")
+    lifecycle.handle_hook(root, "PostToolUse", {**spawn("focused-implementer"),
+        "tool_response": {"agent_id": parent["agent_id"], "nickname": None}})
     assert lifecycle._record_subagent_start(root, parent)
     request = dict(spawn("investigator"), **parent)
     assert lifecycle.handle_hook(root, "PreToolUse", request) == ""
     scanner = child_event("investigator", agent_id="scanner", turn_id="scanner-turn")
+    lifecycle.handle_hook(root, "PostToolUse", {**request,
+        "tool_response": {"agent_id": scanner["agent_id"], "nickname": None}})
     assert lifecycle._record_subagent_start(root, scanner)
     task = core._load_state(root)
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task["task_id"]), task["task_id"])

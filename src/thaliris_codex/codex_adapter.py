@@ -2396,6 +2396,7 @@ def doctor(root: Path) -> dict[str, object]:
     result["managed_task_state"] = lifecycle.managed_task_state(root)[0]
     observations: list[tuple[int, int, dict[str, object]]] = []
     events: set[str] = set()
+    pretool_tools: set[str] = set()
     compatible_profile_observed = False
     orchestration = {
         "wait_calls": 0,
@@ -2417,13 +2418,15 @@ def doctor(root: Path) -> dict[str, object]:
         samples = runtime.get("execution_observations") if current else None
         if current and isinstance(runtime.get("events_observed"), dict):
             events.update(name for name, observed in runtime["events_observed"].items() if observed is True)
+        if current and isinstance(runtime.get("pretool_tools_observed"), list):
+            pretool_tools.update(tool for tool in runtime["pretool_tools_observed"] if isinstance(tool, str))
         if current and isinstance(runtime.get("subagent_start_agent_types"), list):
             compatible_profile_observed = compatible_profile_observed or any(
                 isinstance(value, str) and value in roles.native_profile_names()
                 for value in runtime["subagent_start_agent_types"]
             )
         if isinstance(samples, list):
-            observations.extend((int(runtime.get("observed_at_ns", 0)), int(runtime.get("observation_sequence", 0)), item) for item in samples if isinstance(item, dict))
+            observations.extend((int(item.get("observed_at_ns", runtime.get("observed_at_ns", 0))), int(runtime.get("observation_sequence", 0)), item) for item in samples if isinstance(item, dict))
         metrics = runtime.get("orchestration_metrics") if current else None
         if isinstance(metrics, dict):
             orchestration["wait_calls"] += int(metrics.get("wait_agent_calls", 0))
@@ -2431,8 +2434,13 @@ def doctor(root: Path) -> dict[str, object]:
             orchestration["list_agents_calls"] += int(metrics.get("list_agents_calls", 0))
     latest = max(observations, default=None, key=lambda item: (item[0], item[1]))
     latest_item = latest[2] if latest is not None else None
+    tool_schemas: dict[str, dict[str, object]] = {}
+    for _, _, item in sorted(observations, key=lambda entry: (entry[0], entry[1])):
+        if isinstance(item.get("tool"), str):
+            tool_schemas[item["tool"]] = item
     health = lifecycle.hooks_health(root)
-    lifecycle_start = lifecycle_stop = lifecycle_reconciled = False
+    lifecycle_start = lifecycle_stop = lifecycle_reconciled = lifecycle_bound = False
+    identity_sources: set[str] = set()
     for path in (root / ".context" / "audit" / "lifecycle").glob("*.json"):
         try:
             lifecycle_state = json.loads(path.read_text(encoding="utf-8"))
@@ -2442,6 +2450,11 @@ def doctor(root: Path) -> dict[str, object]:
             continue
         for child in lifecycle_state.get("children", []):
             if isinstance(child, dict):
+                bound = (child.get("managed") is True and child.get("handoff_bound") is True
+                    and isinstance(child.get("handoff_id"), str))
+                lifecycle_bound = lifecycle_bound or bound
+                if bound and isinstance(child.get("native_identity_source"), str):
+                    identity_sources.add(child["native_identity_source"])
                 lifecycle_stop = lifecycle_stop or isinstance(child.get("stop_observed"), int)
                 lifecycle_reconciled = lifecycle_reconciled or (
                     lifecycle._native_execution_terminal(child) and not child.get("native_status_conflict")
@@ -2473,10 +2486,11 @@ def doctor(root: Path) -> dict[str, object]:
         "CURRENT_SESSION_OBSERVED": "UNKNOWN",
         "TASK_START_ATTESTATION": "CURRENT_SESSION_REQUIRED",
         "CODEX_MANAGED_READY": "UNKNOWN",
-        "spawn_pretool_observed": "YES" if "PreToolUse" in events else "UNKNOWN",
+        "spawn_pretool_observed": "YES" if "spawn_agent" in pretool_tools else "UNKNOWN",
         "subagent_start_observed": "YES" if lifecycle_start else "UNKNOWN",
         "subagent_stop_observed": "YES" if lifecycle_stop else "UNKNOWN",
-        "explicit_handoff_binding_observed": "YES" if lifecycle_start else "UNKNOWN",
+        "explicit_handoff_binding_observed": "YES" if lifecycle_bound else "UNKNOWN",
+        "native_dispatch_identity_sources": sorted(identity_sources),
         "CONTROLLER_ACTIVATION_BRIDGE_ACTIVE": "UNKNOWN",
         "HOST_INSTRUCTION_ACTIVE": "UNKNOWN",
         "controller_activation_bridge": "UNKNOWN",
@@ -2510,7 +2524,8 @@ def doctor(root: Path) -> dict[str, object]:
         "effective_wait_maximum": host_explicit_blocking_wait().get("effective_max_wait_timeout_ms", "UNAVAILABLE"),
     })
     result["host_capability"] = host
-    posttool_schema = "PASS" if host_wait_mode().get("status") == "PASS" else "UNKNOWN"
+    posttool_schema = "PASS" if any(item.get("native_response_contract") in {"CURRENT_V2", "LEGACY_V1"}
+        for tool, item in tool_schemas.items() if tool in lifecycle._COLLABORATION_TOOL_NAMES) else "UNKNOWN"
     result["lifecycle_reconciliation"] = {
         "subagent_stop_path": "PASS" if lifecycle_stop else "UNKNOWN",
         "managed_child_turn_notification_ingress": "UNKNOWN",
@@ -2519,7 +2534,8 @@ def doctor(root: Path) -> dict[str, object]:
         # Host hook must observe a real payload before this is a live PASS.
         "native_terminal_reconciliation": "PASS" if lifecycle_reconciled else ("LIVE_NOT_OBSERVED" if posttool_schema == "PASS" else "UNKNOWN"),
         "PostToolUse_source_schema_support": posttool_schema,
-        "PostToolUse_live_host_hook": "PASS" if events else "LIVE_NOT_OBSERVED",
+        "PostToolUse_live_host_hook": "PASS" if "PostToolUse" in events else "LIVE_NOT_OBSERVED",
+        "tool_response_schemas": tool_schemas,
     }
     result["cost_regression"] = {
         # This Hook surface has no model-turn/token/context counter.  Leaving
