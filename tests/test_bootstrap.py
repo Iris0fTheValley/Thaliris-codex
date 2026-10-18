@@ -585,7 +585,11 @@ def test_module_entrypoint_parse_error_has_explicit_restart_boolean(capsys):
 
 def test_native_bootstrap_check_has_explicit_restart_boolean(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(core, "_repo_root", lambda path: tmp_path)
-    monkeypatch.setattr(codex_adapter, "_project_definition_facts", lambda root: {"project_definition_present": "YES"})
+    monkeypatch.setattr(
+        codex_adapter,
+        "_project_definition_facts",
+        lambda root, codex_home=None: {"project_definition_present": "YES"},
+    )
     result = codex_adapter.bootstrap_check(tmp_path)
     assert result["session_restart_required"] is False
     assert type(result["session_restart_required"]) is bool

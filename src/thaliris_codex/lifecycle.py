@@ -4187,7 +4187,19 @@ def _updated_command_output(payload: dict[str, Any], argument: str) -> str:
     end = ending.start() if ending else len(command)
     # Identity options must remain on the invocation line, before any
     # terminal newline supplied by the native shell-tool template.
-    updated[key] = f"{command[:end]} {argument}{command[end:]}"
+    shell = original.get("shell")
+    bash_crlf_comment = (
+        " #"
+        if ending is not None
+        and command.startswith("\r", end)
+        and isinstance(shell, str)
+        and shell.casefold() == "bash"
+        else ""
+    )
+    # Bash treats the CR in a CRLF command ending as part of the last word.
+    # Keep the supplied ending byte-for-byte while making it shell comment
+    # text, so injected identity arguments remain exact.
+    updated[key] = f"{command[:end]} {argument}{bash_crlf_comment}{command[end:]}"
     return json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
