@@ -71,3 +71,5 @@ Focused endpoint 已收敛；以下是最终源码的本地确定性检查结果
 当前 child 未收到可用于 `task-observe` 的精确 historical native handoff/provenance；Controller 也确认该 ACTIVE Work 无绑定。没有猜测 task/requirement 标识或导入历史记录；由 Controller 按其现有绑定和 R1/R2/R3 处理本报告事实与 source refs。该管理关联边界不改变本地候选、源码验证或已授权 Git/CI 交付。
 
 Host 接口核对使用 OpenAI Docs 技能及[官方 app-server 文档](https://learn.chatgpt.com/docs/app-server)：官方 `command/exec` 与 experimental `process/*` 的 sandbox 边界不同。本实现继续沿现有 Host shell 工具执行，没有采用后者作为旁路。官方文档不能替代上述实际 Host schema/运行证据。
+
+Git/CI 交付确认：候选 commit `0828d3fe74dc5d8915b5a9d738a1803c1c0ab713` 已推送到既有 `main`；GitHub Actions [CI run 39297641746](https://github.com/Iris0fTheValley/Thaliris-codex/actions/runs/39297641746)，attempt 1 对该精确 SHA 终态成功。Linux/Windows × Python 3.11/3.12/3.13 的六个矩阵任务均完成通过。该状态由包内 helper 观察的 `gh run watch --exit-status` 返回终态 exit 0 证明；不据此推断生产 Host activation。
