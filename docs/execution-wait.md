@@ -158,8 +158,21 @@ An explicit outer yield of 1000 ms returned cell 6 while its JS kept running;
 `functions.wait` retrieved terminal evidence at 14.614 s. Thus buffering alone
 cannot remove an outer Host yield. If the Host returns `Script running with cell
 ID ...`, resume only that exact cell with `functions.wait`; do not start a second
-observer. The effective maximum outer wait, hard termination behavior, and automatic
-continuation after user interruption remain `UNKNOWN`. `terminate: true` can stop
+observer. For a still-needed operation with no intermediate decision, explicitly
+request the supported long continuation instead of relying on its short default:
+
+```javascript
+// Tool call after the outer isolate yields; use its actual returned cell ID.
+functions.wait({cell_id: selectedCellId, yield_time_ms: 3600000, max_tokens: 3500})
+```
+
+During the live delivery CI observation, `functions.wait` accepted 600000 ms
+and held 601.0 s before returning the same running cell. A subsequent 3600000 ms
+request was accepted and returned terminal evidence early after 753.9 s. These
+prove the requested bounds were accepted and the latter returned on completion;
+they do not prove a full-hour hold or an effective maximum. The effective maximum
+outer wait, hard termination behavior, and automatic continuation after user
+interruption remain `UNKNOWN`. `terminate: true` can stop
 the JS isolate; it does not prove the owned external command was terminated.
 Use the exact durable cancel request when the Python observer is alive.
 
@@ -201,7 +214,22 @@ The read-only GitHub transport was exercised against completed public run
 The attempt jobs response had seven jobs with matching `run_id`, `head_sha` and
 `run_attempt: 1`. Running-to-terminal, duplicates, interleaved attempts and early
 job failure transitions are controlled provider-shaped fixtures, not a live CI
-transition experiment.
+transition experiment. A later live delivery observation watched repository
+`Iris0fTheValley/Thaliris-codex`, commit
+`dca15c5ce677d8fc7a8917b2f0cdb9cbe777c6d3`,
+[run 39219576557, attempt 1](https://github.com/Iris0fTheValley/Thaliris-codex/actions/runs/39219576557)
+from `in_progress` to `completed` / `success`. Its 67 snapshots comprised seven
+changed running observations, 59 duplicates and one terminal observation over
+2241.203 s. The checkout association was verified again at finish; workspace
+bytes remained `UNKNOWN` and `semantic_done` remained `false`.
+
+The actual JS adapter made nine inner observations (`exec_command` plus eight
+`write_stdin` calls). The outer operation returned to the model five times:
+four running-cell yields and one terminal return. Inner tool calls are not
+model requests. Long continuation reduced re-entry, but four forced Host yields
+still occurred and information-free re-entry was not eliminated. Model call and
+token attribution for this live observation remain `UNKNOWN`. See the
+[delivery report](codex-native-wait-upgrade-20261019.md) for the combined evidence.
 
 ## Native children and app-server boundary
 
