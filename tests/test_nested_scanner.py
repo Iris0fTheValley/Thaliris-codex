@@ -380,7 +380,7 @@ def test_spawn_return_is_correlated_to_authorized_parent(active, monkeypatch):
     for wrong in ({**event()}, {**parent, "turn_id": "wrong"}, parent):
         lifecycle.handle_hook(active, "PostToolUse", {**wrong, "tool_name": "spawn_agent", "tool_response": {"task_name": "/wrong"}})
         assert state(active)["children"][-1]["task_name_hash"] is None
-    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args: "scanner")
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args, **_kwargs: "scanner")
     lifecycle.handle_hook(active, "PostToolUse", {**request, "tool_response": {"task_name": "/root/scanner"}})
     assert state(active)["children"][-1]["handoff_bound"] is True
     assert state(active)["children"][-1]["task_name_hash"] == lifecycle._identity_hash("/root/scanner")

@@ -86,13 +86,83 @@ def test_native_activity_refuses_ambiguous_or_malformed_native_data(monkeypatch,
     assert resolve(monkeypatch, [page])[0] is None
 
 
-def test_native_activity_refuses_unknown_reader_version_and_wrong_home(monkeypatch):
-    assert resolve(monkeypatch, [], cli_version="codex-cli 0.162.0")[0] is None
+@pytest.mark.parametrize("version", ["codex-cli 0.162.0", "codex-cli 0.163.0-alpha.10.2", "UNKNOWN"])
+def test_native_activity_accepts_exact_edge_independently_of_reader_version(monkeypatch, version):
+    assert resolve(monkeypatch, [{"data": [activity()]}], cli_version=version)[0] == CHILD
+
+
+def test_native_activity_refuses_wrong_or_unknown_home(monkeypatch):
     assert resolve(monkeypatch, [], daemon_home_matches_requested="NO")[0] is None
+    assert resolve(monkeypatch, [], daemon_home_matches_requested="UNKNOWN")[0] is None
 
 
 def test_native_activity_refuses_repeating_cursor(monkeypatch):
     assert resolve(monkeypatch, [{"data": [], "nextCursor": "repeat"}] * 2)[0] is None
+
+
+@pytest.mark.parametrize("fields,expected", [
+    ({}, ("UNKNOWN", "UNKNOWN")),
+    ({"model": None, "reasoningEffort": None}, ("UNKNOWN", "UNKNOWN")),
+    ({"model": "gpt-6.1-sol", "reasoningEffort": "high"}, ("MATCH", "MATCH")),
+    ({"model": "unexpected-model", "reasoningEffort": "low"}, ("MISMATCH", "MISMATCH")),
+    ({"model": {}, "reasoningEffort": 1}, ("INVALID", "INVALID")),
+])
+def test_optional_routing_observations_never_authorize_or_reject_identity(monkeypatch, fields, expected):
+    reader = NativeReader([{"data": [activity(**fields)]}])
+    monkeypatch.setattr(codex_app_server, "_native_lifecycle_client", lambda _home: reader)
+    observation = {}
+    spawn = {**request(), "session_id": THREAD, "turn_id": TURN}
+    assert codex_app_server.native_spawn_identity(Path("unused"), spawn, NAME,
+        routing_observation=observation) == CHILD
+    assert (observation["model"]["status"], observation["reasoningEffort"]["status"]) == expected
+
+
+def test_invalid_edge_cannot_publish_routing_observation(monkeypatch):
+    reader = NativeReader([{"data": [activity(agentPath="/root/forged", model="gpt-6.1-sol")]}])
+    monkeypatch.setattr(codex_app_server, "_native_lifecycle_client", lambda _home: reader)
+    observation = {}
+    assert codex_app_server.native_spawn_identity(Path("unused"), {
+        "session_id": THREAD, "turn_id": TURN, "tool_use_id": CALL}, NAME,
+        routing_observation=observation) is None
+    assert observation == {}
+
+
+@pytest.mark.parametrize("selection,fields,expected", [
+    ({"agent_type": "thaliris-implementer", "model": "gpt-6.1-sol"},
+        {"model": "gpt-6.1-sol", "reasoningEffort": "medium"}, ("MATCH", "UNKNOWN")),
+    ({"agent_type": "thaliris-focused-implementer"},
+        {"model": "gpt-6.1-sol", "reasoningEffort": "high"}, ("MATCH", "MATCH")),
+])
+def test_routing_observations_preserve_inherited_effort_and_fixed_profile_bindings(monkeypatch, selection, fields, expected):
+    reader = NativeReader([{"data": [activity(**fields)]}])
+    monkeypatch.setattr(codex_app_server, "_native_lifecycle_client", lambda _home: reader)
+    observation = {}
+    assert codex_app_server.native_spawn_identity(Path("unused"), {
+        "session_id": THREAD, "turn_id": TURN, "tool_use_id": CALL, "tool_input": selection}, NAME,
+        routing_observation=observation) == CHILD
+    assert (observation["model"]["status"], observation["reasoningEffort"]["status"]) == expected
+
+
+def test_posttool_records_routing_mismatch_without_changing_hook_binding(evidence_task, monkeypatch):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    spawn = request()
+    assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", spawn)
+    # Synthetic fixture identities are not UUIDs, so exercise the lifecycle
+    # observation transport independently of the UUID reader tests above.
+    def observe(_home, _payload, _name, *, routing_observation):
+        routing_observation.update({"model": {"status": "MISMATCH", "observed": "unexpected-model",
+            "expected": "gpt-6.1-sol"}, "reasoningEffort": {"status": "MISMATCH", "observed": "low", "expected": "high"}})
+        return CHILD
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", observe)
+    lifecycle.handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"task_name": NAME}})
+    lifecycle.handle_hook(root, "SubagentStart", _identity("implementer", CHILD))
+    state = ledger(root, task_id)
+    assert state["children"][-1]["managed"] is True
+    assert state["native_routing_observations"][-1]["routing"]["model"]["status"] == "MISMATCH"
+    report = codex_adapter.doctor(root)["lifecycle_reconciliation"]
+    assert report["recorded_routing_status_counts"]["model"]["MISMATCH"] == 1
+    assert "unexpected-model" not in json.dumps(report)
 
 
 def request():
@@ -113,7 +183,7 @@ def test_exact_v2_edge_restores_write_observation_and_nested_scanner(evidence_ta
     monkeypatch.setattr(lifecycle, "_dispatch_identity_required", lambda *_args: reused)
     seen = []
     monkeypatch.setattr(codex_app_server, "native_spawn_identity",
-        lambda home, payload, name: seen.append((home, payload["tool_use_id"], name)) or CHILD)
+        lambda home, payload, name, **_kwargs: seen.append((home, payload["tool_use_id"], name)) or CHILD)
     spawn, child = request(), _identity("implementer", CHILD)
     assert "deny" not in lifecycle.handle_hook(root, "PreToolUse", spawn)
     if start_first:
@@ -141,7 +211,7 @@ def test_exact_v2_edge_restores_write_observation_and_nested_scanner(evidence_ta
 def test_name_and_single_pending_never_bind_without_native_edge(evidence_task, monkeypatch):
     root, task_id = evidence_task
     _register_requirement(root)
-    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args: None)
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args, **_kwargs: None)
     spawn = request()
     lifecycle.handle_hook(root, "PreToolUse", spawn)
     lifecycle.handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"task_name": NAME}})
@@ -160,7 +230,7 @@ def test_name_and_single_pending_never_bind_without_native_edge(evidence_task, m
 def test_wrong_dispatch_callback_does_not_query_or_consume_reservation(evidence_task, monkeypatch):
     root, task_id = evidence_task
     _register_requirement(root)
-    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args: pytest.fail("wrong dispatch queried native identity"))
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args, **_kwargs: pytest.fail("wrong dispatch queried native identity"))
     spawn = request()
     lifecycle.handle_hook(root, "PreToolUse", spawn)
     before = deepcopy(ledger(root, task_id)["pending_authorized_spawn"])
@@ -191,7 +261,7 @@ def test_doctor_keeps_recent_decoded_shapes_per_tool_without_wait_inference(evid
 def test_reused_child_pretool_without_start_cannot_close_from_old_snapshot(evidence_task, monkeypatch):
     root, task_id = evidence_task
     _register_requirement(root)
-    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args: CHILD)
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args, **_kwargs: CHILD)
     spawn, child = request(), _identity("implementer", CHILD)
     lifecycle.handle_hook(root, "PreToolUse", spawn)
     lifecycle.handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"task_name": NAME}})
@@ -219,7 +289,7 @@ def test_same_name_new_dispatch_cannot_inherit_old_call_or_completion(evidence_t
     _register_requirement(root)
     old, fresh = CHILD, "44444444-4444-4444-8444-444444444444"
     monkeypatch.setattr(codex_app_server, "native_spawn_identity",
-        lambda _home, payload, _name: old if payload["tool_use_id"] == CALL else fresh)
+        lambda _home, payload, _name, **_kwargs: old if payload["tool_use_id"] == CALL else fresh)
     first = request()
     lifecycle.handle_hook(root, "PreToolUse", first)
     lifecycle.handle_hook(root, "PostToolUse", {**first, "tool_response": {"task_name": NAME}})
@@ -251,7 +321,7 @@ def test_reused_session_status_requires_exact_current_task_pretool(evidence_task
     root, task_id = evidence_task
     _register_requirement(root)
     monkeypatch.setattr(lifecycle, "_dispatch_identity_required", lambda *_args: True)
-    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args: None)
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args, **_kwargs: None)
     spawn = request()
     lifecycle.handle_hook(root, "PreToolUse", spawn)
     lifecycle.handle_hook(root, "PostToolUse", {**spawn,

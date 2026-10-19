@@ -37,8 +37,9 @@ pages of that selected turn without status polling, model calls or a lifecycle
 subscription. The task name is a consistency check; the native call ID and
 `agentThreadId` establish identity. Missing, malformed, duplicated, conflicting
 or unavailable evidence leaves the reservation pending and the child unbound.
-The reader pin is independent of explicit-wait pins and currently covers this
-exact observed CLI version only. An initialized home mismatch is refused.
+The historical experiment used this exact CLI version. The current reader now
+accepts the same corroborated edge independently of CLI version; initialized home
+mismatches remain refused. See the [2026-10-19 compatibility update](codex-native-compatibility-20261019.md).
 
 Normal task ownership, immutable task association, exact parent/profile/session/
 turn/call checks, abandoned/fenced refusal, model constraints and collision checks

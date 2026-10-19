@@ -52,6 +52,25 @@ def audit_args(root: Path, sessions: Path, end: str = END, annotations: Path | N
     return Namespace(root=str(root), sessions_dir=str(sessions), from_time=START, until=end, annotations=str(annotations) if annotations else None)
 
 
+def test_known_context_and_additional_tools_are_counted_without_exposing_payload(tmp_path: Path) -> None:
+    sessions = tmp_path / "sessions"
+    root = write_log(sessions / "root.jsonl", [
+        session_meta("root-id", START),
+        record(2, "2026-10-08T10:01:00.000Z", "turn_context", {
+            "model": "PRIVATE_MODEL", "effort": "high", "developer_instructions": "PRIVATE_CONTEXT"}),
+        record(3, "2026-10-08T10:01:00.000Z", "world_state", {"private": "PRIVATE_STATE"}),
+        record(4, "2026-10-08T10:01:00.000Z", "response_item", {
+            "type": "additional_tools", "id": "PRIVATE_ITEM_ID", "role": "developer",
+            "tools": [{"name": "PRIVATE_TOOL", "description": "PRIVATE_TOOL_DEFINITION"}]}),
+    ])
+    report = run_audit(audit_args(root, sessions))
+    counts = report["threads"][0]["record_type_counts"]
+    assert counts["turn_context"] == counts["world_state"] == 1
+    assert counts.get("unknown", 0) == 0
+    assert observed_calls(make_parsed_file(root, None, None), None, None)["unclassified_response_item_count"] == 0
+    assert "PRIVATE_" not in json.dumps(report)
+
+
 def test_tree_links_by_native_parent_metadata_recursively_and_keeps_orphans_unknown(tmp_path: Path) -> None:
     sessions = tmp_path / "sessions"
     root = write_log(sessions / "root.jsonl", [

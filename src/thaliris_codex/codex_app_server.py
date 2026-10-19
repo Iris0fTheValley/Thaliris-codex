@@ -212,11 +212,13 @@ def _native_lifecycle_client(codex_home: Path) -> CodexAppServer:
     return CodexAppServer(codex_home, executable=executable)
 
 
-def native_spawn_identity(codex_home: Path, payload: dict[str, Any], task_name: str) -> str | None:
+def native_spawn_identity(codex_home: Path, payload: dict[str, Any], task_name: str,
+                          *, routing_observation: dict[str, Any] | None = None) -> str | None:
     """Read the official call-to-child edge, without names as identity proof.
 
-    alpha.17.2 emits a subAgentActivity started item whose id is the native
-    spawn call id. Its agentThreadId corroborates SubagentStart.agent_id.
+    A subAgentActivity started item's id is the native spawn call id. Its
+    agentThreadId corroborates SubagentStart.agent_id. CLI versions are only
+    provenance: the exact parent/turn/call/item/path edge supplies evidence.
     This is a read of the exact parent turn, not a subscription, status poll,
     session-file reader, child-authored bearer, or model invocation.
     """
@@ -231,8 +233,7 @@ def native_spawn_identity(codex_home: Path, payload: dict[str, Any], task_name: 
         uuid.UUID(turn)
         with _native_lifecycle_client(codex_home) as client:
             facts = client.connection_facts()
-            if (facts.get("cli_version") != "codex-cli 0.162.0-alpha.17.2"
-                    or facts.get("daemon_home_matches_requested") != "YES"):
+            if facts.get("daemon_home_matches_requested") != "YES":
                 return None
             cursor = None
             seen_cursors: set[str] = set()
@@ -269,6 +270,29 @@ def native_spawn_identity(codex_home: Path, payload: dict[str, Any], task_name: 
                     or child == thread):
                 return None
             uuid.UUID(child)
+            if routing_observation is not None:
+                # Optional fields never establish identity or authorization.
+                # Preserve absent/null old-host fields as UNKNOWN, and flag
+                # malformed or unexpected values as routing diagnostics only.
+                selected = lifecycle._delegation_input(payload)
+                profile = lifecycle._native_spawn_agent_type(payload)
+                role = lifecycle._native_agent_roles().get(profile)
+                defaults = lifecycle.roles.ROLE_MODEL_ROUTING_DEFAULTS.get(role, (None, None))
+                fixed = lifecycle.roles.agent_profiles().get(f"{profile}.toml", (None, None, None))
+                # Ordinary routing fills both omitted fields, but deliberately
+                # leaves effort inherited when only model was supplied. Fixed
+                # exceptional profiles take precedence over spawn arguments.
+                expected_model = fixed[0] or selected.get("model") or defaults[0]
+                expected_effort = fixed[1] or selected.get("reasoning_effort") or (
+                    defaults[1] if selected.get("model") is None else None)
+                for field, expected in (("model", expected_model), ("reasoningEffort", expected_effort)):
+                    actual = item.get(field)
+                    status = ("UNKNOWN" if actual is None else "INVALID"
+                              if not isinstance(actual, str) or not actual.strip() else "UNKNOWN"
+                              if expected is None else "MATCH" if actual == expected else "MISMATCH")
+                    routing_observation[field] = {"status": status,
+                        "observed": actual if isinstance(actual, str) else None,
+                        "expected": expected}
             return child
     except (OSError, ValueError, TypeError, CodexAppServerError, subprocess.SubprocessError):
         return None

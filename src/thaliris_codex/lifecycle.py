@@ -3372,8 +3372,16 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                     pending["task_name_hash"] = name_hash
                     if "native_agent_id_hash" not in pending and _pending_parent_live(state, pending):
                         from . import codex_app_server
-                        agent_id = codex_app_server.native_spawn_identity(_host_home_path(), payload, task_name)
+                        routing: dict[str, Any] = {}
+                        agent_id = codex_app_server.native_spawn_identity(_host_home_path(), payload, task_name,
+                            routing_observation=routing)
                         if agent_id is not None:
+                            if routing:
+                                observations = state.setdefault("native_routing_observations", [])
+                                observations.append({"spawn_tool_use_id_hash": _identity_hash(payload.get("tool_use_id")),
+                                    "agent_id_hash": _identity_hash(agent_id), "source": "app_server_subagent_activity",
+                                    "routing": routing})
+                                del observations[:-16]
                             _corroborate_dispatch_identity(root, task_id, state, pending,
                                 agent_id, "app_server_subagent_activity")
                     changed = True

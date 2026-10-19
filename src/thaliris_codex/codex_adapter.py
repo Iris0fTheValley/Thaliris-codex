@@ -2441,6 +2441,8 @@ def doctor(root: Path) -> dict[str, object]:
     health = lifecycle.hooks_health(root)
     lifecycle_start = lifecycle_stop = lifecycle_reconciled = lifecycle_bound = False
     identity_sources: set[str] = set()
+    routing_counts = {field: {status: 0 for status in ("MATCH", "MISMATCH", "INVALID", "UNKNOWN")}
+                      for field in ("model", "reasoningEffort")}
     for path in (root / ".context" / "audit" / "lifecycle").glob("*.json"):
         try:
             lifecycle_state = json.loads(path.read_text(encoding="utf-8"))
@@ -2448,6 +2450,14 @@ def doctor(root: Path) -> dict[str, object]:
             continue
         if not isinstance(lifecycle_state, dict) or lifecycle_state.get("version") != lifecycle.LIFECYCLE_STATE_VERSION or lifecycle_state.get("managed_hook_spec_hash") != expected or lifecycle_state.get("adapter_protocol_version") != lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION:
             continue
+        for observation in lifecycle_state.get("native_routing_observations", []):
+            routing = observation.get("routing") if isinstance(observation, dict) else None
+            if isinstance(routing, dict):
+                for field, counts in routing_counts.items():
+                    fact = routing.get(field)
+                    status = fact.get("status") if isinstance(fact, dict) else None
+                    if isinstance(status, str) and status in counts:
+                        counts[status] += 1
         for child in lifecycle_state.get("children", []):
             if isinstance(child, dict):
                 bound = (child.get("managed") is True and child.get("handoff_bound") is True
@@ -2536,6 +2546,7 @@ def doctor(root: Path) -> dict[str, object]:
         "PostToolUse_source_schema_support": posttool_schema,
         "PostToolUse_live_host_hook": "PASS" if "PostToolUse" in events else "LIVE_NOT_OBSERVED",
         "tool_response_schemas": tool_schemas,
+        "recorded_routing_status_counts": routing_counts,
     }
     result["cost_regression"] = {
         # This Hook surface has no model-turn/token/context counter.  Leaving

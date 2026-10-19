@@ -1,0 +1,22 @@
+{
+  "observed_date": "2026-10-19",
+  "command": "python -m scripts.verify_native_spawn_runtime",
+  "source": "Actual isolated CLI with loopback synthetic Responses and separate official app-server reader",
+  "status": "PASS",
+  "cli_version": "codex-cli 0.163.0-alpha.10.2",
+  "cli_sha256": "f6dbf48cb70f62649c645f26c87dc9bf84cc36986202dfad8e12fb5b8ca70312",
+  "exact_official_edge": true,
+  "separate_reader": true,
+  "wrong_parent_call_path_refused": true,
+  "routing": {
+    "model": {"status": "MATCH", "observed": "gpt-6.1-sol", "expected": "gpt-6.1-sol"},
+    "reasoningEffort": {"status": "MATCH", "observed": "high", "expected": "high"}
+  },
+  "native_item_keys": ["agentPath", "agentThreadId", "id", "kind", "model", "reasoningEffort", "type"],
+  "local_requests": 3,
+  "external_model_requests": 0,
+  "managed_hook_binding": "NOT_EXERCISED",
+  "production_host_activation": "UNKNOWN",
+  "wait_runtime_duration_wake_interruption_resume": "UNKNOWN",
+  "privacy": "Native identity strings, user payloads and machine paths omitted"
+}

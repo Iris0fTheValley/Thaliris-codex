@@ -71,11 +71,13 @@ SubagentStart and child PreToolUse identity; other Host/session behavior remains
 Synthetic event tests do not prove a Host protocol guarantee.
 
 Managed Start binding requires a corroborated native child ID even for a fresh owner.
-Current V2 `task_name` results supply navigation only. On the exact observed
-`0.162.0-alpha.17.2` CLI, the adapter reads official `thread/items/list` for the exact
+Current V2 `task_name` results supply navigation only. The adapter reads official
+`thread/items/list` for the exact
 parent native thread and spawn turn: a unique `subAgentActivity(kind=started)` item
 must have `id` equal to the Hook's spawn `tool_use_id` and a valid `agentThreadId`.
-The returned path is checked for consistency without becoming identity proof. Missing
+The initialized home must match; a CLI version is provenance rather than admission.
+Optional `model` and `reasoningEffort` fields record routing match, mismatch or UNKNOWN
+independently of identity and authorization. The returned path is checked for consistency without becoming identity proof. Missing
 or conflicting evidence leaves the child unbound. The legacy exact `{agent_id,nickname}`
 response remains supported independently. No session-file tail, UI reader, polling,
 model call or production Host configuration mutation supplies this edge. See the

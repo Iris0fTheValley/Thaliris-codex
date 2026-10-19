@@ -29,7 +29,7 @@ local evidence; do not add raw session logs or machine-private paths to Git.
 The table shows the observed window, tree coverage, thread-cumulative usage as
 of the end cutoff, window increments, native wait results, and compaction
 counts. Record type values are emitted only for a fixed set the utility
-understands; all other native type values share the literal `unknown` bucket.
+understands, including `turn_context` and `world_state`; all other native type values share the literal `unknown` bucket.
 Unknown values are never used as report keys or annotations.
 
 Usage summaries prefer cumulative `token_usage_record.thread_token_usage` and
@@ -75,7 +75,8 @@ the selected window. Pairing also requires a later result ordinal and a result
 timestamp at or after the call timestamp; missing chronology or a result that
 precedes its call leaves the pair unresolved. Equal timestamps are ordered by
 native ordinal. The audit recognizes call and output response-item types plus
-`message` and `reasoning`. All other subtype values, including empty or unknown
+`message`, `reasoning` and `additional_tools`. The latter's tool declarations
+are not executed, printed, or counted as tool calls. All other subtype values, including empty or unknown
 strings, are counted in a safe unclassified bucket without exposing their
 payload. Any call ID attached to a response item outside the call/output types
 remains ambiguous across the parsed thread, even outside the selected window.

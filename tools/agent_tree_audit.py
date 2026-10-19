@@ -48,11 +48,13 @@ NATIVE_RECORD_TYPES = frozenset({
     "event_msg",
     "token_usage_record",
     "compacted",
+    "turn_context",
+    "world_state",
 })
 NATIVE_EVENT_TYPES = frozenset({"token_count"})
 CALL_ITEM_TYPES = frozenset({"function_call", "custom_tool_call"})
 RESULT_ITEM_TYPES = frozenset({"function_call_output", "custom_tool_call_output"})
-RESPONSE_ITEM_TYPES = CALL_ITEM_TYPES | RESULT_ITEM_TYPES | {"message", "reasoning"}
+RESPONSE_ITEM_TYPES = CALL_ITEM_TYPES | RESULT_ITEM_TYPES | {"message", "reasoning", "additional_tools"}
 
 
 @dataclass
