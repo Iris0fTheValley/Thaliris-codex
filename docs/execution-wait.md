@@ -201,13 +201,18 @@ line and final `done` line. This was a real tool/CLI composition test.
 That composition preceded the Job Object improvement. The current Windows path
 is verified by real root/descendant cancellation: wait for the descendant's ready
 file, request exact-identity cancellation, confirm `CONFIRMED_JOB_EMPTY`, confirm
-the descendant cannot write its delayed marker, and confirm a separately owned
+the descendant cannot write its marker after releasing a post-cleanup gate, and confirm a separately owned
 unrelated control process remains alive. The focused test also covers failure to
 establish ownership without launching an uncontained fallback. A separate real
 CLI observer is forcibly terminated after its descendant becomes ready; the
-descendant's delayed marker stays absent and the surviving receipt is reported
+test waits for that exact live fixture descendant's synchronization-only process
+handle to signal termination, then releases the marker gate. The marker stays
+absent and the surviving receipt is reported
 as `UNKNOWN` with manual recovery. This proves the current Windows kill-on-close
 behavior without falsely manufacturing a terminal receipt after observer death.
+Both fixture gates replace a readiness-relative sleep that could expire before
+cancellation was scheduled on a loaded CI runner. The production cleanup code
+was unchanged by this test synchronization repair.
 
 The read-only GitHub transport was exercised against completed public run
 39178233725, commit `379f60a9af3e6fae817b0f87403ef54c16011152`, attempt 1.

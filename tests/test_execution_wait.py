@@ -71,10 +71,11 @@ def test_timeout_cancel_interrupt_and_spawn_failure(identity, tmp_path):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows creation-time Job Object runtime proof")
 def test_cancel_owns_descendants_at_creation_and_preserves_unrelated_process(identity, tmp_path):
-    ready, late = tmp_path / "ready", tmp_path / "late"
-    child = ("from pathlib import Path; import time; "
-             f"Path({str(ready)!r}).write_text('ready'); time.sleep(.6); "
-             f"Path({str(late)!r}).write_text('escaped'); time.sleep(60)")
+    ready, late, release = tmp_path / "ready", tmp_path / "late", tmp_path / "release"
+    child = ("from pathlib import Path\nimport time\n"
+             f"Path({str(ready)!r}).write_text('ready')\n"
+             f"while not Path({str(release)!r}).exists(): time.sleep(.01)\n"
+             f"Path({str(late)!r}).write_text('escaped')\ntime.sleep(60)")
     parent = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c'," + repr(child) + "]); time.sleep(60)"
     unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
@@ -92,7 +93,9 @@ def test_cancel_owns_descendants_at_creation_and_preserves_unrelated_process(ide
         assert result["process_ownership"] == "WINDOWS_CREATION_JOB"
         assert result["output_complete"] is True
         assert unrelated.poll() is None
-        threading.Event().wait(.7)
+        # Side effects are released only after confirmed cleanup. A fixed delay
+        # from readiness could expire before a loaded runner requested cancel.
+        release.touch()
         assert not late.exists(), "descendant survived cancellation"
     finally:
         unrelated.terminate()
@@ -141,31 +144,52 @@ def test_posix_runner_publishes_unknown_without_launching_command(identity, tmp_
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows kill-on-close runtime proof")
 def test_observer_hard_exit_kills_job_and_leaves_manual_unknown_receipt(identity, tmp_path):
+    import ctypes
+    from ctypes import wintypes
     import time
     path = tmp_path / "identity.json"
     path.write_text(json.dumps(asdict(identity)))
     ready, late, directory = tmp_path / "ready", tmp_path / "late", tmp_path / "hard-exit"
-    child = ("from pathlib import Path; import time; "
-             f"Path({str(ready)!r}).write_text('ready'); time.sleep(.6); "
-             f"Path({str(late)!r}).write_text('escaped'); time.sleep(60)")
+    release = tmp_path / "release"
+    child = ("from pathlib import Path\nimport os,time\n"
+             f"Path({str(ready.with_suffix('.new'))!r}).write_text(str(os.getpid()))\n"
+             f"os.replace({str(ready.with_suffix('.new'))!r}, {str(ready)!r})\n"
+             f"while not Path({str(release)!r}).exists(): time.sleep(.01)\n"
+             f"Path({str(late)!r}).write_text('escaped')\ntime.sleep(60)")
     command = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c'," + repr(child) + "]); time.sleep(60)"
     helper = subprocess.Popen([sys.executable, "-m", "thaliris_codex.execution_wait", "run",
                                "--identity", str(path), "--receipt", str(directory), "--",
                                sys.executable, "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    child_handle = None
     try:
         deadline = time.monotonic() + 5
         while not ready.exists():
             assert helper.poll() is None, helper.communicate()
             assert time.monotonic() < deadline, "owned descendant did not start"
             threading.Event().wait(.01)
+        # Synchronize only with the exact live descendant of this fixture.
+        # The handle grants no termination right and is never used for a PID kill.
+        child_handle = kernel.OpenProcess(0x100000, False, int(ready.read_text()))
+        assert child_handle, ctypes.WinError(ctypes.get_last_error())
+        assert kernel.WaitForSingleObject(child_handle, 0) == 0x102
         helper.terminate()  # Exact owned observer handle, no PID lookup or enumeration.
         helper.communicate(timeout=5)
-        threading.Event().wait(.7)
+        assert kernel.WaitForSingleObject(child_handle, 5000) == 0, "descendant remained alive"
+        release.touch()
         assert not late.exists(), "descendant escaped observer kill-on-close"
         result = inspect(directory, identity)
         assert result["status"] == "UNKNOWN"
         assert result["automatic_resume"] == "UNSUPPORTED"
     finally:
+        if child_handle:
+            kernel.CloseHandle(child_handle)
         if helper.poll() is None:
             helper.terminate()
             helper.communicate(timeout=5)

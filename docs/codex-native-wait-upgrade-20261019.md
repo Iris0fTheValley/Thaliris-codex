@@ -132,13 +132,28 @@ against the provider. This report fixes the verified code milestone above;
 the final documentation commit and its CI result are reported separately in the
 delivery response rather than changing this file to chase its own commit hash.
 
+The subsequent documentation commit `4bdaceed617f114b66b34beddf59b46f19fecd23`
+triggered [run 39224249571, attempt 1](https://github.com/Iris0fTheValley/Thaliris-codex/actions/runs/39224249571).
+The observer returned early on Windows/Python 3.11 job failure evidence. All
+cleanup assertions passed, including `CONFIRMED_JOB_EMPTY`; the failing assertion
+was a descendant marker whose fixed 0.6-second delay could expire before the
+runner scheduled cancellation. A local reproduction deliberately delayed the
+cancel callback and reproduced that marker with confirmed empty-job cleanup.
+The fixtures now release side effects only after cleanup, and observer-death
+verification waits on the exact fixture descendant's synchronization-only
+process handle. No production process-control behavior changed. The repaired
+commit's CI result is reported in the delivery response.
+
 Local related regression passed 369 tests with one POSIX-only test skipped on
-Windows. This is one non-overlapping invocation across execution waiting,
+Windows before the fixture synchronization repair. This is one non-overlapping invocation across execution waiting,
 native wait capability, Host compatibility, single handoff, native spawn
 identity, managed acceptance, and native execution contracts. The Node adapter
 test passed separately. These counts do not add earlier overlapping runs.
 Windows process tests run only on Windows; the actual POSIX refusal test runs on
 POSIX, where process launch must remain unsupported.
+After the synchronization repair, the focused execution-wait suite passed
+27 tests with the same one POSIX-only skip. This rerun overlaps the earlier
+369-test invocation and must not be added to it as additional distinct coverage.
 
 The selected Host advertised a 3,600,000 ms maximum native wait. Requested
 600,000 ms and 1,800,000 ms waits were accepted; selected waits returned early
