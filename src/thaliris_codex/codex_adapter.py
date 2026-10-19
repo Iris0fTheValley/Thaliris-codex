@@ -15,7 +15,7 @@ import tomllib
 
 from thaliris import core
 
-from . import codex_app_server, lifecycle, roles, runtime_identity, host_preflight, task_authority
+from . import codex_app_server, lifecycle, roles, runtime_identity, host_preflight, task_authority, native_wait_capability
 from .lifecycle import (
     MANAGED_HOOKS_DESCRIPTION,
     MANAGED_HOOK_ABI,
@@ -368,29 +368,6 @@ _KNOWN_GENERATED_MANAGED_INSTRUCTION_HASHES = frozenset({
     # 3094c0a69a620780558b535cf6aaf0f91ea66b62.
     "febde2dd8181652986a05d27ff9763a57e9cbc21b7916d84616802cdc9c40e9f",
 })
-_CODEX_0162_STABLE_WAIT_CAPABILITY = {
-    "min": 10_000,
-    "default": 30_000,
-    "max": 3_600_000,
-    "explicit_timeout_supported": True,
-    "native_completion_reenters_root": "UNKNOWN",
-}
-_KNOWN_HOST_WAIT_CAPABILITIES = {
-    # These are release-pinned observations, not a cross-version assumption.
-    "0.153.4": {"min": 10_000, "default": 30_000, "max": 3_600_000, "explicit_timeout_supported": True, "native_completion_reenters_root": "UNSUPPORTED"},
-    "0.154.0": {"min": 10_000, "default": 30_000, "max": 3_600_000, "explicit_timeout_supported": True, "native_completion_reenters_root": "UNSUPPORTED"},
-    "0.155.1": {"min": 10_000, "default": 30_000, "max": 3_600_000, "explicit_timeout_supported": True, "native_completion_reenters_root": "UNSUPPORTED"},
-    # Exact source verification confirms explicit wait_agent timeout support
-    # on this prerelease.  Its live child-completion behavior remains unknown.
-    "0.155.0-alpha.9.2": {"min": 10_000, "default": 30_000, "max": 3_600_000, "explicit_timeout_supported": True, "native_completion_reenters_root": "UNKNOWN"},
-    # Stable 0.162 releases share the same explicit timeout contract. Keep
-    # completion reentry unknown because the CLI source contract alone does
-    # not establish the live session's notification behavior.
-    "0.162.0": _CODEX_0162_STABLE_WAIT_CAPABILITY,
-    "0.162.1": _CODEX_0162_STABLE_WAIT_CAPABILITY,
-}
-
-
 # Immutable 6396e138 source witnesses and renders are retained under
 # tests/fixtures/prompt-contract-before. Matching edits and cross-role copies
 # remain user-owned; no current-HEAD historical ownership inference.
@@ -894,43 +871,35 @@ def controller_actor(runtime_role: str) -> str:
 
 @lru_cache(maxsize=8)
 def _host_wait_mode_cached(runner: str) -> dict[str, object]:
-    """Return a conservative, version-bound wait capability for this host."""
+    """Observe CLI provenance only; a version cannot certify native waiting."""
     try:
         completed = subprocess.run([runner, "--version"], capture_output=True, text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
-        return {"status": "UNSUPPORTED", "version": "UNKNOWN", "reason": "Codex executable is unavailable"}
-    # A capability pin is useful only when the executable identifies itself
-    # with its complete exact version, including any prerelease suffix.  The
-    # lookup below never promotes an unpinned suffix from its numeric prefix.
+        return {"version": "UNKNOWN", "reason": "Codex executable is unavailable"}
     match = re.fullmatch(
         r"(?:codex(?:-cli)?\s+)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)",
         ((completed.stdout or "") + (completed.stderr or "")).strip(),
         flags=re.IGNORECASE,
     )
     if completed.returncode != 0 or match is None:
-        return {"status": "UNSUPPORTED", "version": "UNKNOWN", "reason": "Codex version could not be determined"}
+        return {"version": "UNKNOWN", "reason": "Codex version could not be determined"}
     version = match.group(1)
-    capability = _KNOWN_HOST_WAIT_CAPABILITIES.get(version)
-    if capability is None:
-        return {"status": "UNSUPPORTED", "version": version, "reason": "no version-pinned wait capability is recorded for this Codex host"}
-    return {"status": "PASS", "version": version, **capability}
+    return {"version": version}
 
 
-def host_wait_mode(executable: str | None = None) -> dict[str, object]:
-    return dict(_host_wait_mode_cached(executable or os.environ.get("THALIRIS_CODEX_EXECUTABLE") or "codex"))
+def host_wait_mode(executable: str | None = None, *, wait_schema: object = None,
+                   runtime_observations: object = None) -> dict[str, object]:
+    provenance = _host_wait_mode_cached(executable or os.environ.get("THALIRIS_CODEX_EXECUTABLE") or "codex")
+    return {**provenance, **native_wait_capability.classify(wait_schema, runtime_observations)}
 
 
-def host_explicit_blocking_wait(executable: str | None = None) -> dict[str, object]:
-    """Return version-pinned support for an explicit, bounded native wait.
-
-    Release defaults and hard ceilings do not prove the active turn's
-    effective maximum. The Host does not currently expose that maximum bound
-    to the current session, so report it as unavailable until it does.
-    """
-    host = host_wait_mode(executable)
+def host_explicit_blocking_wait(executable: str | None = None, *, wait_schema: object = None,
+                                runtime_observations: object = None) -> dict[str, object]:
+    """Report selected schema support separately from unproven runtime facts."""
+    host = (host_wait_mode(executable) if wait_schema is None and runtime_observations is None
+            else host_wait_mode(executable, wait_schema=wait_schema, runtime_observations=runtime_observations))
     if host.get("status") != "PASS":
-        status = "UNSUPPORTED" if host.get("version") == "UNKNOWN" else "UNKNOWN"
-        return {"status": status, "host": host}
+        return {"status": "UNKNOWN", "host": host}
     if host.get("explicit_timeout_supported") is not True:
         return {"status": "UNSUPPORTED", "host": host}
     return {
@@ -938,28 +907,38 @@ def host_explicit_blocking_wait(executable: str | None = None) -> dict[str, obje
         "version": host["version"],
         "min_wait_timeout_ms": host["min"],
         "default_wait_timeout_ms": host["default"],
-        # The exact release pin supplies a hard ceiling only. A configurable
-        # per-turn effective maximum is not exposed by the current Host hook.
-        "release_hard_max_wait_timeout_ms": host["max"],
+        "schema_max_wait_timeout_ms": host["max"],
+        "release_hard_max_wait_timeout_ms": "UNAVAILABLE",
         "effective_max_wait_timeout_ms": "UNAVAILABLE",
         "explicit_timeout_supported": True,
+        "runtime": host.get("runtime", {}),
     }
 
 
-def native_child_completion_reenters_root(executable: str | None = None) -> str:
+def native_child_completion_reenters_root(executable: str | None = None, *,
+                                        runtime_observations: object = None) -> str:
     """Return only PASS, UNSUPPORTED, or UNKNOWN for native re-entry."""
-    capability = host_wait_mode(executable)
+    capability = (host_wait_mode(executable) if runtime_observations is None
+                  else host_wait_mode(executable, runtime_observations=runtime_observations))
     result = capability.get("native_completion_reenters_root")
     return result if result in {"PASS", "UNSUPPORTED", "UNKNOWN"} else "UNKNOWN"
 
 
-def selected_continuation_mode(root: Path, executable: str | None = None) -> str:
-    continuation = native_child_completion_reenters_root(executable)
+def selected_continuation_mode(root: Path, executable: str | None = None, *,
+                               wait_schema: object = None, runtime_observations: object = None) -> str:
+    continuation = (native_child_completion_reenters_root(executable) if runtime_observations is None
+                    else native_child_completion_reenters_root(executable, runtime_observations=runtime_observations))
     if continuation == "PASS":
         return "EVENT_DRIVEN"
-    if host_explicit_blocking_wait(executable).get("status") == "PASS":
+    blocking = (host_explicit_blocking_wait(executable) if wait_schema is None and runtime_observations is None
+                else host_explicit_blocking_wait(executable, wait_schema=wait_schema,
+                                                runtime_observations=runtime_observations))
+    if blocking.get("status") == "PASS":
         return "BLOCKING_WAIT"
-    return "UNAVAILABLE"
+    # Unknown optimizations cannot revoke task intent or native dispatch.
+    # The caller uses the native tool's documented ordinary staged wait and
+    # observes actual wake reasons; this claims no long-wait or reentry bound.
+    return "STAGED_WAIT"
 
 
 def _read_text(path: Path) -> str:
@@ -1903,7 +1882,7 @@ def task_start(
             return {"ok": False, "status": catalog_status, "new_role_profile_files": lifecycle.new_role_profile_files(root, session_hash), "host_instruction_activation": "UNKNOWN"}
     mode = selected_continuation_mode(root)
     readiness = {
-        "status": "PASS" if mode in {"EVENT_DRIVEN", "BLOCKING_WAIT"} else "MANAGED_CONTINUATION_UNAVAILABLE",
+        "status": "PASS" if mode in {"EVENT_DRIVEN", "BLOCKING_WAIT"} else "UNKNOWN" if mode == "STAGED_WAIT" else "MANAGED_CONTINUATION_UNAVAILABLE",
         "NATIVE_CHILD_COMPLETION_REENTERS_ROOT": native_child_completion_reenters_root(),
         "HOST_EXPLICIT_BLOCKING_WAIT": host_explicit_blocking_wait().get("status"),
         "selected_continuation_mode": mode,

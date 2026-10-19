@@ -1376,7 +1376,7 @@ def test_no_task_does_not_normalize_wait_even_with_known_host(tmp_path: Path, mo
     assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
 
 
-def test_codex_01551_wait_capability_is_version_pinned(monkeypatch) -> None:
+def test_codex_01551_version_is_provenance_not_current_wait_capability(monkeypatch) -> None:
     class Version:
         returncode = 0
         stdout = "codex-cli 0.155.1\n"
@@ -1385,16 +1385,13 @@ def test_codex_01551_wait_capability_is_version_pinned(monkeypatch) -> None:
     codex_adapter._host_wait_mode_cached.cache_clear()
     monkeypatch.setattr(codex_adapter.subprocess, "run", lambda *args, **kwargs: Version())
     capability = codex_adapter.host_explicit_blocking_wait("codex-0.155-test")
-    assert capability == {
-        "status": "PASS", "version": "0.155.1", "min_wait_timeout_ms": 10_000,
-        "default_wait_timeout_ms": 30_000, "release_hard_max_wait_timeout_ms": 3_600_000,
-        "effective_max_wait_timeout_ms": "UNAVAILABLE", "explicit_timeout_supported": True,
-    }
-    assert codex_adapter.native_child_completion_reenters_root("codex-0.155-test") == "UNSUPPORTED"
+    assert capability["status"] == "UNKNOWN"
+    assert capability["host"]["version"] == "0.155.1"
+    assert codex_adapter.native_child_completion_reenters_root("codex-0.155-test") == "UNKNOWN"
     codex_adapter._host_wait_mode_cached.cache_clear()
 
 
-def test_exact_current_codex_alpha_wait_capability_is_source_pinned(monkeypatch) -> None:
+def test_old_source_pin_does_not_certify_runtime_wait(monkeypatch) -> None:
     class Version:
         returncode = 0
         stdout = "codex-cli 0.155.0-alpha.9.2\n"
@@ -1403,13 +1400,10 @@ def test_exact_current_codex_alpha_wait_capability_is_source_pinned(monkeypatch)
     codex_adapter._host_wait_mode_cached.cache_clear()
     monkeypatch.setattr(codex_adapter.subprocess, "run", lambda *args, **kwargs: Version())
     capability = codex_adapter.host_explicit_blocking_wait("codex-current-alpha-test")
-    assert capability == {
-        "status": "PASS", "version": "0.155.0-alpha.9.2", "min_wait_timeout_ms": 10_000,
-        "default_wait_timeout_ms": 30_000, "release_hard_max_wait_timeout_ms": 3_600_000,
-        "effective_max_wait_timeout_ms": "UNAVAILABLE", "explicit_timeout_supported": True,
-    }
+    assert capability["status"] == "UNKNOWN"
+    assert capability["host"]["version"] == "0.155.0-alpha.9.2"
     assert codex_adapter.native_child_completion_reenters_root("codex-current-alpha-test") == "UNKNOWN"
-    assert codex_adapter.selected_continuation_mode(Path("."), "codex-current-alpha-test") == "BLOCKING_WAIT"
+    assert codex_adapter.selected_continuation_mode(Path("."), "codex-current-alpha-test") == "STAGED_WAIT"
     codex_adapter._host_wait_mode_cached.cache_clear()
 
 
@@ -1435,7 +1429,7 @@ def test_release_pinned_host_does_not_normalize_with_unknown_turn_cap(tmp_path: 
 
 
 @pytest.mark.parametrize("version", ["0.153.4", "0.154.0"])
-def test_historical_codex_wait_capabilities_remain_exactly_pinned(monkeypatch, version: str) -> None:
+def test_historical_codex_versions_preserve_provenance_without_certifying_wait(monkeypatch, version: str) -> None:
     class Version:
         returncode = 0
         stdout = f"codex-cli {version}\n"
@@ -1444,9 +1438,9 @@ def test_historical_codex_wait_capabilities_remain_exactly_pinned(monkeypatch, v
     codex_adapter._host_wait_mode_cached.cache_clear()
     monkeypatch.setattr(codex_adapter.subprocess, "run", lambda *args, **kwargs: Version())
     capability = codex_adapter.host_explicit_blocking_wait("codex-pinned-test")
-    assert capability["version"] == version
-    assert capability["release_hard_max_wait_timeout_ms"] == 3_600_000
-    assert capability["effective_max_wait_timeout_ms"] == "UNAVAILABLE"
+    assert capability["host"]["version"] == version
+    assert capability["status"] == "UNKNOWN"
+    assert capability["host"]["effective_max_wait_timeout_ms"] == "UNAVAILABLE"
     codex_adapter._host_wait_mode_cached.cache_clear()
 
 
@@ -1476,7 +1470,7 @@ def test_future_codex_wait_capability_is_conservative(monkeypatch) -> None:
     monkeypatch.setattr(codex_adapter.subprocess, "run", lambda *args, **kwargs: Version())
     capability = codex_adapter.host_explicit_blocking_wait("codex-future-test")
     assert capability["status"] == "UNKNOWN"
-    assert codex_adapter.selected_continuation_mode(Path("."), "codex-future-test") == "UNAVAILABLE"
+    assert codex_adapter.selected_continuation_mode(Path("."), "codex-future-test") == "STAGED_WAIT"
     codex_adapter._host_wait_mode_cached.cache_clear()
 
 
@@ -2309,7 +2303,7 @@ def test_unsupported_prerelease_after_valid_attestation_is_continuation_unavaila
     codex_adapter._host_wait_mode_cached.cache_clear()
     with monkeypatch.context() as isolated:
         isolated.setattr(codex_adapter.subprocess, "run", lambda *args, **kwargs: Version())
-        assert codex_adapter.selected_continuation_mode(root) == "UNAVAILABLE"
+        assert codex_adapter.selected_continuation_mode(root) == "STAGED_WAIT"
     codex_adapter._host_wait_mode_cached.cache_clear()
     monkeypatch.setattr(codex_adapter, "selected_continuation_mode", lambda _root: "UNAVAILABLE")
     digest = codex_adapter._controller_bridge()["controller_bridge_sha256"]

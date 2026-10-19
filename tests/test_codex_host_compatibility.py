@@ -1,9 +1,7 @@
 """Deterministic compatibility boundary for the locally observed Codex host.
 
-Compatibility maintenance only: the historical alpha observation below stays
-outside the explicit-wait pins. Stable 0.162.0 and 0.162.1 are tested separately
-against their source-equivalent timeout contract; live completion re-entry
-remains unknown and is not enabled by these tests.
+Historical version observations remain provenance. No version alone certifies
+the current session's wait schema, effective duration or completion re-entry.
 
 Observed local host, 2026-10-08:
 
@@ -79,13 +77,8 @@ def _observe(monkeypatch, version: str) -> None:
     monkeypatch.setattr(codex_adapter.subprocess, "run", lambda *args, **kwargs: _ReportedVersion(version))
 
 
-def test_pinned_wait_capability_set_is_exactly_the_certified_boundary() -> None:
-    """Only source-certified stable .162 releases join the explicit-wait set."""
-    assert set(codex_adapter._KNOWN_HOST_WAIT_CAPABILITIES) == {
-        "0.153.4", "0.154.0", "0.155.1", "0.155.0-alpha.9.2",
-        "0.162.0", "0.162.1",
-    }
-    assert OBSERVED_VERSION not in codex_adapter._KNOWN_HOST_WAIT_CAPABILITIES
+def test_versions_are_not_wait_capability_authority() -> None:
+    assert not hasattr(codex_adapter, "_KNOWN_HOST_WAIT_CAPABILITIES")
 
 
 def test_observed_local_host_remains_fail_closed(monkeypatch) -> None:
@@ -96,59 +89,49 @@ def test_observed_local_host_remains_fail_closed(monkeypatch) -> None:
         assert capability["status"] != "PASS"
         assert capability["host"]["status"] != "PASS"
         assert capability["host"]["version"] == OBSERVED_VERSION
-        assert capability["host"]["reason"] == (
-            "no version-pinned wait capability is recorded for this Codex host"
-        )
+        assert capability["host"]["schema_status"] == "UNKNOWN"
         assert codex_adapter.native_child_completion_reenters_root("codex-observed-test") == "UNKNOWN"
-        assert codex_adapter.selected_continuation_mode(Path("."), "codex-observed-test") == "UNAVAILABLE"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-observed-test") == "STAGED_WAIT"
     finally:
         codex_adapter._host_wait_mode_cached.cache_clear()
 
 
 @pytest.mark.parametrize("version", ["0.153.4", "0.154.0", "0.155.1"])
-def test_previously_certified_hosts_are_unchanged(monkeypatch, version: str) -> None:
-    """Adding compatibility for a newer build must not disturb older pins."""
+def test_old_version_provenance_does_not_certify_current_session_wait(monkeypatch, version: str) -> None:
     _observe(monkeypatch, version)
     try:
         capability = codex_adapter.host_explicit_blocking_wait("codex-pinned-test")
-        assert capability["status"] == "PASS"
-        assert capability["version"] == version
-        assert capability["min_wait_timeout_ms"] == 10_000
-        assert capability["default_wait_timeout_ms"] == 30_000
-        assert capability["release_hard_max_wait_timeout_ms"] == 3_600_000
-        assert capability["effective_max_wait_timeout_ms"] == "UNAVAILABLE"
-        assert codex_adapter.selected_continuation_mode(Path("."), "codex-pinned-test") == "BLOCKING_WAIT"
+        assert capability["status"] == "UNKNOWN"
+        assert capability["host"]["version"] == version
+        assert capability["host"]["effective_max_wait_timeout_ms"] == "UNAVAILABLE"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-pinned-test") == "STAGED_WAIT"
     finally:
         codex_adapter._host_wait_mode_cached.cache_clear()
 
 
-def test_source_verified_prerelease_pin_is_unchanged(monkeypatch) -> None:
-    """The one source-verified prerelease keeps its recorded classification."""
+def test_source_verified_prerelease_still_needs_current_session_evidence(monkeypatch) -> None:
     _observe(monkeypatch, "0.155.0-alpha.9.2")
     try:
         assert codex_adapter.native_child_completion_reenters_root("codex-alpha-pin-test") == "UNKNOWN"
-        assert codex_adapter.selected_continuation_mode(Path("."), "codex-alpha-pin-test") == "BLOCKING_WAIT"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-alpha-pin-test") == "STAGED_WAIT"
     finally:
         codex_adapter._host_wait_mode_cached.cache_clear()
 
 
 @pytest.mark.parametrize("version", ["0.162.0", "0.162.1"])
-def test_stable_0162_hosts_share_source_verified_explicit_wait_contract(
+def test_stable_0162_hosts_keep_provenance_without_inventing_runtime_contract(
     monkeypatch, version: str,
 ) -> None:
     _observe(monkeypatch, version)
     try:
         host = codex_adapter.host_wait_mode("codex-stable-test")
         capability = codex_adapter.host_explicit_blocking_wait("codex-stable-test")
-        assert host["status"] == "PASS"
-        assert capability["status"] == "PASS"
-        assert capability["version"] == version
-        assert capability["min_wait_timeout_ms"] == 10_000
-        assert capability["default_wait_timeout_ms"] == 30_000
-        assert capability["release_hard_max_wait_timeout_ms"] == 3_600_000
-        assert capability["effective_max_wait_timeout_ms"] == "UNAVAILABLE"
+        assert host["status"] == "UNKNOWN"
+        assert capability["status"] == "UNKNOWN"
+        assert host["version"] == version
+        assert host["effective_max_wait_timeout_ms"] == "UNAVAILABLE"
         assert codex_adapter.native_child_completion_reenters_root("codex-stable-test") == "UNKNOWN"
-        assert codex_adapter.selected_continuation_mode(Path("."), "codex-stable-test") == "BLOCKING_WAIT"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-stable-test") == "STAGED_WAIT"
     finally:
         codex_adapter._host_wait_mode_cached.cache_clear()
 
@@ -158,7 +141,7 @@ def test_neighboring_0162_builds_are_not_promoted_by_numeric_prefix(monkeypatch,
     _observe(monkeypatch, version)
     try:
         assert codex_adapter.host_explicit_blocking_wait("codex-neighbor-test")["status"] != "PASS"
-        assert codex_adapter.selected_continuation_mode(Path("."), "codex-neighbor-test") == "UNAVAILABLE"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-neighbor-test") == "STAGED_WAIT"
     finally:
         codex_adapter._host_wait_mode_cached.cache_clear()
 
@@ -168,7 +151,7 @@ def test_arbitrary_prerelease_suffixes_still_fail_closed(monkeypatch) -> None:
     _observe(monkeypatch, f"{OBSERVED_VERSION}.1")
     try:
         assert codex_adapter.host_explicit_blocking_wait("codex-suffix-test")["status"] != "PASS"
-        assert codex_adapter.selected_continuation_mode(Path("."), "codex-suffix-test") == "UNAVAILABLE"
+        assert codex_adapter.selected_continuation_mode(Path("."), "codex-suffix-test") == "STAGED_WAIT"
     finally:
         codex_adapter._host_wait_mode_cached.cache_clear()
 

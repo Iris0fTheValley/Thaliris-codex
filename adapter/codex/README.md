@@ -424,10 +424,15 @@ do not disable managed hooks on their own, which is why this preflight is
 required. The check verifies string acceptance, actual
 prompt effect and wrong-type rejection; complete consistent evidence is required
 before planning a write. Contradictory evidence reports `CAPABILITY_INCOMPATIBLE`,
-while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`. Stable
-`0.162.0` and `0.162.1` have the explicit bounded-wait contract (10,000 ms minimum,
-30,000 ms default, 3,600,000 ms release hard maximum); the effective per-session
-maximum and native child completion re-entry remain `UNAVAILABLE` and `UNKNOWN`.
+while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`.
+Native wait capabilities are separate from these configuration probes. A selected
+session's actual tool schema can establish argument limits, including a 3,600,000 ms
+schema ceiling, without certifying effective duration. CLI versions do not establish
+wait capability. Bounded duration, completion wake, message wake, user interruption
+and automatic resume each require their own runtime evidence. Without selected schema
+transport these facts remain `UNKNOWN`; effective runtime maximum stays `UNAVAILABLE`.
+Unknown waiting optimizations select `STAGED_WAIT` using the native tool's ordinary
+documented wait behavior and preserve normal task admission and identity checks.
 The [Codex host compatibility record](../../docs/codex-host-compatibility-20261008.md)
 preserves the source comparison and runtime-evidence limits.
 `HostIntegration=ready` and matching disk bytes do not prove catalog compatibility or
