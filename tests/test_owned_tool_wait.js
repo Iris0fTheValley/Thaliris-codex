@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const {waitOwnedCommand} = require("../tools/owned_tool_wait.js");
+const {waitOwnedCommand, observeOwnedCommand} = require("../tools/owned_tool_wait.js");
 
 (async () => {
   let calls = 0;
@@ -33,11 +33,33 @@ const {waitOwnedCommand} = require("../tools/owned_tool_wait.js");
   assert.equal((await waitOwnedCommand({...tools, write_stdin: async () => ({session_id: 17, status: "NOT_FOUND"})}, {})).status, "UNKNOWN");
   const cancelled = await waitOwnedCommand(tools, {}, {signal: {aborted: true}});
   assert.equal(cancelled.status, "INTERVENTION_REQUIRED");
-  assert.equal(cancelled.session_id, 17);
+  assert.equal(cancelled.session_id, undefined);
+  assert.equal(cancelled.observations, 0);
   assert.equal((await waitOwnedCommand({...tools, exec_command: async () => ({exit_code: 0})}, {})).status, "TERMINAL");
   const callbackFailure = await waitOwnedCommand({exec_command: async () => ({exit_code: 0, output: "done"})}, {},
     {onProgress: () => {throw Error("display failed");}});
   assert.equal(callbackFailure.status, "TERMINAL");
   assert.match(callbackFailure.progress_error, /display failed/);
+  let launches = 0;
+  const selectedTools = {
+    exec_command: async args => { launches++; return {session_id: 91, output: "progress"}; },
+    write_stdin: async args => { assert.equal(args.session_id, 91); return {exit_code: 0}; }
+  };
+  const selection = {expectedLong: true, finite: true, noninteractive: true};
+  for (const options of [{}, {...selection, finite: false}, {...selection, noninteractive: false}]) {
+    const fallback = await observeOwnedCommand(selectedTools, {cmd: "authorized"}, options);
+    assert.equal(fallback.mode, "NATIVE");
+    assert.equal(fallback.observation.session_id, 91);
+  }
+  assert.equal((await observeOwnedCommand(selectedTools, {tty: true}, selection)).mode, "NATIVE");
+  assert.equal((await observeOwnedCommand({exec_command: selectedTools.exec_command}, {}, selection)).mode, "NATIVE");
+  assert.equal((await observeOwnedCommand(selectedTools, {}, selection)).status, "TERMINAL");
+  assert.equal(launches, 6);
+  let failedLaunches = 0;
+  const unknown = await observeOwnedCommand({exec_command: async () => {
+    failedLaunches++; throw Error("uncertain launch");
+  }, write_stdin: selectedTools.write_stdin}, {}, selection);
+  assert.equal(unknown.status, "UNKNOWN");
+  assert.equal(failedLaunches, 1);
   process.stdout.write("owned tool wait: PASS\n");
 })().catch(error => {process.stderr.write(String(error)); process.exitCode = 1;});

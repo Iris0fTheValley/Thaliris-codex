@@ -17,6 +17,9 @@ async function waitOwnedCommand(tools, args, options = {}) {
   try {
     if (!Number.isSafeInteger(maxBufferedChars) || maxBufferedChars < 1)
       throw new Error("Positive bounded output size required");
+    if (signal?.aborted)
+      return {status: "INTERVENTION_REQUIRED", reason: "cancelled before launch",
+        observations: 0, semantic_done: false};
     let result = await tools.exec_command(args);
     if (Number.isInteger(result.session_id)) session = result.session_id;
     while (true) {
@@ -53,4 +56,16 @@ async function waitOwnedCommand(tools, args, options = {}) {
       recovery: "inspect durable receipt; reconcile original tool session manually"};
   }
 }
-if (typeof module !== "undefined") module.exports = {waitOwnedCommand};
+// Selection is operational metadata, never task/actor authority. Only a fresh
+// exec result establishes this helper's session; there is no attach-by-ID API.
+async function observeOwnedCommand(tools, args, options = {}) {
+  const selected = options.expectedLong === true && options.finite === true &&
+    options.noninteractive === true && args.tty !== true &&
+    typeof tools.write_stdin === "function";
+  if (!selected) {
+    // Preserve native interaction and permissions. Never retry an uncertain start.
+    return {mode: "NATIVE", observation: await tools.exec_command(args), semantic_done: false};
+  }
+  return {mode: "OWNED_WAIT", ...await waitOwnedCommand(tools, args, options)};
+}
+if (typeof module !== "undefined") module.exports = {waitOwnedCommand, observeOwnedCommand};

@@ -1,9 +1,20 @@
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from thaliris import core
 from thaliris_codex import codex_adapter, runtime_identity
+
+
+def test_source_distribution_excludes_local_control_state():
+    root = Path(__file__).resolve().parents[1]
+    build = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))[
+        "tool"]["hatch"]["build"]["targets"]["sdist"]
+    excludes = set(build["exclude"])
+    for directory in (".agent-memory", ".context", ".milestones"):
+        assert f"/{directory}" in excludes
+        assert f"/{directory}/**" in excludes
 
 
 def test_adapter_uses_external_shared_core():

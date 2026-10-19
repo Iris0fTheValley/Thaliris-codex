@@ -86,6 +86,9 @@ def _parser() -> argparse.ArgumentParser:
     _add_global_arguments(p)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("runtime-check", help="report this public console's interpreter and package origin without mutation")
+    q = sub.add_parser("execution-wait", help="retrieve packaged helper or run an owned foreground observation")
+    q.add_argument("--tool-source", action="store_true", help="include packaged JS source in the read-only guide")
+    q.add_argument("arguments", nargs=argparse.REMAINDER)
     controller_help = sub.add_parser("controller-instructions", help="list or retrieve Controller procedures without admission or mutation")
     from . import controller_instructions
     controller_selection = controller_help.add_mutually_exclusive_group()
@@ -277,6 +280,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(out, sort_keys=True, separators=(",", ":")))
             return 0
         root = args.root.resolve()
+        if args.command == "execution-wait" and not args.arguments:
+            from .execution_observation import guide
+            print(json.dumps(guide(include_source=args.tool_source), ensure_ascii=False))
+            return 0
         command_task_id = getattr(args, "task_id", None) if args.command in {"task-abandon", "task-observe", "document-maintain"} else None
         if args.selected_task_id and command_task_id and args.selected_task_id != command_task_id:
             raise ValueError("conflicting selected task IDs")
@@ -330,6 +337,11 @@ def main(argv: list[str] | None = None) -> int:
             if response:
                 sys.stdout.write(response)
             return 0
+        if args.command == "execution-wait":
+            if args.tool_source:
+                raise ValueError("--tool-source is retrieval only")
+            from .execution_wait import main as observe
+            return observe(args.arguments)
         if args.command == "init": out = codex_adapter.init(root, accept_managed_instruction_sha256=args.accept_managed_instruction_sha256)
         elif args.command == "bootstrap-check": out = codex_adapter.bootstrap_check(root)
         elif args.command in {"codex-install", "codex-uninstall"}:

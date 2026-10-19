@@ -6,6 +6,7 @@ The registry includes the persistent Controller entry for CLI compatibility;
 only entries with a native profile participate in the named-role lifecycle.
 """
 from __future__ import annotations
+from .execution_observation import INSTRUCTIONS as _EXECUTION_OBSERVATION_INSTRUCTIONS
 
 from dataclasses import dataclass, replace
 
@@ -342,8 +343,8 @@ def _instructions(role: str) -> str:
         ),
     }
     if role == "controller":
-        return (_WAITING_INSTRUCTIONS + role_instructions[role]).strip()
-    shared = _SHARED_INSTRUCTIONS
+        return (_WAITING_INSTRUCTIONS + _EXECUTION_OBSERVATION_INSTRUCTIONS + role_instructions[role]).strip()
+    shared = _SHARED_INSTRUCTIONS + _EXECUTION_OBSERVATION_INSTRUCTIONS
     if role in {"implementer", "focused-implementer", "reviewer"}:
         shared += _WAITING_INSTRUCTIONS + _FOCUSED_SCANNER_INSTRUCTIONS
     else:

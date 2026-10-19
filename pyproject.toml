@@ -40,4 +40,12 @@ norecursedirs = ["benchmarks/abcd/historical"]
 packages = ["src/thaliris_codex"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/HANDOFF.md"]
+exclude = [
+  "/HANDOFF.md",
+  "/.agent-memory",
+  "/.agent-memory/**",
+  "/.context",
+  "/.context/**",
+  "/.milestones",
+  "/.milestones/**",
+]

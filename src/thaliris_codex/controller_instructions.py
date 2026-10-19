@@ -6,6 +6,7 @@ import re
 import shlex
 
 from . import roles
+from .execution_observation import INSTRUCTIONS as _EXECUTION_OBSERVATION_INSTRUCTIONS
 
 
 _WAITING_INSTRUCTIONS = (
@@ -75,7 +76,7 @@ def render(runner: str = "<installed pinned runner>", *, section: str | None = N
         for role in roles.role_choices() if role != "controller"
     )
     rendered = source.replace("@RUNNER@", runner).replace("@ROLE_ROWS@", rows).replace(
-        "@WAITING_INSTRUCTIONS@", _WAITING_INSTRUCTIONS.strip()
+        "@WAITING_INSTRUCTIONS@", (_WAITING_INSTRUCTIONS + _EXECUTION_OBSERVATION_INSTRUCTIONS).strip()
     )
     if section is None:
         return rendered

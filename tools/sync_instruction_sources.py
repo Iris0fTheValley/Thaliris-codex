@@ -8,7 +8,7 @@ from pathlib import Path
 import argparse
 import subprocess
 
-from thaliris_codex import codex_adapter, controller_instructions, roles
+from thaliris_codex import codex_adapter, controller_instructions, roles, execution_observation
 
 
 def main() -> int:
@@ -19,6 +19,7 @@ def main() -> int:
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     outputs = {
+        "tools/owned_tool_wait.js": execution_observation.TOOL_SOURCE,
         "AGENTS.md": codex_adapter.render_managed(),
         "docs/thaliris-controller.md": controller_instructions.render(),
         "docs/thaliris-role-packs.md": codex_adapter.render_role_packs(),

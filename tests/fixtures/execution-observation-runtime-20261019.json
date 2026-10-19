@@ -1,0 +1,177 @@
+{
+  "scope": "isolated real model/native tool experiment; not Desktop activation",
+  "baseline_revision": "96b4c72472d2529ea2f0ce277e7c23ebc3e22521",
+  "fixture": {
+    "command": "selected_python fixture.py",
+    "behavior": "print progress; 34 seconds quiet; print done; exit 0",
+    "stdin": "none"
+  },
+  "permission": "danger-full-access; approval never; matches owning task; workspace-write launch failed before process creation",
+  "auth": "existing normal CLI authentication; no copied credentials",
+  "hooks": "disabled by invocation only",
+  "production_host_changed": false,
+  "raw_js_and_provider_request_count": "UNKNOWN",
+  "samples": [
+    {
+      "label": "baseline",
+      "profile_sha256": "8439f13c9d21e00f47807fc666d7c57880524f6e4ccd00cbd59139ac14781b44",
+      "profile_path_confirmed_by_config_read": true,
+      "usage": {
+        "parent": {
+          "totalTokens": 50919,
+          "inputTokens": 50554,
+          "cachedInputTokens": 33152,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 365,
+          "reasoningOutputTokens": 0,
+          "uncachedInputTokens": 17402
+        },
+        "child": {
+          "totalTokens": 53107,
+          "inputTokens": 52893,
+          "cachedInputTokens": 41728,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 214,
+          "reasoningOutputTokens": 0,
+          "uncachedInputTokens": 11165
+        }
+      },
+      "usage_notifications": {
+        "parent": 3,
+        "child": 3
+      },
+      "commands": [
+        {
+          "command": "selected_python fixture.py",
+          "status": "completed",
+          "durationMs": 34104,
+          "exitCode": 0
+        }
+      ],
+      "native_final_consumed": "parent final reports child exit 0 and retained progress/done after native completed notification",
+      "retained_output": "progress\r\ndone\r\n",
+      "turns": {
+        "child": {
+          "status": "completed",
+          "durationMs": 47247
+        },
+        "parent": {
+          "status": "completed",
+          "durationMs": 67103
+        }
+      },
+      "native_wait_completed": true,
+      "usage_updates_strictly_inside_fixture": 1,
+      "fixture_duration_ms_from_events": 34104,
+      "mid_operation_usage_update_offsets_ms": [
+        10003
+      ],
+      "ephemeral_full_history": "UNSUPPORTED: ephemeral threads do not support includeTurns"
+    },
+    {
+      "label": "candidate",
+      "profile_sha256": "5571806709a4bbf369fbb73e433c972db6e25c4e484bf36248ece94d12115cc6",
+      "profile_path_confirmed_by_config_read": true,
+      "usage": {
+        "parent": {
+          "totalTokens": 51072,
+          "inputTokens": 50669,
+          "cachedInputTokens": 40320,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 403,
+          "reasoningOutputTokens": 0,
+          "uncachedInputTokens": 10349
+        },
+        "child": {
+          "totalTokens": 57008,
+          "inputTokens": 56526,
+          "cachedInputTokens": 36608,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 482,
+          "reasoningOutputTokens": 38,
+          "uncachedInputTokens": 19918
+        }
+      },
+      "usage_notifications": {
+        "parent": 3,
+        "child": 3
+      },
+      "commands": [
+        {
+          "command": "pinned_runner execution-wait --tool-source",
+          "status": "completed",
+          "durationMs": 654,
+          "exitCode": 0
+        },
+        {
+          "command": "pinned_runner execution-wait --tool-source",
+          "status": "completed",
+          "durationMs": 663,
+          "exitCode": 0
+        },
+        {
+          "command": "selected_python fixture.py",
+          "status": "completed",
+          "durationMs": 34096,
+          "exitCode": 0
+        }
+      ],
+      "native_final_consumed": "parent final reports child exit 0 and retained progress/done after native completed notification",
+      "retained_output": "progress\r\ndone\r\n",
+      "turns": {
+        "child": {
+          "status": "completed",
+          "durationMs": 52901
+        },
+        "parent": {
+          "status": "completed",
+          "durationMs": 70639
+        }
+      },
+      "native_wait_completed": true,
+      "usage_updates_strictly_inside_fixture": 0,
+      "fixture_duration_ms_from_events": 34097,
+      "mid_operation_usage_update_offsets_ms": [],
+      "ephemeral_full_history": "UNSUPPORTED: ephemeral threads do not support includeTurns"
+    }
+  ],
+  "host_tool_experiments": {
+    "packaged_helper_source_sha256": "3e6ccac5c3ad51f2ab45f6f2cceaa16734601147bab8c7d6983e345213320e9e",
+    "long_silent_command": {
+      "wall_seconds": 36.7,
+      "inner_observations": 2,
+      "outer_returns": 1,
+      "exit_code": 0,
+      "output": "progress\r\ndone\r\n",
+      "semantic_done": false
+    },
+    "outer_yield": {
+      "requested_initial_ms": 1000,
+      "requested_continuation_ms": 3600000,
+      "continuation_wall_seconds": 7.3,
+      "completion": "early terminal",
+      "maximum_duration": "UNKNOWN"
+    },
+    "outer_termination_then_exact_cancel": {
+      "outer": "Script terminated",
+      "cancel": "CANCEL_REQUESTED; termination UNKNOWN",
+      "receipt": "CANCELLED",
+      "elapsed_seconds": 9.109,
+      "descendant_termination": "CONFIRMED_JOB_EMPTY",
+      "semantic_done": false
+    }
+  },
+  "real_failed_ci": {
+    "repository": "Iris0fTheValley/Thaliris-codex",
+    "run_id": "39224249571",
+    "attempt": 1,
+    "commit": "4bdaceed617f114b66b34beddf59b46f19fecd23",
+    "status": "RUN_COMPLETED",
+    "conclusion": "failure",
+    "observations": 1,
+    "cli_exit": 0,
+    "checkout_association_at_finish": "VERIFIED",
+    "semantic_done": false,
+    "live_transition_observed": false
+  }
+}
