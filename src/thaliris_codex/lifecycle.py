@@ -1868,6 +1868,12 @@ def _associated_repository_root(root: Path, payload: dict[str, Any]) -> Path:
     from . import repository_association
     cwd_root = _hook_repository_root(root, payload)
     requested = _direct_context_root(payload)
+    if requested is not None and _context_operation(payload) == "init":
+        # `init` creates the association for the named root instead of
+        # selecting an existing one, so a root without an association yet is
+        # its normal input rather than an unknown actor. The post-init proof
+        # still re-checks that the target is this worktree.
+        requested = None
     if requested is not None and not requested.is_absolute():
         # Resolve against the immutable Host cwd. The Hook may call this
         # resolver twice, with ``root`` already changed to the selected
@@ -3758,6 +3764,16 @@ def _context_cli_tokens(arguments: str) -> list[str]:
     return [word.group() for word in words]
 
 
+def _unquoted_cli_value(value: str) -> str:
+    # Tokens keep `--name="a b"` verbatim so quoted Windows paths survive
+    # tokenizing. Remove exactly one matched surrounding pair, so the equals
+    # and separate forms agree; an unbalanced quote stays visible to the
+    # caller's validation instead of being silently trimmed.
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
 def _direct_context_root(payload: dict[str, Any]) -> Path | None:
     """Read one literal global root on a recognized standalone CLI route.
 
@@ -4399,15 +4415,18 @@ def _direct_context_option(payload: dict[str, Any], names: set[str], *, digest_o
         return None
     values: list[str] = []
     for index, token in enumerate(tokens):
-        option = token.strip("\"'")
-        if option in names:
-            if index + 1 >= len(tokens):
-                return None
-            values.append(tokens[index + 1].strip("\"'"))
+        # Dequote before splitting: `--name="a b"` carries the value's own
+        # quotes, and stripping only the token's outer quote kept the opening
+        # one in the selected value.
+        option, equals, raw = _unquoted_cli_value(token).partition("=")
+        if option not in names:
+            continue
+        if equals:
+            values.append(_unquoted_cli_value(raw))
+        elif index + 1 >= len(tokens):
+            return None
         else:
-            for name in names:
-                if option.startswith(name + "="):
-                    values.append(option[len(name) + 1:])
+            values.append(_unquoted_cli_value(tokens[index + 1]))
     return values[0] if len(values) == 1 and values[0] and (not digest_only or re.fullmatch(r"[0-9a-f]{64}", values[0])) else None
 
 
@@ -4792,20 +4811,29 @@ def _direct_init_call(root: Path, payload: dict[str, Any]) -> bool:
     if arguments is None:
         return False
     try:
-        tokens = [token.strip("\"'") for token in _context_cli_tokens(arguments)]
+        tokens = [_unquoted_cli_value(token) for token in _context_cli_tokens(arguments)]
     except ValueError:
         return False
-    if tokens[:1] == ["--root"]:
-        if len(tokens) < 3 or not tokens[1]:
-            return False
-        cwd = payload.get("cwd")
-        base = Path(cwd) if isinstance(cwd, str) and cwd else root
-        target = Path(tokens[1])
-        if not target.is_absolute():
-            target = base / target
-        if target.resolve(strict=False) != root.resolve(strict=False):
-            return False
-        tokens = tokens[2:]
+    if tokens:
+        name, equals, value = tokens[0].partition("=")
+        if name == "--root":
+            if equals:
+                value = _unquoted_cli_value(value)
+                if not value:
+                    return False
+                tokens = tokens[1:]
+            else:
+                if len(tokens) < 3 or not tokens[1]:
+                    return False
+                value = _unquoted_cli_value(tokens[1])
+                tokens = tokens[2:]
+            cwd = payload.get("cwd")
+            base = Path(cwd) if isinstance(cwd, str) and cwd else root
+            target = Path(value)
+            if not target.is_absolute():
+                target = base / target
+            if target.resolve(strict=False) != root.resolve(strict=False):
+                return False
     return (
         tokens == ["init"]
         or len(tokens) == 3

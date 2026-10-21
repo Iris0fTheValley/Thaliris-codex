@@ -227,3 +227,16 @@ def test_explicit_current_directory_keeps_unassociated_read_navigation(tmp_path)
         "command": f'thaliris --root "{tmp_path}" task-status'}}
     assert lifecycle._associated_repository_root(tmp_path, request) == tmp_path
     assert lifecycle.handle_hook(tmp_path, "PreToolUse", request) == ""
+
+
+@pytest.mark.parametrize("style", ["separate", "equals"])
+def test_init_target_root_is_not_an_unknown_association(tmp_path, style):
+    root = tmp_path / "repo"
+    root.mkdir()
+    argument = f'--root "{tmp_path}"' if style == "separate" else f'--root="{tmp_path}"'
+    request = {"session_id": "init-session", "cwd": str(root), "tool_name": "Bash",
+               "tool_input": {"command": f"thaliris {argument} init"}}
+    # `init` creates the association for its own root, so a not-yet-associated
+    # target keeps the ordinary cwd route instead of reporting an unknown actor.
+    assert lifecycle._associated_repository_root(root, request) == root.resolve()
+    assert lifecycle.handle_hook(root, "PostToolUse", {**request, "tool_response": {"exit_code": 0}}) == ""
