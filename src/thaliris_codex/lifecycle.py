@@ -925,7 +925,7 @@ def _context_arguments(command: str, *, validate_selected_maintenance: bool = Tr
         from . import host_maintenance
         arguments = match.group(2) or ""
         try:
-            tokens = shlex.split(arguments, posix=False)
+            tokens = _context_cli_tokens(arguments)
             selected_contracts = [tokens[i + 1].strip("\"'") for i, token in enumerate(tokens[:-1])
                                   if token == "--maintenance-contract"]
             operations = [token for token in tokens if token in {"codex-install", "codex-uninstall"}]
@@ -1502,9 +1502,7 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
         if mutating and (payload.get("readonly") is True or binding is not None and not binding.repo_write_allowed):
             return _permission_deny("THALIRIS_READONLY_ACTOR: this known role remains readonly even when task association or authority is unavailable")
     try:
-        from . import repository_association
-        cwd_root = _hook_repository_root(root, payload)
-        root = repository_association.resolve(payload, cwd_root) or cwd_root
+        root = _associated_repository_root(root, payload)
     except (OSError, ValueError, TypeError, KeyError):
         diagnostic = "THALIRIS_REPOSITORY_ASSOCIATION_UNKNOWN: exact actor navigation is ambiguous, stale or unavailable; no repository was selected"
         if event == "PreToolUse":
@@ -1863,6 +1861,28 @@ def _hook_repository_root(root: Path, payload: dict[str, Any]) -> Path:
     if cwd.is_dir():
         return cwd
     return root.resolve()
+
+
+def _associated_repository_root(root: Path, payload: dict[str, Any]) -> Path:
+    """Use the same exact actor/CLI navigation at both Hook boundaries."""
+    from . import repository_association
+    cwd_root = _hook_repository_root(root, payload)
+    requested = _direct_context_root(payload)
+    if requested is not None and not requested.is_absolute():
+        # Resolve against the immutable Host cwd. The Hook may call this
+        # resolver twice, with ``root`` already changed to the selected
+        # repository on the second pass.
+        command_input = payload.get("tool_input")
+        workdir = command_input.get("workdir") if isinstance(command_input, dict) else None
+        launch_cwd = payload.get("cwd")
+        base = Path(launch_cwd) if isinstance(launch_cwd, str) and launch_cwd else Path(root)
+        if not base.is_absolute():
+            base = base.resolve(strict=False)
+        if isinstance(workdir, str) and workdir:
+            shell_workdir = Path(workdir)
+            base = shell_workdir if shell_workdir.is_absolute() else base / shell_workdir
+        requested = base / requested
+    return repository_association.resolve(payload, cwd_root, requested_root=requested) or cwd_root
 
 
 def _state_path(root: Path, payload: dict[str, Any], partition: str) -> Path:
@@ -3723,6 +3743,78 @@ def _codex_bash_outcome(response: object) -> str:
     return "UNKNOWN"
 
 
+def _context_cli_tokens(arguments: str) -> list[str]:
+    # Keep quoted Windows paths intact for --root="a path" as well as
+    # --root "a path". shlex's non-POSIX mode splits the former at spaces;
+    # POSIX mode instead consumes Windows path backslashes. Preserve bytes.
+    words = list(re.finditer(r'''(?:[^\s'"]+|'[^']*'|"[^"]*")+''', arguments))
+    end = 0
+    for word in words:
+        if arguments[end:word.start()].strip():
+            raise ValueError("unsupported CLI quoting")
+        end = word.end()
+    if arguments[end:].strip():
+        raise ValueError("unsupported CLI quoting")
+    return [word.group() for word in words]
+
+
+def _direct_context_root(payload: dict[str, Any]) -> Path | None:
+    """Read one literal global root on a recognized standalone CLI route.
+
+    Do not evaluate shell variables or use root-looking text in an operand.
+    Root is navigation among existing associations, never actor authority.
+    """
+    command = _bash_command(payload)
+    if command is None:
+        return None
+    arguments = _context_arguments(command)
+    if arguments is None:
+        return None
+    check = command.lstrip()
+    if check.startswith("&") and check[1:2].isspace():
+        check = check[1:].lstrip()
+    segments = _split_command_separators(check.rstrip())
+    if segments is None or len(segments) != 1:
+        return None
+    tokens = _context_cli_tokens(arguments)
+    if any(token.strip("\"'") in {"-h", "--help"} for token in tokens):
+        return None
+    roots: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        name, equals, value = token.partition("=")
+        name = name.strip("\"'")
+        if name in {"--root", "--task-id", "--session-id"}:
+            if not equals:
+                index += 1
+                if index >= len(tokens) or tokens[index].startswith("--"):
+                    raise ValueError("REPOSITORY_ASSOCIATION_INVALID_CLI_ROOT")
+                value = tokens[index]
+            if name == "--root":
+                roots.append(value)
+            index += 1
+            continue
+        if token.strip("\"'") == "--pretty":
+            index += 1
+            continue
+        break
+    if not roots:
+        return None
+    if len(roots) != 1 or _context_call(payload)[0] is None:
+        raise ValueError("REPOSITORY_ASSOCIATION_INVALID_CLI_ROOT")
+    raw = roots[0]
+    # A single literal shell word only. Conservatively reject expansion syntax
+    # even in single quotes so Hook and native CLI cannot disagree by dialect.
+    value = raw[1:-1] if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'" else raw
+    if (not value or any(char in value for char in "\"'$`%!~*?[]\r\n")
+            or any("\u2018" <= char <= "\u201f" for char in value)):
+        raise ValueError("REPOSITORY_ASSOCIATION_INVALID_CLI_ROOT")
+    if os.name == "nt" and ntpath.splitdrive(value)[0] and not Path(value).is_absolute():
+        raise ValueError("REPOSITORY_ASSOCIATION_INVALID_CLI_ROOT")
+    return Path(value)
+
+
 def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: bool = True) -> tuple[str | None, list[str]]:
     """Recognize a direct context call and its explicit bounded retrieval targets."""
     command = _bash_command(payload)
@@ -3745,7 +3837,7 @@ def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: boo
     if arguments is None:
         return None, []
     try:
-        tokens = shlex.split(arguments, posix=False)
+        tokens = _context_cli_tokens(arguments)
     except ValueError:
         return None, []
     # argparse handles help before required-argument validation and exits
@@ -3760,8 +3852,8 @@ def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: boo
         if token == "--pretty":
             index += 1
             continue
-        if token in {"--root", "--task-id", "--session-id"} and index + 1 < len(tokens):
-            index += 2
+        if token.partition("=")[0] in {"--root", "--task-id", "--session-id"}:
+            index += 1 if "=" in token else 2
             continue
         if token not in _CONTEXT_OPERATIONS:
             return None, []
@@ -3783,7 +3875,7 @@ def _context_help_status(payload: dict[str, Any]) -> tuple[bool, bool]:
     if arguments is None:
         return False, False
     try:
-        tokens = shlex.split(arguments, posix=False)
+        tokens = _context_cli_tokens(arguments)
     except ValueError:
         return False, False
     requested = any(token.strip("\"'") in {"-h", "--help"} for token in tokens)
@@ -4257,7 +4349,7 @@ def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -
     if arguments is None:
         return False
     try:
-        tokens = [token.strip("\"'") for token in shlex.split(arguments, posix=False)]
+        tokens = [token.strip("\"'") for token in _context_cli_tokens(arguments)]
     except ValueError:
         return False
     index = 0
@@ -4268,12 +4360,18 @@ def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -
         if token == "--pretty" and not seen_pretty:
             seen_pretty = True
             index += 1
-        elif token == "--root" and not seen_root and index + 1 < len(tokens):
-            root_value = tokens[index + 1]
+        elif token.partition("=")[0] == "--root" and not seen_root:
+            if "=" in token:
+                root_value = token.partition("=")[2].strip("\"'")
+                index += 1
+            elif index + 1 < len(tokens):
+                root_value = tokens[index + 1]
+                index += 2
+            else:
+                return False
             if not root_value or root_value.startswith("--"):
                 return False
             seen_root = True
-            index += 2
         elif token == "controller-instructions":
             from . import controller_instructions
             tail = tokens[index + 1:]
@@ -4296,7 +4394,7 @@ def _direct_context_option(payload: dict[str, Any], names: set[str], *, digest_o
     if arguments is None:
         return None
     try:
-        tokens = shlex.split(arguments, posix=False)
+        tokens = _context_cli_tokens(arguments)
     except ValueError:
         return None
     values: list[str] = []
@@ -4471,7 +4569,7 @@ def _recovery_command_admitted(root: Path, payload: dict[str, Any], diagnostic: 
     if arguments is None:
         return False
     try:
-        tokens = [token.strip("\"'") for token in shlex.split(arguments, posix=False)]
+        tokens = [token.strip("\"'") for token in _context_cli_tokens(arguments)]
     except ValueError:
         return False
     expected_values: list[str] = []
@@ -4694,7 +4792,7 @@ def _direct_init_call(root: Path, payload: dict[str, Any]) -> bool:
     if arguments is None:
         return False
     try:
-        tokens = [token.strip("\"'") for token in shlex.split(arguments, posix=False)]
+        tokens = [token.strip("\"'") for token in _context_cli_tokens(arguments)]
     except ValueError:
         return False
     if tokens[:1] == ["--root"]:
@@ -5108,9 +5206,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     tool = payload.get("tool_name") or payload.get("tool")
     if not isinstance(tool, str):
         return ""
-    from . import repository_association
-    cwd_root = _hook_repository_root(root or Path.cwd(), payload)
-    root = repository_association.resolve(payload, cwd_root) or cwd_root
+    root = _associated_repository_root(root or Path.cwd(), payload)
     normalized = _tool_basename(tool)
     if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
         return _release_maintenance_output(root, payload, managed_hook_abi)

@@ -1,0 +1,132 @@
+{
+  "actual_native_event": true,
+  "candidate_hook_binding": {
+    "actual_native_edge_routing": {
+      "model": {
+        "expected": "gpt-6-luna",
+        "observed": "gpt-6-luna",
+        "status": "MATCH"
+      },
+      "reasoningEffort": {
+        "expected": "max",
+        "observed": "max",
+        "status": "MATCH"
+      }
+    },
+    "child_uuid": true,
+    "fresh_handoff": true,
+    "observed_events": [
+      "PostToolUse",
+      "PreToolUse",
+      "SubagentStart",
+      "UserPromptSubmit"
+    ],
+    "parent_session": true,
+    "parent_turn": true,
+    "pretool_route": "MATCH",
+    "pretool_routed_model": "gpt-6-luna",
+    "pretool_routed_reasoning_effort": "max",
+    "profile_in_child_request": true,
+    "recorded_lifecycle_routing": {
+      "model": {
+        "expected": "gpt-6-luna",
+        "observed": "gpt-6-luna",
+        "status": "MATCH"
+      },
+      "reasoningEffort": {
+        "expected": "max",
+        "observed": "max",
+        "status": "MATCH"
+      }
+    },
+    "returned_path": true,
+    "spawn_call": true
+  },
+  "candidate_hook_dispatch": "ACTUAL_ISOLATED_APP_SERVER_EVENTS",
+  "sanitized_subagent_start_ingress": {
+    "source": "temporary isolated Host trampoline instrumentation",
+    "event": "SubagentStart",
+    "marker_entries": 2,
+    "process_entered": true,
+    "adapter_exit_code": 0,
+    "raw_payload_recorded": false,
+    "identity_values_recorded": false,
+    "exact_child_identity_binding": "candidate_hook_binding"
+  },
+  "candidate_hook_registrations": 7,
+  "candidate_hook_trust": {
+    "changed": true,
+    "config_path": "isolated CODEX_HOME/config.toml",
+    "dispatchable_count": 7,
+    "enabled_count": 7,
+    "expected_count": 7,
+    "status": "TRUSTED",
+    "trusted_count": 7
+  },
+  "candidate_packages": {
+    "adapter_module": "candidate_runtime/Lib/site-packages/thaliris_codex/codex_app_server.py",
+    "adapter_version": "0.4.6",
+    "core_module": "candidate_runtime/Lib/site-packages/thaliris/__init__.py",
+    "core_version": "0.4.6",
+    "source_build": "authoritative sibling core/Thaliris plus this adapter source via source_wheel"
+  },
+  "candidate_runtime_installed": true,
+  "cli_sha256": "00c0f1e4099246fddcd67ec620ca8ed50827c7d70e113b7224f7a2933cf2d67c",
+  "cli_version": "codex-cli 0.163.0-alpha.11",
+  "effective_wait_runtime": "UNKNOWN",
+  "external_model_requests": 0,
+  "local_responses_requests": 3,
+  "native_app_server_reported_hook_count": 8,
+  "native_config_hooks_effective": true,
+  "native_hook_autodispatch": "OBSERVED_IN_ISOLATED_APP_SERVER",
+  "native_hook_discovery": {
+    "entry_count": 1,
+    "entry_cwds_match_project": [
+      true
+    ],
+    "errors": [
+      []
+    ],
+    "events": [
+      "postToolUse",
+      "preToolUse",
+      "sessionStart",
+      "stop",
+      "subagentStart",
+      "subagentStop",
+      "userPromptSubmit"
+    ],
+    "handler_count": 8,
+    "sources": [
+      "user"
+    ],
+    "warnings": [
+      []
+    ]
+  },
+  "old_protocol_compatibility": "COVERED_BY_FIXTURE_TESTS",
+  "ownership_protection": {
+    "production_home_modified": false,
+    "unknown_merge_extension_preserved": true,
+    "user_config_preserved": true,
+    "user_hook_disabled_state_preserved": true,
+    "user_hook_preserved": true,
+    "user_profile_preserved": true
+  },
+  "privacy": "Thread IDs, payload text and machine paths omitted",
+  "production_host_activation": "UNKNOWN",
+  "reused_session_stale_and_wrong_identity_refusals": {
+    "reused_session_stale_turn": true,
+    "wrong_call": true,
+    "wrong_parent": true,
+    "wrong_path": true
+  },
+  "status": "CANDIDATE_HOOKS_DISPATCHED_IN_ISOLATED_NATIVE_HOST",
+  "probe_selection": {
+    "profile": "thaliris-investigator",
+    "expected_model": "gpt-6-luna",
+    "expected_effort": "max",
+    "method": "Existing scripts.verify_native_spawn_runtime.verify with PROFILE and EXPECTED_MODEL/EXPECTED_EFFORT set to investigator defaults in the calling process; unchanged production configuration",
+    "inference": "SYNTHETIC_LOOPBACK_ONLY"
+  }
+}

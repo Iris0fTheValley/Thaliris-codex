@@ -1,0 +1,86 @@
+{
+  "status": "REAL_LUNA_CHILD_COMPLETED_MANAGED_START_UNVERIFIED",
+  "observation_date": "2026-10-21",
+  "host": {
+    "cli_version": "codex-cli 0.163.0-alpha.11",
+    "cli_sha256": "00c0f1e4099246fddcd67ec620ca8ed50827c7d70e113b7224f7a2933cf2d67c",
+    "desktop_version": "26.1016.6573.0",
+    "latest_stable": "0.163.0",
+    "latest_prerelease": "0.164.0-alpha.9",
+    "candidate_runtime": "source-built adapter/core 0.4.6"
+  },
+  "authentication": {
+    "source_mode": "chatgpt",
+    "isolated_appserver_login": {
+      "method": "account/login/start",
+      "type": "chatgptAuthTokens",
+      "access_token_provided": true,
+      "chatgpt_account_id_provided": true,
+      "refresh_token_provided": false,
+      "accepted": true,
+      "memory_only": true,
+      "refresh_request_observed": false,
+      "isolated_auth_file_written": false,
+      "source_auth_unchanged": true
+    },
+    "secret_values_recorded": false
+  },
+  "probe": {
+    "isolation": [
+      "CODEX_HOME",
+      "HOME",
+      "USERPROFILE",
+      "APPDATA",
+      "LOCALAPPDATA",
+      "XDG_CONFIG_HOME",
+      "authority store",
+      "workspace"
+    ],
+    "candidate_hook_trust": {
+      "status": "TRUSTED",
+      "trusted_handlers": 7,
+      "dispatchable_handlers": 7
+    },
+    "models": {
+      "parent": "gpt-6-luna",
+      "child": "gpt-6-luna",
+      "child_profile": "thaliris-investigator",
+      "child_reasoning_effort": "max",
+      "native_edge_model_and_effort_match": true
+    },
+    "native_activity": {
+      "parent_turns": 1,
+      "parent_turn_status": "completed",
+      "spawn_calls": 1,
+      "child_turns": 1,
+      "child_turn_started": true,
+      "child_turn_completion_notification": "completed",
+      "native_wait_calls": 1,
+      "native_wait_result_kind": "message",
+      "native_wait_timed_out": false,
+      "exact_child_status_reconciliations": 1,
+      "reconciled_child_turn_status": "completed",
+      "post_restart_thread_status": "notLoaded"
+    },
+    "candidate_lifecycle": {
+      "runtime_events_recorded": [
+        "PostToolUse",
+        "PreToolUse",
+        "UserPromptSubmit"
+      ],
+      "subagent_start_recorded": false,
+      "exact_child_binding_recorded": false,
+      "completion_used_to_infer_start": false,
+      "cause_of_missing_start": "UNKNOWN"
+    },
+    "exception_recovery": "NOT_EXERCISED",
+    "token_usage": {
+      "parent": "NOT_EXPOSED",
+      "child": "NOT_EXPOSED"
+    },
+    "provider_http_request_count": "NOT_EXPOSED_BY_APPSERVER",
+    "production_host_activation": "UNKNOWN",
+    "production_host_modified": false
+  },
+  "privacy": "No credential values, prompts, thread identifiers, identity values or machine paths are recorded."
+}

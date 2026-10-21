@@ -40,7 +40,9 @@ def publish(root: Path, task_id: str, identity: str, kind: str) -> None:
         "task_id": task_id, "kind": kind, "identity_hash": identity}, sort_keys=True) + "\n").encode())
 
 
-def resolve(payload: dict, cwd_root: Path) -> Path | None:
+def resolve(payload: dict, cwd_root: Path, *, requested_root: Path | None = None) -> Path | None:
+    cwd_root = cwd_root.resolve()
+    requested_root = requested_root.resolve() if requested_root is not None else None
     # An exact child retains its repository even when its Controller changes task.
     for field, kind in (("agent_id", "agent"), ("session_id", "session")):
         actor = payload.get(field)
@@ -68,9 +70,20 @@ def resolve(payload: dict, cwd_root: Path) -> Path | None:
             # authority, owner, fence, lifecycle and role checks before granting.
             matches.add(repository.resolve())
         if matches:
+            if kind == "agent" and len(matches) != 1:
+                raise ValueError("REPOSITORY_ASSOCIATION_AMBIGUOUS")
+            if requested_root is not None:
+                if requested_root not in matches:
+                    raise ValueError("REPOSITORY_ASSOCIATION_CONFLICT")
+                # A CLI root only selects an already validated association.
+                # In particular it cannot replace an exact child's root with
+                # one of the Controller session's other repositories.
+                return requested_root
             if cwd_root in matches:
                 return cwd_root
             if len(matches) == 1:
                 return matches.pop()
             raise ValueError("REPOSITORY_ASSOCIATION_AMBIGUOUS")
+    if requested_root is not None and requested_root != cwd_root:
+        raise ValueError("REPOSITORY_ASSOCIATION_UNKNOWN")
     return None

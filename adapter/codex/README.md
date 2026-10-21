@@ -35,6 +35,14 @@ freshness is UNKNOWN. Managed admission, persistent task intent and exact actor
 navigation retain their existing authority checks. A parent native cwd does not
 select a nested managed project by scanning descendants: exact actor associations
 select it, and ambiguous or stale associations fail closed.
+For a standalone recognized CLI call, one literal `--root PATH` or `--root=PATH`
+selects among the session's already validated repository associations before cwd
+preference. It cannot add an association or override an exact child's repository.
+Missing, duplicate, expanded or conflicting roots do not supply navigation or
+authority; normal task, role, owner and fence checks still apply.
+For a relative shell `workdir`, the Hook resolves a relative `--root` against the
+payload's stable `cwd`, so routing the same request through both Hook boundaries
+does not append the workdir twice.
 The [repository Controller document](../../docs/thaliris-controller.md) is rendered
 from that source, including registry bindings. Retrieval grants no authority; other
 roles may retrieve rules on demand within their existing authority.
@@ -69,6 +77,9 @@ A known read-only role remains denied Bash/MCP mutations even when Authority or 
 fields are incomplete. The isolated `0.162.0-alpha.17.2` CLI observation corroborated
 SubagentStart and child PreToolUse identity; other Host/session behavior remains UNKNOWN.
 Synthetic event tests do not prove a Host protocol guarantee.
+The [2026-10-21 compatibility record](../../docs/codex-native-compatibility-20261019.md)
+separates its alpha.11 V2 loopback Hook evidence from the real Luna run, whose
+child turn completed but whose managed Start binding remains UNKNOWN.
 
 Managed Start binding requires a corroborated native child ID even for a fresh owner.
 Current V2 `task_name` results supply navigation only. The adapter reads official

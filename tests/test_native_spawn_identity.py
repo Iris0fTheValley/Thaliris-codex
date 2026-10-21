@@ -18,6 +18,25 @@ CALL = "call_native_spawn_contract"
 NAME = "/root/contract_child"
 
 
+@pytest.mark.parametrize("event", ["PreModelRequest", "PostModelRequest", "FutureModelEvent"])
+def test_unregistered_model_events_cannot_record_child_completion(evidence_task, monkeypatch, event):
+    root, task_id = evidence_task
+    _register_requirement(root)
+    monkeypatch.setattr(codex_app_server, "native_spawn_identity", lambda *_args, **_kwargs: CHILD)
+    spawn, child = request(), _identity("implementer", CHILD)
+    lifecycle.handle_hook(root, "PreToolUse", spawn)
+    lifecycle.handle_hook(root, "PostToolUse", {**spawn, "tool_response": {"task_name": NAME}})
+    lifecycle.handle_hook(root, "SubagentStart", child)
+    before = {path.relative_to(root): path.read_bytes()
+              for path in (root / ".context").rglob("*") if path.is_file()}
+    assert lifecycle.handle_hook(root, event, {**child, "cwd": str(root), "model": "gpt-6-luna",
+        "status": "completed", "token_usage": {"input_tokens": 3, "output_tokens": 1}}) == ""
+    after = {path.relative_to(root): path.read_bytes()
+             for path in (root / ".context").rglob("*") if path.is_file()}
+    assert after == before
+    assert not lifecycle.native_execution_closed(root)
+
+
 def activity(**changes):
     return {"turnId": TURN, "item": {"type": "subAgentActivity", "kind": "started",
         "id": CALL, "agentThreadId": CHILD, "agentPath": NAME, **changes},
