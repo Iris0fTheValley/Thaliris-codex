@@ -8,8 +8,8 @@ import subprocess
 import sys
 
 from . import __version__
-from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics
-from thaliris import core
+from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics, project_identity
+from thaliris import core, identity
 from thaliris.core import TaskStateSchemaIncompatible, artifact_get, catalog, document_get, milestone_check, rollback, stale, task_artifact, task_get, task_promote, task_show, task_status, task_update
 
 
@@ -33,6 +33,9 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset:
                     "authority_sha256": task_authority.digest(task_authority.path(root)),
                     "recovery_action": "task-recover-authority --expected-authority-sha256 <authority_sha256> --reason <reason>"}
     out = task_status(root, evidence_offset=evidence_offset)
+    identity_summary = project_identity.summary(root)
+    if identity_summary is not None:
+        out["Project Identity"] = identity_summary
     if anchor is not None:
         out["Task Authority"] = {"status": anchor["status"], "provenance": anchor["provenance"],
                                  "execution_mode": anchor["contract"]["execution_mode"],
@@ -49,7 +52,7 @@ def _controller_evidence_output(root: Path, args: argparse.Namespace, out: dict)
     if args.command not in {
         "task-update", "task-artifact", "task-promote", "task-evidence-register",
         "task-judge", "task-close", "task-mode", "task-dispose-dependency",
-        "task-observe", "document-maintain",
+        "task-observe", "document-maintain", *project_identity.MUTATIONS,
     } or getattr(args, "role", "controller") != "controller":
         return out
     try:
@@ -124,6 +127,21 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("path", nargs="?")
     q = sub.add_parser("document-get", help="retrieve 1 to 8 explicitly selected durable documents")
     q.add_argument("path", nargs="+")
+    sub.add_parser("identity-status", help="read-only Project Identity state and one-line summary")
+    q = sub.add_parser("identity-get", help="read the recorded identity, selected items, or one amendment or challenge")
+    q.add_argument("--version", type=int)
+    q.add_argument("--item", action="append")
+    q.add_argument("--amendment")
+    q.add_argument("--challenge")
+    q = sub.add_parser("identity-trace", help="trace registered relations around one reference; registered relations only")
+    q.add_argument("ref")
+    q.add_argument("--direction", choices=("up", "down", "both"), default="both")
+    q.add_argument("--depth", type=int, default=1)
+    for name in project_identity.MUTATIONS:
+        q = sub.add_parser(name, help="Controller-only Project Identity record (needs the selected ACTIVE task)")
+        q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
+        q.add_argument("--base-revision", required=True, type=int)
+        q.add_argument("--input", required=True)
     q = sub.add_parser("task-start")
     q.add_argument("goal")
     q.add_argument("--milestone")
@@ -291,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         if selected is None and args.session_id:
             selected = lifecycle._associated_task(root, {"session_id": args.session_id})
         core.select_task(root, selected)
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state", "task-evidence-register", "task-observe", "task-judge", "document-maintain"} and selected is None:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state", "task-evidence-register", "task-observe", "task-judge", "document-maintain", *project_identity.MUTATIONS} and selected is None:
             raise ValueError("explicit --task-id or associated --session-id required for managed control")
         if args.command == "controller-instructions":
             from . import controller_instructions
@@ -312,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
             raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-evidence-register", "task-observe", "task-judge", "document-maintain"}:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-evidence-register", "task-observe", "task-judge", "document-maintain", *project_identity.MUTATIONS}:
             task_authority.check(root)
         if args.command == "audit-hook":
             stage = "receive"
@@ -434,6 +452,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "task-judge": out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
         elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
         elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
+        elif args.command == "identity-status": out = identity.identity_status(root)
+        elif args.command == "identity-get": out = identity.identity_get(root, version=args.version, items=args.item, amendment=args.amendment, challenge=args.challenge)
+        elif args.command == "identity-trace": out = identity.identity_trace(root, args.ref, args.direction, args.depth)
+        elif args.command in project_identity.MUTATIONS: out = getattr(identity, args.command.replace("-", "_"))(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
         elif args.command == "task-show": out = task_show(root)
         elif args.command == "task-status": out = _task_status(root, suppress_protocol_notice=args.suppress_protocol_notice, evidence_offset=args.evidence_offset)
         elif args.command == "task-get": out = task_get(root, args.id)
@@ -444,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "rollback": out = rollback(root, args.backup)
         elif args.command == "uninstall": out = codex_adapter.uninstall(root)
         else: out = {"ok": True, "version": __version__}
-        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-judge"}:
+        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-judge", *project_identity.MUTATIONS}:
             task_authority.checkpoint(root)
         out = _controller_evidence_output(root, args, out)
         if args.command == "codex-bootstrap":

@@ -17,7 +17,7 @@ import subprocess
 
 from thaliris import core
 
-from . import lifecycle, runtime_identity, task_authority
+from . import lifecycle, project_identity, runtime_identity, task_authority
 
 EXPECTED_MANAGED_HOOK_ABI = lifecycle.MANAGED_HOOK_ABI
 EXPECTED_ADAPTER_PROTOCOL_VERSION = lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION
@@ -447,6 +447,14 @@ def bootstrap(
                 **guidance}
     result = _bootstrap(root, hook_attestation)
     result.update(guidance)
+    # Controller-only navigation hint; present only when a project identity
+    # exists. It is never delivered to children.
+    try:
+        identity_summary = project_identity.summary(_repo_root(root))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        identity_summary = None
+    if identity_summary is not None:
+        result[project_identity.SUMMARY_FIELD] = identity_summary
     assurance = lifecycle._controller_actor_assurance({})
     result.update(controller_actor_assurance=assurance, ordinary_workspace_work_allowed=True)
     if assurance != "CONTROLLER":

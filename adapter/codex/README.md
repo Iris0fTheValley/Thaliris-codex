@@ -294,6 +294,24 @@ strict utf-8-sig: one document-leading BOM is accepted; repeated or misplaced
 signatures outside JSON content and malformed UTF-8 retain their prior rejection
 behavior. U+FEFF inside valid JSON strings/field names remains exact content.
 
+Project identity is the optional Core plane under tracked `.project-identity/` (see the
+[Core reference](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md)). The Adapter exposes `identity-status`, `identity-get`
+and `identity-trace REF` as read-only commands that need no role or task. `identity-amend`,
+`identity-challenge` and `identity-relate` are Controller-only and follow `task-update`:
+`--role controller`, explicit `--task-id` or an associated `--session-id`, `--base-revision N`,
+`--input FILE`, a Task Authority check before and a checkpoint after an ok result; they do not
+change the task revision. Hooks classify the mutations with the Controller-owned control
+operations (a child session is denied) and the reads with the other read-only context
+operations. When an identity exists, `codex-bootstrap` (`project_identity_summary`) and
+`task-status` (`Project Identity`) give the Controller Core's one-line summary; with no identity
+both outputs are unchanged, and no identity text is ever injected into children (SubagentStart
+output stays empty). The identity files are not Task Authority protected paths, so a checked
+amendment never changes the task security baseline. The obvious-path control-state guard also
+denies an apparent direct write to the identity record files (`IDENTITY.md`, `ledger.json`,
+`versions/`, `amendments/`, `challenges/`, `relations/`), for children and for the Controller;
+like the other guards it is not a sandbox. Detection of any other change relies on Core's
+`UNRECORDED_CHANGE`/`INVALID` status plus Git diff.
+
 ## Enforcement and assurance
 
 Project bootstrap `READY` means definitions are available, not that a Host actor is authenticated. An explicit Controller-selected UTF-8 contract (`human_instruction`, `boundary`, `invariants`, `acceptance`, and optional `execution_mode`, defaulting to `delegated`) admits task intent without requiring a bootstrap receipt or one-shot Hook bearer. Optional legacy proofs remain strictly checked when supplied. The contract is governance, not universal authentication; Host Root assurance remains `UNKNOWN`.

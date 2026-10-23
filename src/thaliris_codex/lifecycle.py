@@ -118,6 +118,8 @@ _CONTEXT_OPERATIONS = frozenset({
     "task-status", "task-get", "artifact-get", "catalog", "document-get",
     "task-artifact", "task-close", "task-promote", "rollback", "version",
     "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "identity-status", "identity-get", "identity-trace",
+    "identity-amend", "identity-challenge", "identity-relate",
 })
 _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "controller-instructions",
@@ -125,20 +127,23 @@ _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
     "task-abandon", "version", "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "identity-status", "identity-get", "identity-trace",
+    "identity-amend", "identity-challenge", "identity-relate",
 })
 _CHILD_CONTEXT_READS = frozenset({
     "controller-instructions",
     "task-show", "task-status", "stale",
     "memory-status", "milestone-check", "task-get", "artifact-get", "catalog",
-    "document-get",
+    "document-get", "identity-status", "identity-get", "identity-trace",
 })
 _CHILD_CONTEXT_MUTATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
     "rollback", "init", "uninstall", "codex-uninstall",
     "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "identity-amend", "identity-challenge", "identity-relate",
 })
-_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
+_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
 _START_ATTESTATION_TTL_NS = 120 * 1_000_000_000
 
@@ -4716,15 +4721,19 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     target = _control_state_target(payload)
     if target is not None:
         mutation = _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
-        _best_effort_record(
-            _record_protocol_deviation,
-            root,
-            payload,
-            operation="control-state-write" if mutation else "control-state-read",
-            target=target,
-            blocked=mutation,
-            notify_controller=mutation or role in roles.notice_roles(),
-        )
+        # Project identity files are ordinary readable repository content;
+        # only an obvious write is control-state misuse, so a read of them is
+        # not recorded as a deviation.
+        if mutation or not target.casefold().startswith(".project-identity/"):
+            _best_effort_record(
+                _record_protocol_deviation,
+                root,
+                payload,
+                operation="control-state-write" if mutation else "control-state-read",
+                target=target,
+                blocked=mutation,
+                notify_controller=mutation or role in roles.notice_roles(),
+            )
         if mutation:
             return _permission_deny(f"THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION: a {role_names} session may not modify Controller-owned control state.")
     for durable_target in _visible_durable_paths(payload):
@@ -5344,6 +5353,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             if normalized in {"list_agents", "wait_agent"} or operation in {
                 "doctor", "milestone-check", "memory-status", "task-status", "task-get",
                 "artifact-get", "catalog", "document-get", "version",
+                "identity-status", "identity-get", "identity-trace",
             }:
                 return ""
             if _managed_control_dependency(payload, root):

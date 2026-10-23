@@ -173,6 +173,8 @@ An initialized repository contains:
 
 Task state stores structured facts, observations and judgments, not conversation transcripts. Persistence and handoff are separate choices: recorded information is not automatically passed to every role.
 
+A project may also have an optional, tracked `.project-identity/`: a cross-task identity baseline that changes only through a recorded amendment by the Controller on the human owner's explicit decision. The Codex Adapter shows the Controller one summary line and never injects identity text into child roles; see [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md).
+
 ## What it is not
 
 Thaliris is not an Agent Runtime, workflow engine, fixed multi-agent pipeline, vector database or RAG system, automatic whole-repository summarizer, or substitute for source code, tests, compilers and runtime behavior.
@@ -184,6 +186,7 @@ Removing Thaliris should not make the underlying development process incorrect.
 - [Core design](https://github.com/Iris0fTheValley/Thaliris/blob/main/DESIGN.md)
 - [Routing protocol](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-routing-protocol.md)
 - [Task authority contract](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-task-authority.md)
+- [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md) — project-level identity, amendments and challenges
 - [Prompt ownership and research motivation](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md)
 - [Role descriptions](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-role-packs.md) · [Packaging and API boundaries](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/host-neutral-packaging.md)
 

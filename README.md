@@ -173,6 +173,8 @@ thaliris-core --root . --task-id "$TASK_ID" task-status
 
 任务状态保存结构化的事实、observation 和判断，不保存对话 transcript。持久化和交接是两个独立选择：记录下来的东西不会自动塞给每个角色。
 
+项目还可以有可选的 `.project-identity/`（可纳入版本控制）：跨任务的项目身份基线，只能经 Controller 在人类所有者明确决定下做记录在案的 amendment 来修订。Codex adapter 只向 Controller 显示一行摘要，不向子角色注入；见 [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md)。
+
 ## 不是什么
 
 不是 Agent runtime、工作流引擎、固定多代理流水线、向量数据库或 RAG 系统、全仓自动总结器，也不能替代源码、测试、编译器和运行时行为。
@@ -184,6 +186,7 @@ thaliris-core --root . --task-id "$TASK_ID" task-status
 - [DESIGN.md](https://github.com/Iris0fTheValley/Thaliris/blob/main/DESIGN.md) — Core 架构与契约
 - [路由协议](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-routing-protocol.md) — 路由、交接、Evidence Continuity、等待与验收
 - [任务授权契约](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-task-authority.md)
+- [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md) — 项目级身份、amendment 与 challenge
 - [提示词归属与研究动机](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-prompt-design.md) — 含相关文献
 - [角色说明](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-role-packs.md) · [分包与 API 边界](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/host-neutral-packaging.md)
 

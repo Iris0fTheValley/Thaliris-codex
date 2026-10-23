@@ -5,7 +5,7 @@ The installed pinned runner returns a procedure index with `controller-instructi
 and one selected procedure with `controller-instructions --section <name>`.
 Normal Controller guidance is resident in the normal bootstrap response/context:
 startup, authority, routing, handoff, Workstream endpoints, durable selection,
-waiting/completion and causal diagnosis. Retrieve task-recovery or host-maintenance
+project identity, waiting/completion and causal diagnosis. Retrieve task-recovery or host-maintenance
 only when their exceptional operation is needed. Measure the complete normal task
 context plus retrieval cost and quality, not the shortest individual prompt. Shared
 inherited instructions do not inject the full Controller routine into every fresh
@@ -513,6 +513,46 @@ and handoff rules above; controller-direct and single-agent permit direct execut
 No file, line, token, query or tool-count quota grants or denies permission. Prefer catalog,
 document-get, task-get, artifact-get and exact instruction sections when useful.
 Hooks cannot prove cumulative semantic scope or every third-party MCP tool's behavior.
+
+## Project identity
+
+Project identity is the project-level, cross-task statement of what the project is for and
+what must not be changed silently. It lives in tracked `.project-identity/` and Core owns
+its records. It is not Task Authority (one task's frozen intent), Memory or milestones
+(reusable knowledge) or evidence (task-local observations). Legacy `.agent-memory` labels
+such as `Kind: HARD_CONSTRAINT` or `Status: CURRENT` confer no identity authority. The
+layers identity, strategy, design, implementation and tasks are a reasoning model, not
+files, permissions or stages. Absent identity is normal: nothing is blocked or required;
+suggest establishing one (an existing constitution document may become v1) only on the
+user's decision.
+
+When identity exists, bootstrap and `task-status` show one summary line. Read more on demand with the installed pinned runner:
+`identity-status`, `identity-get` (`--version`, repeatable `--item`,
+`--amendment`, `--challenge`) and `identity-trace REF --direction up|down|both --depth 1..4`;
+they need no role or task. Read identity for directional or architectural tasks, replanning,
+cross-layer conflicts and before turning an implementation limit into a principle; not for
+ordinary local repair. When a lower-level result may touch it: LOCATE the layer; TRACE UP;
+REPAIR at the lowest sufficient layer; CHALLENGE UP when evidence says identity itself may be
+wrong, by recording `identity-challenge` (open, or dismiss with a reason), never by editing
+`.project-identity/`; AMEND only on the human owner's explicit decision. Then choose which
+registered dependents to revalidate; nothing propagates automatically.
+
+`identity-amend`, `identity-challenge` and `identity-relate` are Controller-only: `--role
+controller`, the selected ACTIVE task, `--base-revision` and `--input` file, like `task-update`;
+they do not change the task revision. An amendment quotes the human owner's instruction in
+`decision.human_instruction`, gives the rationale and, when lower-level repair was considered,
+why it is insufficient, and names `base_version` and the canonical `base_sha256` of the
+on-disk `IDENTITY.md` from `identity-status`. Amendment is not memory promotion and does not
+use `task-promote`, `document-maintain` or Curator. `UNRECORDED_CHANGE` or `INVALID` in status
+is an observation of a hand edit or bad merge: do not adopt or revert it silently; tell the user.
+
+Use `identity-relate` (`serves`, `supports`, `challenges`, `supersedes`) only for significant
+decisions, designs or experiments; evidence against identity itself is a challenge, not a
+relation. Trace shows registered relations only: absence of a relation is not independence.
+An amendment never rewrites a running task's frozen contract: that task keeps it, tell the
+user, and only a human decision starts a new task or changes intent. No identity text is
+injected into children; quote selected item ids and text into a handoff only when they bind
+the child's work.
 
 ## Product completion, native completion and mechanical closure
 
