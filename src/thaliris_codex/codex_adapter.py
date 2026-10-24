@@ -2247,6 +2247,23 @@ def namespaced_observation(handoff_id: str, payload: dict) -> dict:
     return result
 
 
+def _check_namespaced_ids(handoff_id: str, body: dict) -> None:
+    """Refuse (with the local limit) child ids that overflow the 64-character stored limit once namespaced."""
+    sources = body.get("sources")
+    candidates = [("observation id", body.get("id"))]
+    if isinstance(sources, list):
+        candidates += [("source id", item.get("id")) for item in sources if isinstance(item, dict)]
+    limit = 64 - len(handoff_id) - 1
+    for label, value in candidates:
+        if isinstance(value, str) and value.startswith(handoff_id + ".") and len(value) > 64:
+            raise core.ThalirisError(
+                "CONTINUITY_INVALID", f"invalid {label}",
+                recovery=(f"child-local observation and source ids are stored as '{handoff_id}.<id>' (stored limit 64 characters), "
+                          f"so keep each local id to at most {limit} characters and retry with shorter ids"),
+                details={"field": "id", "expected": f"child-local id of 1-{limit} characters",
+                         "got_length": len(value) - len(handoff_id) - 1})
+
+
 def task_observe(root: Path, role: str, handoff_id: str | None, agent_id_hash: str | None,
                  input_file: str | None = None, observation_json: str | None = None) -> dict:
     """Persist one selected observation without rewriting caller-owned input."""
@@ -2317,6 +2334,7 @@ def _task_observe_locked(root: Path, role: str, handoff_id: str | None, agent_id
         # Sibling children choose ids independently (every child may report
         # "O1"); the handoff id makes each one task-unique.
         body = namespaced_observation(handoff_id, body)
+        _check_namespaced_ids(handoff_id, body)
     appended = core._append_continuity_state(task, handoff["producer"], body, "observations")
     lifecycle._write_evidence_reservation(root, task,
         lifecycle._lifecycle_path(root, task["task_id"]), None)

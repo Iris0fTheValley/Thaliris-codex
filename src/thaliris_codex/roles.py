@@ -167,6 +167,8 @@ _SHARED_INSTRUCTIONS = (
     "When an already discovered local fact changes your conclusion, local acceptance or critical UNKNOWN, "
     "record it with source refs using task-observe; the adapter supplies the selected handoff, "
     "workchain provenance and opaque requirement refs. Do not reconstruct these bindings. "
+    "The adapter stores your observation and embedded source ids as handoff-id.local-id (41-character "
+    "prefix, 64-character stored limit), so keep each local observation id and source id to at most 23 characters. "
     "If selected provenance is unavailable, return the observation and sources in FINAL for "
     "Controller association. "
     "This adds no search obligation or global-importance classification; do not reconstruct "

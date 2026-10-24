@@ -309,8 +309,12 @@ evidence association also advances the revision once.
 `--since-revision N` adds a bounded, non-exact `Changes Since` hint. A stale write is refused
 under strict CAS with `code: TASK_REVISION_CONFLICT`: read `details.current_revision` and
 `details.changes_since` (revision gap, newer records, recent handoffs/observations/judgments,
-open evidence) from that same error, review what still applies and retry once with the current
-revision; do not re-read the full status first. Other failures carry `code`, `recovery` and
+open evidence) from that same error. `changes_since` is an approximate hint (`exact: false`):
+`recent` holds only the last min(revision gap, 16) items per collection and can omit items one
+batch wrote in a single revision; replaced fields (Active Work, Pending Results, milestone,
+status) and sources are not tracked. Review the hint including its open-evidence summary, retry
+once with the current revision if the write still applies, and read compact status when you need
+Active Work/Pending Results or anything the hint does not cover. Other failures carry `code`, `recovery` and
 `details` (collection, index, id, field, expected) beside the unchanged `error` text.
 A selected child records `task-observe --role ROLE --observation-json '<JSON>'`; the existing
 Hook binding supplies its exact Task ID, `--handoff-id ID --agent-id-hash HASH` without an
@@ -321,7 +325,8 @@ do not wrap the invocation in variables, scripts or compound shell statements.
 The minimal body is `{"id":"O1","text":"local fact","source_refs":["S1"]}`. A child's local ids
 are namespaced by the adapter: `O1` and its embedded source `S1` are stored as `HANDOFF_ID.O1` and
 `HANDOFF_ID.S1`, so parallel children may all report `O1`; the response lists the stored `appended` ids and
-Controller judgments cite those ids (already-qualified ids are kept; keep local ids short, the stored id is limited to 64 characters). Include
+Controller judgments cite those ids (already-qualified ids are kept; the stored id is limited to 64 characters and a Codex handoff id is `handoff-` plus 32 hex
+(41 characters with the dot), so a child-local observation id and each embedded source id must be at most 23 characters; longer ids are refused with a recovery hint). Include
 `sources: [{"id":"S1","kind":"local","locator":"tests/result.txt","summary":"exact output"}]`
 when the source is not already registered. Source refs must be nonempty and resolve to sources.
 Pass ordinary JSON in a shell literal. The trusted PreToolUse Hook transports a literal

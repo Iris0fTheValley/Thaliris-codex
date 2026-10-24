@@ -55,6 +55,20 @@ def _observe_both(root: Path, children) -> list[dict]:
     return results
 
 
+def test_overlong_child_local_id_refusal_names_the_local_limit(two_children):
+    root, _task_id, children = two_children
+    agent, _child, handoff = children[0]
+    assert len(handoff) == 40
+    with pytest.raises(core.ThalirisError) as refused:
+        codex_adapter.task_observe(root, "investigator", handoff, lifecycle._identity_hash(agent),
+                                   observation_json=json.dumps(_observation("O" * 24)))
+    assert refused.value.code == "CONTINUITY_INVALID" and str(refused.value) == "invalid observation id"
+    assert "23 characters" in refused.value.recovery and handoff in refused.value.recovery
+    ok = codex_adapter.task_observe(root, "investigator", handoff, lifecycle._identity_hash(agent),
+                                    observation_json=json.dumps(_observation("O" * 21)))
+    assert ok["ok"]
+
+
 def test_parallel_children_reporting_the_same_ids_are_namespaced_and_judged_in_one_batch(two_children, capsys):
     root, task_id, children = two_children
     (_, _, first), (_, _, second) = children
