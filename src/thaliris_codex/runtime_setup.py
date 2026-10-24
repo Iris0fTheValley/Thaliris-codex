@@ -319,7 +319,7 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
         subprocess.run([str(interpreter), "-I", "-B", "-c",
                         "from importlib.metadata import version; "
                         "v=tuple(map(int,version('thaliris').split('.')[:3])); "
-                        "assert (0,4,6)<=v<(0,5,0); import thaliris_codex.cli"],
+                        "assert (0,5,0)<=v<(0,6,0); import thaliris_codex.cli"],
                        env=environment, check=True, stdout=sys.stderr)
         if runtime_identity.manifest_bytes(executable) != contents:
             raise ValueError("new runtime changed during verification")

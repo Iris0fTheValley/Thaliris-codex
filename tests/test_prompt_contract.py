@@ -185,8 +185,11 @@ def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
     assert (root / "docs/thaliris-controller.md").read_text(encoding="utf-8") == controller_instructions.render()
     for name in ("README.md", "README.en.md", "adapter/codex/README.md"):
         text = (root / name).read_text(encoding="utf-8")
-        assert "timeout_ms=3600000" in text, name
-        assert "UNKNOWN" in text and "10–60" in text, name
+        if name == "adapter/codex/README.md":
+            assert "timeout_ms=3600000" in text, name
+            assert "UNKNOWN" in text and "10–60" in text, name
+        else:
+            assert "(adapter/codex/README.md)" in text, name
         assert "never a default" not in text, name
         assert "tool maximum is capacity, not a default duration" not in normalized(text), name
     waiting = normalized(controller_instructions.render(section="completion"))
