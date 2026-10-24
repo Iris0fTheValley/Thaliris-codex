@@ -13,6 +13,9 @@ from thaliris import identity
 # Controller-only mutations; read-only commands carry no role and no task.
 MUTATIONS = ("identity-amend", "identity-challenge", "identity-relate")
 READS = ("identity-status", "identity-get", "identity-trace")
+# Controller-only, but they need neither the selected ACTIVE task nor a base
+# revision: basis notes and suggestion preferences live outside the repository.
+FORMATION = ("identity-note", "identity-suggest")
 SUMMARY_FIELD = "project_identity_summary"
 
 
@@ -25,4 +28,16 @@ def summary(root: Path) -> str | None:
     try:
         return identity.identity_summary(root)
     except (ValueError, OSError, RuntimeError):
+        return None
+
+
+def offer(root: Path, session_key: str | None = None) -> str | None:
+    """Return Core's one-line identity offer after a successful close, or None.
+
+    Core records that the offer was shown. Any failure leaves the field absent.
+    """
+    try:
+        from thaliris import identity_basis
+        return identity_basis.identity_offer(root, session_key)
+    except Exception:  # noqa: BLE001 - an offer must never change a close result
         return None

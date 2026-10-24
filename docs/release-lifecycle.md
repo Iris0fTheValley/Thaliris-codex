@@ -174,7 +174,10 @@ is inferred from an apparently unused cache record.
 
 `release/core.lock.json` is the single authoritative default Core pairing used by
 both CI and release builds. It selects Core
-`e29c8375316392823ce2d25bc64bb9d040170e7d` (Core 0.5.1, which adds structured
+`fc170edddbc41ce09aba57d3cf30d9a50344c570` (Core 0.5.2, which adds natural
+Project Identity formation: basis notes, the once-per-note close offer and
+suggestion preferences, on top of Core 0.5.1 `e29c8375316392823ce2d25bc64bb9d040170e7d`
+with structured
 errors, batch continuity writes and compact status/write responses; the Project
 Identity plane Adapter 0.5.0 delivers is retained; the task state schema stays 7
 and persisted state stays valid for Core 0.5.0). The prior pin

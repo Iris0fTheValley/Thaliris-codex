@@ -18,7 +18,7 @@ Thaliris 不另造 Agent Runtime，而是建在 Codex、DeepSeek Harness、Claud
 
 > **状态：Beta。** 在真实的复杂重构任务上，已经观察到实现者自主派发调查、Controller 发起独立审查、反证推动修复的完整链路。样本量还小，不足以证明普遍的质量或成本优势。见[实测观察](#实测观察)。
 >
-> **版本：** 本文描述各仓库 `main` 分支上的源码版本：Core 0.5.1、Codex adapter 0.5.1、Claude Code plugin 0.4.1、DSH plugin 0.3.1。版本号描述源码，不描述某台机器上的安装；仓库或磁盘上的文件更新，也不证明正在运行的 Host 已经加载新版本。
+> **版本：** 本文描述各仓库 `main` 分支上的源码版本：Core 0.5.2、Codex adapter 0.5.2、Claude Code plugin 0.4.2、DSH plugin 0.3.2。版本号描述源码，不描述某台机器上的安装；仓库或磁盘上的文件更新，也不证明正在运行的 Host 已经加载新版本。
 
 ## 为什么不止于上下文管理
 
@@ -191,7 +191,7 @@ thaliris-core --root . --task-id "$TASK_ID" task-status
 
 任务状态保存结构化的事实、observation 和判断，不保存对话 transcript。持久化和交接是两个独立选择：记录下来的东西不会自动塞给每个角色。
 
-项目还可以有可选的 `.project-identity/`（可纳入版本控制）：跨任务的项目身份基线，只能经 Controller 在人类所有者明确决定下做记录在案的 amendment 来修订。Codex adapter 只向 Controller 显示一行摘要，不向子角色注入；见 [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md)。
+项目还可以有可选的 `.project-identity/`（可纳入版本控制）：跨任务的项目身份基线，只能经 Controller 在人类所有者明确决定下做记录在案的 amendment 来修订。Codex adapter 只向 Controller 显示一行摘要，不向子角色注入。无需任何设置表单：Controller 用 `identity-note` 逐字记录用户自己明确说出的长期表述，并可在任务关闭后（`identity_offer`）至多提示一次，供用户确认后组成第一版；`identity-suggest` 可按范围关闭提示；见 [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md)。
 
 ## 不是什么
 
@@ -210,7 +210,7 @@ thaliris-core --root . --task-id "$TASK_ID" task-status
 
 ## Codex 原生集成
 
-Thaliris-codex 将共享语义接入 Codex 原生 Agent、角色 profile、Hooks 与 session lifecycle。它依赖单独安装的 Thaliris Core（Core 0.5.1 及以上、0.6 以下），由 Core 提供任务记录、证据和任务授权（authority）API；Codex adapter 负责原生准入、路由、身份关联和生命周期观察。详见[集成协议](adapter/codex/README.md)。
+Thaliris-codex 将共享语义接入 Codex 原生 Agent、角色 profile、Hooks 与 session lifecycle。它依赖单独安装的 Thaliris Core（Core 0.5.2 及以上、0.6 以下），由 Core 提供任务记录、证据和任务授权（authority）API；Codex adapter 负责原生准入、路由、身份关联和生命周期观察。详见[集成协议](adapter/codex/README.md)。
 
 普通角色的模型/effort 默认路由如下；Controller 会在受管派发检查后为精确注册的 Thaliris 角色补齐省略的选择字段，显式选择保留：
 

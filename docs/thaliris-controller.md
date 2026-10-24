@@ -547,9 +547,25 @@ its records. It is not Task Authority (one task's frozen intent), Memory or mile
 (reusable knowledge) or evidence (task-local observations). Legacy `.agent-memory` labels
 such as `Kind: HARD_CONSTRAINT` or `Status: CURRENT` confer no identity authority. The
 layers identity, strategy, design, implementation and tasks are a reasoning model, not
-files, permissions or stages. Absent identity is normal: nothing is blocked or required;
-suggest establishing one (an existing constitution document may become v1) only on the
-user's decision.
+files, permissions or stages. Most projects start with no identity; nothing is blocked or
+required, and the current task always comes first.
+
+Note, don't interrupt. When the user explicitly states the project's long-term purpose,
+direction, constraint or non-goal, or explicitly decides or rejects one, record their verbatim
+words with `identity-note` (`--role controller`, one call with `--json '{"quote":"..."}'`; optional
+`kind`, a one-line `context`, `refs`; no task or revision needed; `--list` reads, `{"retract":
+"N-000k","reason":"..."}` withdraws). Never note your inferences, tentative "maybe", temporary
+technical choices, summaries or a child's report of what the user said. Material the user hands
+over (a few sentences, a goal, a document via `refs`) is noted the same way; if they ask to record
+it as the identity, that request is the decision for v1. Offer only when a `task-close` result
+carries `identity_offer` (or the user is plainly describing what a new project is for): once,
+briefly, after the work; no answer means no; never block. To compose, show the user's quotes and
+your own organization apart. On their yes, record v1 or the amendment with `identity-amend`,
+quoting their confirmation and the cited notes (date, N id) verbatim in
+`decision.human_instruction`; never write a draft `IDENTITY.md` yourself. "Stop suggesting" means
+`identity-suggest --role controller --off --scope session|workspace|project|global` at the scope
+named (unstated: session, and mention the other scopes in one short line); `--on` and `--clear`
+undo it. Codex derives the session key mechanically: the global `--session-id` if given, else the selected task's recorded Controller session (the same key for suggest, status and the `task-close` offer), so session scope needs no flag after `task-start`.
 
 When identity exists, bootstrap and `task-status` show one summary line. Read more on demand with the installed pinned runner:
 `identity-status`, `identity-get` (`--version`, repeatable `--item`,

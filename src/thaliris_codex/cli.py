@@ -214,6 +214,20 @@ def _parser() -> argparse.ArgumentParser:
         q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
         q.add_argument("--base-revision", required=True, type=int)
         q.add_argument("--input", required=True)
+    q = sub.add_parser("identity-note", help="Controller-only: record, retract or list the user's verbatim long-term project statements (no task needed)")
+    q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
+    source = q.add_mutually_exclusive_group()
+    source.add_argument("--input", help="JSON object file path, or - for stdin: {quote,kind?,context?,refs?} or {retract,reason}")
+    source.add_argument("--json", help="one inline JSON object (single-quoted literal or utf8-base64:...)")
+    source.add_argument("--list", action="store_true", help="list noted statements")
+    q.add_argument("--include-retracted", action="store_true", help="with --list, include retracted notes")
+    q = sub.add_parser("identity-suggest", help="Controller-only: set or clear the identity-offer preference at a scope, only on the user's words (no task needed)")
+    q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
+    q.add_argument("--scope", required=True, choices=("session", "workspace", "project", "global"))
+    setting = q.add_mutually_exclusive_group(required=True)
+    setting.add_argument("--on", action="store_true")
+    setting.add_argument("--off", action="store_true")
+    setting.add_argument("--clear", action="store_true")
     q = sub.add_parser("task-start")
     q.add_argument("goal")
     q.add_argument("--milestone")
@@ -343,6 +357,23 @@ def _requested_command(argv: list[str]) -> str | None:
     except ValueError:
         return None
     return args.command
+
+
+def _identity_session_key(root: Path, args: argparse.Namespace) -> str | None:
+    """One stable, adapter-derived session key for identity suggestion scope.
+
+    An explicit --session-id wins (hashed); otherwise the selected task's
+    recorded Controller owner hash is used, so suggest, status and the close
+    offer agree without the Controller repeating a flag. None when neither
+    exists, which Core treats as "no session scope".
+    """
+    if getattr(args, "session_id", None):
+        return lifecycle._identity_hash(args.session_id)
+    try:
+        task_id = core.selected_task(root)
+        return lifecycle.active_controller_owner(root, str(task_id)) if task_id else None
+    except Exception:  # noqa: BLE001 - a missing key only disables session scope
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -534,7 +565,19 @@ def main(argv: list[str] | None = None) -> int:
                 out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, source, compact_evidence=True)
         elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
         elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
-        elif args.command == "identity-status": out = identity.identity_status(root)
+        elif args.command == "identity-status": out = identity.identity_status(root, session_key=_identity_session_key(root, args))
+        elif args.command == "identity-note":
+            from thaliris import identity_basis
+            actor = codex_adapter.controller_actor(args.role)
+            if args.list:
+                out = identity_basis.identity_note_list(root, include_retracted=args.include_retracted)
+            else:
+                with _inline_input(args.json, args.input) as source:
+                    out = identity_basis.identity_note(root, actor, source)
+        elif args.command == "identity-suggest":
+            from thaliris import identity_basis
+            actor = codex_adapter.controller_actor(args.role)
+            out = identity_basis.identity_suggest(root, actor, args.scope, "on" if args.on else "off" if args.off else "clear", session_key=_identity_session_key(root, args))
         elif args.command == "identity-get": out = identity.identity_get(root, version=args.version, items=args.item, amendment=args.amendment, challenge=args.challenge)
         elif args.command == "identity-trace": out = identity.identity_trace(root, args.ref, args.direction, args.depth)
         elif args.command in project_identity.MUTATIONS: out = getattr(identity, args.command.replace("-", "_"))(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
@@ -550,6 +593,10 @@ def main(argv: list[str] | None = None) -> int:
         else: out = {"ok": True, "version": __version__}
         if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-judge", *project_identity.MUTATIONS}:
             task_authority.checkpoint(root)
+        if args.command == "task-close" and out.get("ok"):
+            line = project_identity.offer(root, _identity_session_key(root, args))
+            if line:
+                out = {**out, "identity_offer": line}
         out = _controller_evidence_output(root, args, out)
         if args.command == "codex-bootstrap":
             out = codex_bootstrap.ordered_response(out)

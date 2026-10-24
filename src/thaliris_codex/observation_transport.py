@@ -18,6 +18,7 @@ INLINE_OPTIONS = {
     "task-judge": "--json",
     "task-evidence-register": "--json",
     "task-update": "--json",
+    "identity-note": "--json",
 }
 
 
