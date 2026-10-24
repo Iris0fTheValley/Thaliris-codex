@@ -5,6 +5,7 @@ import json
 import base64
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -114,9 +115,11 @@ def test_first_opaque_and_nested_observations_through_real_shell(evidence_task, 
         result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", env=env)
         assert result.returncode == 0, (result.stdout, result.stderr, updated)
         assert json.loads(result.stdout)["ok"] is True
-        stored = core.task_get(root, identifier)["object"]
+        selected = re.search(r"--handoff-id (\S+)", updated).group(1)
+        stored = core.task_get(root, f"{selected}.{identifier}")["object"]
         assert stored["text"] == body["text"]
-        source = core.task_get(root, body["source_refs"][0])["object"]
+        assert stored["source_refs"] == [f"{selected}.{body['source_refs'][0]}"]
+        source = core.task_get(root, stored["source_refs"][0])["object"]
         assert source["locator"] == body["sources"][0]["locator"]
         assert stored["candidate"] == "C-shell"
         assert stored["native_actor"] == lifecycle._identity_hash(child["agent_id"])
@@ -204,13 +207,13 @@ def test_legacy_existing_input_file_retains_child_binding(evidence_task, capsys)
     tokens = [token.strip("\"'") for token in shlex.split(updated, posix=False)]
     assert cli.main(tokens[1:]) == 0
     assert json.loads(capsys.readouterr().out)["ok"] is True
-    assert core.task_get(root, "O-input")["object"]["handoff_id"] == handoff
+    assert core.task_get(root, f"{handoff}.O-input")["object"]["handoff_id"] == handoff
 
 
 def test_readonly_reviewer_records_write_refusal_as_literal_data(evidence_task, capsys):
     root, _ = evidence_task
     _register_requirement(root)
-    child, _ = _spawn(root, "reviewer", "readonly-report", marker=_selected_message())
+    child, handoff = _spawn(root, "reviewer", "readonly-report", marker=_selected_message())
     body = _observation("O-write-refusal")
     body["text"] = "apply_patch was denied; Set-Content did not execute > probe.txt"
     command = f'thaliris --root "{root}" task-observe --role reviewer --observation-json \'{json.dumps(body)}\''
@@ -219,7 +222,7 @@ def test_readonly_reviewer_records_write_refusal_as_literal_data(evidence_task, 
     tokens = [token.strip("\"'") for token in shlex.split(updated, posix=False)]
     assert cli.main(tokens[1:]) == 0
     assert json.loads(capsys.readouterr().out)["ok"] is True
-    assert core.task_get(root, "O-write-refusal")["object"]["text"] == body["text"]
+    assert core.task_get(root, f"{handoff}.O-write-refusal")["object"]["text"] == body["text"]
     fenced = {**_request(child, command), "fenced": True}
     assert "THALIRIS_FENCED_ACTOR" in lifecycle.handle_hook(root, "PreToolUse", fenced)
 
@@ -249,7 +252,7 @@ def test_powershell_smart_quotes_refused_before_inline_normalization(evidence_ta
 def test_escaped_smart_quotes_keep_single_powershell_observation(evidence_task, capsys):
     root, _ = evidence_task
     _register_requirement(root)
-    child, _ = _spawn(root, "reviewer", "escaped-smart-quote", marker=_selected_message())
+    child, handoff = _spawn(root, "reviewer", "escaped-smart-quote", marker=_selected_message())
     body = _observation("O-escaped-smart")
     body["text"] = "".join(chr(code) for code in range(0x2018, 0x2020)) + " ; Get-Date"
     command = f'thaliris --root "{root}" task-observe --role reviewer --observation-json \'' + json.dumps(body) + "'"
@@ -257,7 +260,7 @@ def test_escaped_smart_quotes_keep_single_powershell_observation(evidence_task, 
     tokens = [token.strip("\"'") for token in shlex.split(updated, posix=False)]
     assert cli.main(tokens[1:]) == 0
     assert json.loads(capsys.readouterr().out)["ok"] is True
-    assert core.task_get(root, body["id"])["object"]["text"] == body["text"]
+    assert core.task_get(root, f"{handoff}.{body['id']}")["object"]["text"] == body["text"]
 
 
 @pytest.mark.parametrize("quote", [chr(code) for code in range(0x2018, 0x201C)])

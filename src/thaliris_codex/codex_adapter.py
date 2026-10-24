@@ -2165,15 +2165,14 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
         if task_authority.check(root) is None and selection is not None:
             raise ValueError("dispatch selection requires current task authority")
         state = core._load_state(root, active=True)
-        if state["revision"] != base_revision:
-            raise ValueError("task revision conflict")
+        core.check_revision(state, base_revision)
         task_id = state["task_id"]
         path = lifecycle._lifecycle_path(root, task_id)
         ledger = lifecycle._load_lifecycle(path, task_id)
         if selection is None:
-            core._append_continuity_state(state, actor, payload, "register")
+            appended = core._append_continuity_state(state, actor, payload, "register")
             lifecycle._write_evidence_reservation(root, state, path, None)
-            return core._task_ack(state, ["evidence_continuity"])
+            return core.task_write_response(state, ["evidence_continuity"], appended=appended)
         owner = lifecycle.active_controller_owner(root, task_id)
         if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
             raise ValueError("dispatch selection requires an unfenced owning Controller")
@@ -2203,11 +2202,14 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
                 raise ValueError("durable paths require Curator")
             prototype["durable_paths"] = selection["durable_paths"]
         core._register_evidence_handoff(state, prototype)
-        data["handoffs"].pop()
+        # Core replaces the continuity mapping on a validated append: pop the
+        # provisional prototype from the current mapping, not the stale alias.
+        state["evidence_continuity"]["handoffs"].pop()
         state["revision"] += 1
         ledger["next_evidence_dispatch"] = {**selection, "owner_session_id_hash": owner}
         lifecycle._write_evidence_reservation(root, state, path, ledger)
-        return {**core._task_ack(state, ["evidence_continuity"]), "next_dispatch": selection}
+        registered = [str(item["id"]) for field in ("requirements", "handoffs") for item in payload.get(field, []) if isinstance(item, dict) and "id" in item]
+        return {**core.task_write_response(state, ["evidence_continuity"], appended=registered), "next_dispatch": selection}
 
 
 def _selected_handoff(root: Path, handoff_id: str) -> dict:
@@ -2216,6 +2218,33 @@ def _selected_handoff(root: Path, handoff_id: str) -> dict:
     if len(matches) != 1:
         raise ValueError("selected handoff has no evidence association; return the observation and sources to Controller to register its exact opaque requirement/candidate association")
     return matches[0]
+
+
+def namespaced_observation(handoff_id: str, payload: dict) -> dict:
+    """Prefix child-chosen observation and source ids with the handoff id.
+
+    Sibling children each number their own observations and sources (O1, S1),
+    so the task-wide continuity ids would collide. Ids that already carry the
+    prefix are kept, so a repeated or pre-qualified id is idempotent. Only
+    references to this observation's own embedded sources are renamed; refs to
+    existing task-wide ids are untouched.
+    """
+    prefix = handoff_id + "."
+    sources = payload.get("sources")
+    local_sources = {source.get("id") for source in sources if isinstance(source, dict)} if isinstance(sources, list) else set()
+
+    def rename(value):
+        return prefix + value if isinstance(value, str) and value and not value.startswith(prefix) else value
+
+    result = dict(payload)
+    if "id" in payload:
+        result["id"] = rename(payload["id"])
+    if isinstance(sources, list):
+        result["sources"] = [{**source, "id": rename(source.get("id"))} if isinstance(source, dict) and "id" in source else source
+                             for source in sources]
+    if isinstance(payload.get("source_refs"), list):
+        result["source_refs"] = [rename(ref) if ref in local_sources else ref for ref in payload["source_refs"]]
+    return result
 
 
 def task_observe(root: Path, role: str, handoff_id: str | None, agent_id_hash: str | None,
@@ -2284,10 +2313,16 @@ def _task_observe_locked(root: Path, role: str, handoff_id: str | None, agent_id
     body["native_actor"] = agent_id_hash
     if submitted_by is not None:
         body["submitted_by"] = submitted_by
-    core._append_continuity_state(task, handoff["producer"], body, "observations")
+    if submitted_by is None:
+        # Sibling children choose ids independently (every child may report
+        # "O1"); the handoff id makes each one task-unique.
+        body = namespaced_observation(handoff_id, body)
+    appended = core._append_continuity_state(task, handoff["producer"], body, "observations")
     lifecycle._write_evidence_reservation(root, task,
         lifecycle._lifecycle_path(root, task["task_id"]), None)
-    return core._task_ack(task, ["evidence_continuity"])
+    if submitted_by is not None:
+        return core.task_write_response(task, ["evidence_continuity"], appended=appended)
+    return {**core._task_ack(task, ["evidence_continuity"]), "appended": appended}
 
 
 def document_maintain(root: Path, role: str, base_revision: int, input_file: str, handoff_id: str | None = None) -> dict:

@@ -1473,8 +1473,12 @@ def _inline_observation_transport(payload: object) -> dict[str, Any] | None:
     if direct.startswith("& "):
         prefix += "& "
         direct = direct[2:]
+    operation = _context_call(payload)[0]
+    option = observation_transport.INLINE_OPTIONS.get(operation)
+    if option is None:
+        return None
     normalized = observation_transport.literal_object_argument(
-        direct, powershell=_maintenance_shell_dialect(payload) == "powershell")
+        direct, powershell=_maintenance_shell_dialect(payload) == "powershell", option=option)
     if normalized is None:
         return None
     original = payload.get("tool_input")
@@ -1485,7 +1489,7 @@ def _inline_observation_transport(payload: object) -> dict[str, Any] | None:
         return None
     updated = {**original, key: prefix + normalized}
     routed = {**payload, "tool_input": updated}
-    if _context_call(routed)[0] != "task-observe":
+    if _context_call(routed)[0] != operation:
         return None
     return routed
 
@@ -1790,7 +1794,7 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
     state = core._load_state(root)
     if not state.get("evidence_continuity"):
         return ""
-    packet = core._continuity_status(state)
+    packet = {"task_revision": state["revision"], **core.evidence_summary(state)}
     # Some Native Hosts supply an opaque spawn message to Hooks. A bound
     # lifecycle handoff then exists without a readable selected marker. Expose
     # that mechanical gap to the Controller; never decrypt, guess relevance or
@@ -1831,7 +1835,7 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
                 excerpts.append(excerpt)
     packet["decision_context_excerpts"] = excerpts
     return json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext":
-        "Evidence Continuity before your next requirement/completion judgment. Models decide applicability; "
+        f"Evidence Continuity at task revision {state['revision']} (the next write's --base-revision) before your next requirement/completion judgment. Models decide applicability; "
         "PASS, READY and Completed do not dispose evidence. Use task-get for exact records and "
         "task-status --evidence-offset for remaining pages; no polling or closing stage is required.\n" +
         ("Selected observations for unassociated handoffs are not durably linked. If selected for this task, "
@@ -2885,8 +2889,9 @@ def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, exp
     with task_authority._lock(root):
         task_authority.check(root)
         state = core._load_state(root, active=True)
-        if state["task_id"] != task_id or state["revision"] != base_revision:
+        if state["task_id"] != task_id:
             raise ValueError("task revision conflict")
+        core.check_revision(state, base_revision)
         path = _lifecycle_path(root, task_id)
         if task_authority.digest(path) != expected_lifecycle:
             raise ValueError("TASK_LIFECYCLE_CHANGED")

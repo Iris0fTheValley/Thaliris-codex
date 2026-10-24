@@ -151,12 +151,13 @@ def test_readonly_child_appends_inline_observation_with_hook_bound_identity(evid
     result = json.loads(capsys.readouterr().out)
     assert result["ok"] is True
     assert "Evidence Continuity" not in result and "evidence_continuity" not in result
-    stored = core.task_get(root, "O-inline")["object"]
+    assert result["appended"] == [f"{handoff_id}.O-inline"]
+    stored = core.task_get(root, f"{handoff_id}.O-inline")["object"]
     assert stored["producer"] == "handoff:" + handoff_id
     assert stored["native_actor"] == lifecycle._identity_hash("evidence-investigator")
     assert "submitted_by" not in stored
     assert task_authority.check(root) is not None
-    assert core.task_status(root)["Evidence Continuity"]["unincorporated"][0]["observation_id"] == "O-inline"
+    assert core.task_status(root)["Evidence Continuity"]["unincorporated"][0]["observation_id"] == f"{handoff_id}.O-inline"
 
 
 def test_nested_handoff_inherits_opaque_lineage_without_global_text(evidence_task) -> None:
@@ -282,15 +283,20 @@ def test_controller_results_keep_unincorporated_evidence_visible(evidence_task, 
     assert cli.main([*prefix, "task-update", "--role", "controller", "--base-revision", str(revision), "--input", str(update)]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["ok"] is True
-    assert result["Evidence Continuity"]["unincorporated"][0]["observation_id"] == "O-pending"
+    assert "Evidence Continuity" not in result
+    assert result["evidence"]["unincorporated"][0]["observation_id"] == "O-pending"
+    assert result["evidence"]["unincorporated_total"] == 1
     assert cli.main([*prefix, "task-update", "--role", "controller", "--base-revision", str(revision), "--input", str(update)]) == 2
     conflict = json.loads(capsys.readouterr().out)
     assert conflict["error"] == "task revision conflict"
-    assert conflict["Evidence Continuity"]["unincorporated_total"] == 1
+    assert conflict["code"] == "TASK_REVISION_CONFLICT"
+    assert conflict["details"]["current_revision"] == revision + 1
+    assert conflict["details"]["changes_since"]["evidence"]["unincorporated_total"] == 1
+    assert "Evidence Continuity" not in conflict
     assert cli.main([*prefix, "task-close", "--base-revision", str(revision + 1)]) == 0
     closed = json.loads(capsys.readouterr().out)
     assert closed["ok"] is True
-    assert closed["Evidence Continuity"]["unincorporated_total"] == 1
+    assert closed["evidence"]["unincorporated_total"] == 1
     assert core.task_status(root)["Task"]["status"] == "DONE"
 
 
@@ -409,7 +415,7 @@ def test_opaque_native_spawn_reports_gap_then_exact_controller_association_suppo
     codex_adapter.task_observe(root, "implementer", handoff_id, lifecycle._identity_hash("opaque-native-parent"),
                                observation_json=json.dumps(_observation("O-opaque")))
     task_authority.checkpoint(root)
-    stored = core.task_get(root, "O-opaque")["object"]
+    stored = core.task_get(root, f"{handoff_id}.O-opaque")["object"]
     assert stored["handoff_id"] == handoff_id and stored["candidate"] == "opaque-candidate"
     assert stored["native_actor"] == lifecycle._identity_hash("opaque-native-parent")
     assert stored["requirement_refs"] == ["R1"] and "submitted_by" not in stored
@@ -551,7 +557,7 @@ def test_preselection_cli_registers_requirements_before_first_corroborated_obser
     assert lifecycle._bound_managed_child(root, child)
     codex_adapter.task_observe(root, "implementer", handoff_id, lifecycle._identity_hash(child["agent_id"]),
         observation_json=json.dumps(_observation("O-before-ack")))
-    assert core.task_get(root, "O-before-ack")["object"]["requirement_refs"] == ["R1"]
+    assert core.task_get(root, f"{handoff_id}.O-before-ack")["object"]["requirement_refs"] == ["R1"]
     assert task_authority.check(root) is not None
     # After native identity corroboration, the first observation and Scanner
     # retain preselected provenance without a second Controller association.
@@ -570,7 +576,7 @@ def test_preselection_cli_registers_requirements_before_first_corroborated_obser
     tokens = [token.strip("\"'") for token in shlex.split(updated, posix=False)]
     assert cli.main(tokens[1:]) == 0
     capsys.readouterr()
-    observation = core.task_get(root, "O-scanner-first")["object"]
+    observation = core.task_get(root, f"{scanner_handoff}.O-scanner-first")["object"]
     assert observation["requirement_refs"] == [] and observation["candidate"] == "C4"
     assert core.task_get(root, scanner_handoff)["object"]["parent_handoff_id"] == handoff_id
     assert observation["native_actor"] == lifecycle._identity_hash(scanner["agent_id"])
@@ -794,7 +800,7 @@ def test_concurrent_child_append_selection_and_reservation_share_checkpoint_lock
             release_checkpoint.set()
         assert first.result()["ok"] is True
         assert second.result() == ""
-    assert core.task_get(root, "O-concurrent")["object"]["handoff_id"] == handoff
+    assert core.task_get(root, f"{handoff}.O-concurrent")["object"]["handoff_id"] == handoff
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task_id), task_id)
     assert core.task_get(root, ledger["pending_authorized_spawn"]["handoff_id"])["object"]["candidate"] == "C4"
     assert task_authority.check(root) is not None

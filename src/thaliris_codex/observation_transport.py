@@ -10,6 +10,15 @@ import binascii
 import json
 
 PREFIX = "utf8-base64:"
+OBSERVATION_OPTION = "--observation-json"
+# The one inline-JSON option each direct operation accepts. Controller writes
+# use the generic --json; a readonly child keeps --observation-json.
+INLINE_OPTIONS = {
+    "task-observe": OBSERVATION_OPTION,
+    "task-judge": "--json",
+    "task-evidence-register": "--json",
+    "task-update": "--json",
+}
 
 
 class UnsupportedShellQuote(ValueError):
@@ -25,7 +34,7 @@ def decode(value: str) -> object:
     return json.loads(value)
 
 
-def literal_object_argument(command: str, *, powershell: bool) -> str | None:
+def literal_object_argument(command: str, *, powershell: bool, option: str = OBSERVATION_OPTION) -> str | None:
     """Replace one single-quoted JSON argument, preserving every other byte.
 
     The caller must independently prove the trusted standalone task-observe
@@ -37,7 +46,7 @@ def literal_object_argument(command: str, *, powershell: bool) -> str | None:
     # quoted string. Our deliberately small reader only understands ASCII
     # quotes. Refuse the whole inline command rather than hide syntax that the
     # original shell would execute. POSIX keeps these characters as data.
-    if powershell and "--observation-json" in command and any(
+    if powershell and option in command and any(
             "\u2018" <= char <= "\u201f" for char in command):
         raise UnsupportedShellQuote("use JSON Unicode escapes for PowerShell smart quotes")
     words: list[tuple[str, int, int]] = []
@@ -74,7 +83,7 @@ def literal_object_argument(command: str, *, powershell: bool) -> str | None:
                 value.append(char)
                 index += 1
         words.append(("".join(value), start, index))
-    options = [i for i, (word, _, _) in enumerate(words) if word == "--observation-json"]
+    options = [i for i, (word, _, _) in enumerate(words) if word == option]
     if len(options) != 1 or options[0] + 1 >= len(words):
         return None
     value, start, end = words[options[0] + 1]

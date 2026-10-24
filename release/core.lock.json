@@ -1,5 +1,5 @@
 {
   "repository": "Iris0fTheValley/Thaliris",
-  "commit": "eb540d0c7f900449609544d107b4b308234c96f9",
-  "reason": "Core 0.5.0 with the Project Identity plane required by Adapter 0.5.0; keeps explicit non-Git project lifecycle and task state schema 7. Fast-forward of the previous Core 0.5.0 pin that fixes Project Identity integrity defects; no API change."
+  "commit": "e29c8375316392823ce2d25bc64bb9d040170e7d",
+  "reason": "Core 0.5.1 (controller ergonomics: structured errors, batch continuity writes, compact status and write responses); keeps explicit non-Git project lifecycle, the Project Identity plane and task state schema 7. Persisted state stays valid for Core 0.5.0."
 }

@@ -290,14 +290,32 @@ or prescribe a role, model call, stage or polling loop. Register selected requir
 handoff refs with `task-evidence-register`; record selected local evidence with `task-observe`;
 Controller records candidate, requirement, exact observation refs, outcome and reasoning
 with `task-judge`. Use bounded `task-status` visibility and explicit `task-get` retrieval.
-Controller commands use `--role controller --base-revision N --input FILE`.
+Controller commands use `--role controller --base-revision N` with `--input FILE` (`-` reads
+stdin) or one inline `--json '<object>'` (task-update, task-evidence-register, task-judge; the
+Hook transports a single-quoted literal like `--observation-json`). `task-judge` takes one
+judgment object or an atomic ordered batch `{"judgments":[...]}` that commits in one revision;
+record several judgments with one call. Every state write returns the new `revision`, the
+appended ids and a compact `evidence` summary (open totals plus a bounded item list paged by
+`next_offset`); use that revision as the next `--base-revision`. A managed spawn that registers an
+evidence association also advances the revision once.
+`task-status` is compact by default (routing header, counts, open-evidence summary,
+`--evidence-offset N` pages); `task-status --view full` is the full Evidence Continuity page and
+`--since-revision N` adds a bounded, non-exact `Changes Since` hint. A stale write is refused
+under strict CAS with `code: TASK_REVISION_CONFLICT`: read `details.current_revision` and
+`details.changes_since` (revision gap, newer records, recent handoffs/observations/judgments,
+open evidence) from that same error, review what still applies and retry once with the current
+revision; do not re-read the full status first. Other failures carry `code`, `recovery` and
+`details` (collection, index, id, field, expected) beside the unchanged `error` text.
 A selected child records `task-observe --role ROLE --observation-json '<JSON>'`; the existing
 Hook binding supplies its exact Task ID, `--handoff-id ID --agent-id-hash HASH` without an
 extra Agent call or payload file write. `--input FILE` remains available for existing files.
 Read or validate selected local sources in a separate read-only tool call, then issue one
 direct installed-runner invocation for the observation. A terminal newline is supported;
 do not wrap the invocation in variables, scripts or compound shell statements.
-The minimal body is `{"id":"O1","text":"local fact","source_refs":["S1"]}`; include
+The minimal body is `{"id":"O1","text":"local fact","source_refs":["S1"]}`. A child's local ids
+are namespaced by the adapter: `O1` and its embedded source `S1` are stored as `HANDOFF_ID.O1` and
+`HANDOFF_ID.S1`, so parallel children may all report `O1`; the response lists the stored `appended` ids and
+Controller judgments cite those ids (already-qualified ids are kept; keep local ids short, the stored id is limited to 64 characters). Include
 `sources: [{"id":"S1","kind":"local","locator":"tests/result.txt","summary":"exact output"}]`
 when the source is not already registered. Source refs must be nonempty and resolve to sources.
 Pass ordinary JSON in a shell literal. The trusted PreToolUse Hook transports a literal
@@ -357,13 +375,15 @@ not a new approval stage. Such refusal means no durable observation was recorded
 Return the observation and source pointers to Controller for exact association when selected
 provenance is unavailable; preserve the fact in FINAL for Controller historical import.
 Use `task-status --evidence-offset N` for bounded evidence pages and `task-get` for exact records.
-Ordinary Controller PostToolUse result delivery reintroduces the bounded evidence packet
+Ordinary Controller PostToolUse result delivery reintroduces the bounded evidence packet,
+stating the current task revision,
 before the next requirement-satisfied or broad completion decision, including test PASS,
 child Completed and Reviewer READY results. Review the relevant pending observations and
 prior unresolved judgment basis before that decision; retrieve exact records/pages only
 as needed. This is existing event delivery, not polling, an extra stage or a closing handoff.
-State-operation results also retain the packet alongside success, conflicts and mechanical
-closure; task-close output alone arrives too late to inform an earlier completion decision.
+State-operation results also retain the compact evidence summary alongside success and
+mechanical closure (a revision conflict embeds it in `changes_since`); task-close output alone
+arrives too late to inform an earlier completion decision.
 Core does not decide semantic relevance, failure, approval or product completion.
 For selected historical child results, Controller uses `task-observe --role controller
 --handoff-id ID --observation-json '<JSON>'`. The adapter preserves the original native producer

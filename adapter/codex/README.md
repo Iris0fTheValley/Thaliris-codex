@@ -171,12 +171,28 @@ Readonly children need no payload file write; `--input FILE` also accepts an exi
 `sources: [{"id":"S1","kind":"local","locator":"tests/result.txt","summary":"exact output"}]`.
 Source refs must be nonempty and resolve to sources. The adapter fills candidate, handoff and
 requirement refs from the selected binding; conflicting explicit fields are rejected.
-No Controller revision CAS is required. `task-status --evidence-offset N` pages pending evidence
-and judgments; `task-get` retrieves exact records. Existing Controller state-operation outputs
-also include bounded evidence visibility, including revision conflicts and successful closure.
-Child observation acknowledgements do not receive unrelated global evidence bodies.
+No Controller revision CAS is required. A child's `id` and the ids of its embedded `sources`
+(with `source_refs` to them) are prefixed with its handoff id (`HANDOFF_ID.O1`), so parallel
+children may all report `O1`; an already-qualified id is kept and the response lists the stored
+`appended` ids. The stored id is bounded to 64 characters, so local ids stay short. A Controller
+historical import keeps its chosen id. `task-status` is compact by default (routing header,
+counts and the Core open-evidence summary: totals always, a bounded item list paged with
+`--evidence-offset N`); `task-status --view full` returns the full Evidence Continuity page and
+`--since-revision N` adds a bounded, non-exact `Changes Since` review hint. `task-get` retrieves
+exact records. Controller state-operation outputs carry the same compact `evidence` summary
+(not the full page), also on successful closure. Child observation acknowledgements do not
+receive unrelated global evidence bodies.
+Controller writes are strict compare-and-set. A stale `--base-revision` is refused with
+`error: "task revision conflict"`, `code: TASK_REVISION_CONFLICT` and `details.current_revision`
+plus `details.changes_since` (revision gap, newer records, recent handoffs/observations/judgments
+and the open-evidence summary); review it and retry once with the current revision. Other Core
+errors expose `code`, `recovery` and `details` beside the unchanged `error` text.
+`task-update`, `task-evidence-register` and `task-judge` accept `--input FILE|-` or one inline
+`--json '<object>'` (single-quoted literals use the same Hook UTF-8/base64 transport as
+`--observation-json`; a `utf8-base64:` value is also accepted).
 `task-judge --role controller --base-revision N --input FILE` records `id`, `candidate`,
-`requirement_ref`, exact `observation_refs`, `outcome` and `reasoning`. Outcomes are
+`requirement_ref`, exact `observation_refs`, `outcome` and `reasoning`. The input is one judgment
+or an atomic ordered batch `{"judgments":[...]}` (1 to 64) committed in one revision. Outcomes are
 `satisfied`, `unknown`, `repair` and `no-current-impact`. An observation retains its immutable
 logical handoff candidate label C1, not a spawn-time repository identity; source refs and
 optional producer-selected `observed_state` identify the local observation (otherwise actual
@@ -190,8 +206,8 @@ explains how it addresses that prior basis without reciting its full observation
 Unaddressed model-authored repair/unknown basis remains in `unresolved_judgments` even
 after a later satisfied judgment cites only fresh observations. Complete legacy recitation
 of the earlier observation basis also establishes a mechanical continuity link.
-Ordinary Controller PostToolUse results reintroduce bounded evidence and local excerpts
-before the next broad completion judgment. This uses existing result delivery, no polling,
+Ordinary Controller PostToolUse results reintroduce the bounded evidence summary, the current task
+revision and local excerpts before the next broad completion judgment. This uses existing result delivery, no polling,
 fixed final stage or semantic close gate. Children never receive that global packet.
 
 Explicit task admission/association publishes exact actor navigation beside external task

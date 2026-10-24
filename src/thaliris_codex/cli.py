@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 from . import __version__
-from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics, project_identity
+from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics, observation_transport, project_identity
 from thaliris import core, identity
+from thaliris.errors import TASK_REVISION_CONFLICT, ThalirisError, error_envelope
 from thaliris.core import TaskStateSchemaIncompatible, artifact_get, catalog, document_get, milestone_check, rollback, stale, task_artifact, task_get, task_promote, task_show, task_status, task_update
 
 
@@ -19,7 +22,8 @@ class _Parser(argparse.ArgumentParser):
         raise ValueError(message)
 
 
-def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset: int = 0) -> dict[str, object]:
+def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset: int = 0,
+                 view: str = "compact", since_revision: int | None = None) -> dict[str, object]:
     """Attach the one-shot lifecycle notice at the Codex CLI boundary."""
     anchor = task_authority.read(root)
     if anchor is not None:
@@ -32,7 +36,7 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset:
             return {"ok": False, "status": "TASK_AUTHORITY_CONFLICT", "task_id": anchor["task_id"],
                     "authority_sha256": task_authority.digest(task_authority.path(root)),
                     "recovery_action": "task-recover-authority --expected-authority-sha256 <authority_sha256> --reason <reason>"}
-    out = task_status(root, evidence_offset=evidence_offset)
+    out = task_status(root, evidence_offset=evidence_offset, view=view, since_revision=since_revision)
     identity_summary = project_identity.summary(root)
     if identity_summary is not None:
         out["Project Identity"] = identity_summary
@@ -48,20 +52,81 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset:
 
 
 def _controller_evidence_output(root: Path, args: argparse.Namespace, out: dict) -> dict:
-    """Retain decision evidence beside existing Controller operation results."""
+    """Retain decision evidence beside Controller operation results.
+
+    The evidence is the Core compact summary: totals plus a bounded list of
+    open items (paged by ``next_offset``), not the full Evidence Continuity
+    page. A write response that already carries it, and a revision conflict
+    whose ``changes_since`` embeds it, are not given a second copy.
+    """
     if args.command not in {
         "task-update", "task-artifact", "task-promote", "task-evidence-register",
         "task-judge", "task-close", "task-mode", "task-dispose-dependency",
         "task-observe", "document-maintain", *project_identity.MUTATIONS,
     } or getattr(args, "role", "controller") != "controller":
         return out
+    if "evidence" in out or out.get("code") == TASK_REVISION_CONFLICT:
+        return out
     try:
         state = core._load_state(root)
         if state.get("evidence_continuity"):
-            return {**out, "Evidence Continuity": core._continuity_status(state)}
+            return {**out, "evidence": core.evidence_summary(state)}
     except (ValueError, OSError, RuntimeError):
-        return {**out, "Evidence Continuity": {"status": "UNKNOWN"}}
+        return {**out, "evidence": {"status": "UNKNOWN"}}
     return out
+
+
+@contextlib.contextmanager
+def _inline_input(value: str | None, input_path: str | None):
+    """Yield the one input path for a Controller operation.
+
+    ``--input`` is a file path (``-`` reads stdin). ``--json`` carries one inline
+    JSON object, optionally in the ``utf8-base64:`` transport that the PreToolUse
+    hook applies to a single-quoted literal so shell quoting cannot alter it.
+    The decoded object is handed to Core through a private temporary file, so
+    Core's decoding, validation and error contract stay the single path.
+    """
+    if (value is None) == (input_path is None):
+        raise ThalirisError("INPUT_SOURCE_INVALID", "exactly one of --input or --json is required",
+                            recovery="pass --input <file|-> or --json '<one JSON object>'")
+    if input_path is not None:
+        yield input_path
+        return
+    try:
+        body = observation_transport.decode(value)
+    except ValueError as exc:
+        raise ThalirisError(
+            "INPUT_JSON_INVALID", "invalid --json: " + str(exc),
+            recovery="supply one JSON object, or use --input <file|->",
+        ) from exc
+    if not isinstance(body, dict):
+        raise ThalirisError("INPUT_NOT_OBJECT", "task input must be a JSON object",
+                            recovery="wrap the payload in a JSON object")
+    with tempfile.TemporaryDirectory(prefix="thaliris-json-") as directory:
+        path = Path(directory) / "input.json"
+        path.write_bytes(json.dumps(body, ensure_ascii=False).encode("utf-8"))
+        yield str(path)
+
+
+def _write_utf8(text: str, *, newline: bool = True) -> None:
+    """Write text as UTF-8 bytes, independent of the process console code page.
+
+    Output that keeps non-ASCII characters (bootstrap, controller guidance and
+    hook context) must not be re-encoded by a locale code page such as cp1252
+    or cp936. Other commands stay ASCII-escaped JSON.
+    """
+    text = text + "\n" if newline else text
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)
+        return
+    sys.stdout.flush()
+    buffer.write(text.encode("utf-8"))
+    buffer.flush()
+
+
+def _write_utf8_line(text: str) -> None:
+    _write_utf8(text)
 
 
 def _add_global_arguments(parser: argparse.ArgumentParser) -> None:
@@ -76,6 +141,13 @@ def _add_global_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--task-id", dest="selected_task_id", help="explicit task selection; not an authority grant")
     parser.add_argument("--session-id", help="Controller-selected session association; Host assurance remains UNKNOWN")
+
+
+_INPUT_HELP = {
+    "task-update": "append mechanical ledger records with strict revision CAS",
+    "task-evidence-register": "register requirements and handoffs with strict revision CAS",
+    "task-judge": 'record one judgment object, or an atomic ordered batch {"judgments":[...]} in one revision',
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -177,15 +249,16 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--human-instruction", required=True)
     q.add_argument("--base-revision", type=int, required=True)
     q.add_argument("--expected-authority-sha256", required=True)
-    q = sub.add_parser("task-update")
-    q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
-    q.add_argument("--base-revision", required=True, type=int)
-    q.add_argument("--input", required=True)
-    for name in ("task-evidence-register", "task-judge", "document-maintain"):
-        q = sub.add_parser(name)
+    for name in ("task-update", "task-evidence-register", "task-judge", "document-maintain"):
+        q = sub.add_parser(name, help=_INPUT_HELP.get(name))
         q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
         q.add_argument("--base-revision", required=True, type=int)
-        q.add_argument("--input", required=True)
+        if name == "document-maintain":
+            q.add_argument("--input", required=True)
+        else:
+            source = q.add_mutually_exclusive_group(required=True)
+            source.add_argument("--input", help="JSON object file path, or - for stdin")
+            source.add_argument("--json", help="one inline JSON object (single-quoted literal or utf8-base64:...)")
         if name == "task-evidence-register":
             q.add_argument("--controller-session-id-hash", help=argparse.SUPPRESS)
         if name == "document-maintain":
@@ -200,7 +273,10 @@ def _parser() -> argparse.ArgumentParser:
     observation.add_argument("--input")
     observation.add_argument("--observation-json", help="one inline JSON observation; useful to readonly native roles")
     sub.add_parser("task-show")
-    q = sub.add_parser("task-status", help="bounded Controller routing packet")
+    q = sub.add_parser("task-status", help="bounded Controller routing packet (compact by default)")
+    q.add_argument("--view", choices=("compact", "full"), default="compact",
+                   help="compact: counts plus open evidence summary; full: Evidence Continuity page")
+    q.add_argument("--since-revision", type=int, help="add a bounded review hint for changes after this revision")
     q.add_argument("--evidence-offset", type=int, default=0)
     q.add_argument("--suppress-protocol-notice", action="store_true", help=argparse.SUPPRESS)
     q = sub.add_parser("task-get", help="retrieve one current-task object by ID")
@@ -300,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
         root = args.root.resolve()
         if args.command == "execution-wait" and not args.arguments:
             from .execution_observation import guide
-            print(json.dumps(guide(include_source=args.tool_source), ensure_ascii=False))
+            _write_utf8_line(json.dumps(guide(include_source=args.tool_source), ensure_ascii=False))
             return 0
         command_task_id = getattr(args, "task_id", None) if args.command in {"task-abandon", "task-observe", "document-maintain"} else None
         if args.selected_task_id and command_task_id and args.selected_task_id != command_task_id:
@@ -316,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
             runner = controller_instructions.runner_command(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME)
             if args.resident:
                 delivery = controller_instructions.guidance_delivery_fields(runner)
-                print(json.dumps({
+                _write_utf8_line(json.dumps({
                     "ok": True,
                     "controller_guidance_sha256": delivery["controller_guidance_sha256"],
                     "controller_guidance_utf8_bytes": delivery["controller_guidance_utf8_bytes"],
@@ -325,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 content = (controller_instructions.render(runner, section=args.section) if args.section
                            else controller_instructions.index(runner))
-                print(json.dumps({"ok": True, "content": content}, ensure_ascii=False))
+                _write_utf8_line(json.dumps({"ok": True, "content": content}, ensure_ascii=False))
             return 0
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
@@ -353,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 response = codex_adapter.audit_hook(root, args.event, payload, args.managed_hook_abi)
             if response:
-                sys.stdout.write(response)
+                _write_utf8(response, newline=False)
             return 0
         if args.command == "execution-wait":
             if args.tool_source:
@@ -447,9 +523,15 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "task-dispose-dependency": out = lifecycle.task_dispose_dependency(root, args.handoff_id, args.base_revision, args.expected_lifecycle_sha256, args.reason)
         elif args.command == "task-associate": out = lifecycle.associate_task(root, str(core.selected_task(root)), lifecycle._identity_hash(args.session_id), args.expected_authority_sha256)
         elif args.command == "task-mode": out = task_authority.switch_mode(root, args.expected_authority_sha256, args.base_revision, args.mode, args.human_instruction)
-        elif args.command == "task-update": out = task_update(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
-        elif args.command == "task-evidence-register": out = codex_adapter.task_evidence_register(root, args.role, args.base_revision, args.input, args.controller_session_id_hash)
-        elif args.command == "task-judge": out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
+        elif args.command == "task-update":
+            with _inline_input(args.json, args.input) as source:
+                out = task_update(root, codex_adapter.controller_actor(args.role), args.base_revision, source)
+        elif args.command == "task-evidence-register":
+            with _inline_input(args.json, args.input) as source:
+                out = codex_adapter.task_evidence_register(root, args.role, args.base_revision, source, args.controller_session_id_hash)
+        elif args.command == "task-judge":
+            with _inline_input(args.json, args.input) as source:
+                out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, source, compact_evidence=True)
         elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
         elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
         elif args.command == "identity-status": out = identity.identity_status(root)
@@ -457,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "identity-trace": out = identity.identity_trace(root, args.ref, args.direction, args.depth)
         elif args.command in project_identity.MUTATIONS: out = getattr(identity, args.command.replace("-", "_"))(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
         elif args.command == "task-show": out = task_show(root)
-        elif args.command == "task-status": out = _task_status(root, suppress_protocol_notice=args.suppress_protocol_notice, evidence_offset=args.evidence_offset)
+        elif args.command == "task-status": out = _task_status(root, suppress_protocol_notice=args.suppress_protocol_notice, evidence_offset=args.evidence_offset, view=args.view, since_revision=args.since_revision)
         elif args.command == "task-get": out = task_get(root, args.id)
         elif args.command == "artifact-get": out = artifact_get(root, args.id)
         elif args.command == "task-artifact": out = task_artifact(root, args.base_revision, args.id, args.path, args.summary, producer=(codex_adapter.semantic_role(args.producer_role) if getattr(args, "producer_role", None) else None), registered_by=codex_adapter.controller_actor(args.role), evidence_refs=args.source_ref or None, supersedes=args.supersedes or None)
@@ -471,8 +553,8 @@ def main(argv: list[str] | None = None) -> int:
         out = _controller_evidence_output(root, args, out)
         if args.command == "codex-bootstrap":
             out = codex_bootstrap.ordered_response(out)
-            print(json.dumps(out, ensure_ascii=False, indent=2 if args.pretty else None,
-                             separators=None if args.pretty else (",", ":")))
+            _write_utf8_line(json.dumps(out, ensure_ascii=False, indent=2 if args.pretty else None,
+                                        separators=None if args.pretty else (",", ":")))
         else:
             print(json.dumps(out, sort_keys=True, indent=2 if args.pretty else None, separators=None if args.pretty else (",", ":")))
         return 0 if out.get("ok", False) else 3
@@ -481,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
         if args is not None and args.command == "codex-bootstrap":
             result.update(codex_bootstrap.controller_guidance_fields(args.controller_guidance_sha256))
             result = codex_bootstrap.ordered_response(result)
-            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            _write_utf8_line(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         else:
             print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 3
@@ -491,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
             diagnostics.failure("dispatch")
             print(json.dumps({"ok": False, "error": "HOOK_DISPATCH_FAILED"}, separators=(",", ":")))
             return 2
-        result = {"ok": False, "error": str(exc)}
+        result = error_envelope(exc)
         if args is not None and root is not None:
             result = _controller_evidence_output(root, args, result)
         if bootstrap_requested or (args is not None and args.command == "codex-bootstrap"):
@@ -500,7 +582,7 @@ def main(argv: list[str] | None = None) -> int:
             result["status"] = "BOOTSTRAP_UNAVAILABLE"
             result.update(codex_bootstrap.controller_guidance_fields(args.controller_guidance_sha256))
             result = codex_bootstrap.ordered_response(result)
-            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            _write_utf8_line(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         else:
             print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 2
