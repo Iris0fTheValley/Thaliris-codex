@@ -208,7 +208,8 @@ def test_inline_json_is_accepted_for_controller_writes_and_requires_exactly_one_
     assert code == 2 and broken["code"] == "INPUT_JSON_INVALID"
 
 
-def test_controller_hook_transports_inline_json_literal_as_data(two_children, capsys):
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+def test_controller_hook_transports_inline_json_literal_as_data(two_children, capsys, shell):
     root, task_id, children = two_children
     (_, _, first), (_, _, second) = children
     _observe_both(root, children)
@@ -216,9 +217,12 @@ def test_controller_hook_transports_inline_json_literal_as_data(two_children, ca
     body = {"judgments": [_judgment("J1", [f"{first}.O1", f"{second}.O1"])]}
     body["judgments"][0]["reasoning"] = "apply_patch was only discussed; Native's text > not.txt $(x) `y`"
     inline = json.dumps(body, separators=(",", ":"))
+    literal = "'" + inline.replace("'", "''") + "'" if shell == "powershell" else shlex.quote(inline)
     command = (f"thaliris --root '{root}' --task-id {task_id} task-judge --role controller "
-               f"--base-revision {revision} --json " + "'" + inline.replace("'", "''") + "'")
-    raw, _payload = _invoke_hook_command(root, _event(), command)
+               f"--base-revision {revision} --json " + literal)
+    event = _event()
+    raw = lifecycle.handle_hook(root, "PreToolUse", {
+        **event, "tool_name": "Bash", "tool_input": {"command": command, "shell": shell}})
     updated = json.loads(raw)["hookSpecificOutput"]["updatedInput"]["command"]
     assert "utf8-base64:" in updated and "apply_patch" not in updated
     tokens = [token.strip("\"'") for token in shlex.split(updated, posix=False)]
