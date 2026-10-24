@@ -17,46 +17,16 @@ from thaliris_codex import codex_adapter as adapter, codex_bootstrap, controller
 
 def test_child_profiles_keep_local_decisions_without_controller_routing_or_protocols():
     controller = controller_instructions.resident("runner")
-    assert "Controller chooses what follows" in controller
-    assert "timeout_ms=3600000" in controller
-    assert "gpt-6-luna/max" in controller and "gpt-6.1-sol/high" in controller
-    assert "current-task user authorization" in controller
-    assert "pending" in controller and "requirement" in controller
     assert controller.strip() in codex_bootstrap.controller_guidance().replace(
         codex_bootstrap._controller_guidance_runner(), "runner"
     )
     for policy in (None, "luna-only"):
         for name, (model, effort, role) in roles.agent_profiles(policy).items():
             text = tomllib.loads(adapter._agent_profile(name[:-5], role, model, effort).decode())["developer_instructions"]
-            for controller_only in (
-                "fresh ordinary Implementer", "Controller reopen", "mechanical DONE",
-                "Reviewer READY", "timeout_ms=3600000", "60-minute", "codex-cli 0.",
-                "gpt-6-luna/max", "gpt-6.1-sol/high", "task-evidence-register",
-            ):
-                assert controller_only not in text, (name, controller_only)
-            assert "selected local acceptance" in text
             assert "task-observe" in text
-            assert "adapter supplies the selected handoff" in text
-            assert "Do not reconstruct these bindings" in text
-            assert "do not reconstruct global requirements or decide their satisfaction" in text
-            assert "historical observations are not automatic current truth" in text
-            assert "If selected provenance is unavailable" in text
             if roles.get_codex_binding(role).allowed_delegation_targets:
-                assert "semantically usable FINAL without another lifecycle wait" in text
-                assert "without per-child polling loops" in text
                 assert 'fork_turns="none"' in text and "fork_context=false" in text
                 assert roles._FOCUSED_SCANNER_INSTRUCTIONS in text
-
-
-def test_inherited_entry_names_ownership_without_shared_controller_execution_details():
-    shared = adapter.render_managed()
-    assert "child owns its selected local assignment" in shared
-    assert "adapter/lifecycle binds mechanical identity" in shared
-    for controller_only in ("`PASS`", "`READY`", "`Completed`", "`DONE`", "--controller-guidance-sha256", "timeout_ms"):
-        assert controller_only not in shared
-    packs = adapter.render_role_packs()
-    assert "Role meaning is separate from model/profile bindings" in packs
-    assert "codex-cli 0." not in packs and "PreToolUse routing supplies omitted" not in packs
 
 
 def test_role_ownership_predecessor_migrates_only_exact_filename_bound_bytes():

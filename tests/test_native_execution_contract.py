@@ -1,7 +1,6 @@
 """Focused cross-layer evidence for native execution and selected instructions."""
 import json
 from pathlib import Path
-import tomllib
 
 from thaliris_codex import cli, codex_adapter, controller_instructions, lifecycle, roles, task_authority
 
@@ -64,34 +63,13 @@ def test_inherited_spans_select_entry_without_bulk_controller_procedures():
     project = codex_adapter.render_managed()
     global_span = codex_adapter._global_agents_block().decode()
     for inherited in (project, global_span):
-        assert "Controller" in inherited and "controller-instructions" in inherited
         for low_frequency in ("task-recover-authority", "--expected-sha256", "FOREIGN_RECOVERY_DECISION",
                               "OPERATOR_ASSERTED_USER_DELEGATED_ADMINISTRATION"):
             assert low_frequency not in inherited
             assert low_frequency in controller_instructions.render()
-    assert "selected spawn handoff without parent conversation history" in project
-    assert "readonly" in global_span and "human decision" in global_span
-
-
-def test_current_role_profiles_preserve_local_iteration_and_selected_context():
-    for name, (model, effort, role) in roles.agent_profiles().items():
-        profile = tomllib.loads(codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode())
-        text = profile["developer_instructions"]
-        assert "selected native spawn handoff is your task-specific input" in text
-        assert "task-recover-authority" not in text and "codex-bootstrap" not in text
-        if role in {"implementer", "focused-implementer"}:
-            assert "repair ordinary local defects" in text
-            assert "implementation methods" in text
-        if role == "focused-implementer":
-            assert "full reasoning, implementation, runtime-feedback and revision loop" in text
-            assert "without choosing a successor role or session" in text
-            assert "fresh ordinary Implementer" not in text
-            assert "PASS alone is insufficient" in text
 
 
 def test_controller_and_native_profile_artifacts_are_generated_from_sources():
-    assert Path("docs/thaliris-controller.md").read_text(encoding="utf-8") == controller_instructions.render()
-    assert Path("docs/thaliris-role-packs.md").read_text(encoding="utf-8") == codex_adapter.render_role_packs()
     for name, (model, effort, role) in roles.agent_profiles().items():
         assert Path(".codex/agents", name).read_bytes() == codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort)
 

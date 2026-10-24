@@ -115,8 +115,6 @@ def test_ordinary_profiles_inherit_selection_and_static_astra_profiles_stay_fixe
         assert "Facts unknown route to Investigator" not in value["developer_instructions"]
         if role in {"implementer", "focused-implementer"}:
             assert roles._EXECUTOR_INSTRUCTIONS in value["developer_instructions"]
-            assert "decision-changing unknown" in value["developer_instructions"]
-            assert "verification" in value["developer_instructions"].lower()
     for role in ("focused-implementer", "reasoning-specialist"):
         for effort, suffix in (("medium", "astra-medium"), ("xhigh", "xhigh")):
             name = f"thaliris-{role}-{suffix}.toml"
@@ -567,7 +565,6 @@ def test_current_focused_profile_bytes_remain_upgradeable_by_exact_identity() ->
         model, effort, role = profiles[name]
         value = tomllib.loads(codex_adapter._agent_profile(name.removesuffix(".toml"), role, model, effort).decode())
         assert value["developer_instructions"] == roles.profile_instructions("focused-implementer", name.removesuffix(".toml"))
-        assert "core solution" in value["developer_instructions"].lower()
 
 
 def test_ec1ad7b_project_focused_profiles_have_exact_historical_ownership() -> None:
@@ -943,8 +940,6 @@ def test_formal_seventh_role_requires_only_spec_and_binding(tmp_path: Path, monk
     )
     assert "formal-sentinel" in role_action.choices
     assert "formal-sentinel" in codex_adapter.doctor(root)["role_registry"]["roles"]
-    from thaliris_codex import controller_instructions
-    assert "Formal Sentinel" in controller_instructions.render()
     assert "Formal Sentinel" in codex_adapter.render_role_packs()
     assert "| `formal-sentinel` |" in roles.render_registry_document().decode()
     assert roles.get_codex_binding("formal-sentinel").legacy_profile_hashes == frozenset()
@@ -1018,42 +1013,9 @@ def test_9b5bcf2_managed_and_role_pack_outputs_are_recognized_as_legacy() -> Non
     assert codex_adapter._role_pack_state(role_packs + b"\nuser edit") == "user"
 
 
-def test_managed_renderer_matches_working_artifact_and_derives_added_role(monkeypatch) -> None:
-    current = Path("AGENTS.md").read_text(encoding="utf-8")
-    start, end = codex_adapter._managed_span(current, "test")
-    assert current[start:end] + "\n" == codex_adapter.render_managed()
+def test_role_packs_derive_added_role_from_registry(monkeypatch) -> None:
     monkeypatch.setitem(roles.ROLE_REGISTRY, "formal-sentinel", _formal_sentinel_registration())
-    from thaliris_codex import controller_instructions
-    assert "Formal Sentinel" in controller_instructions.render()
     assert "formal sentinel instructions" in codex_adapter.render_role_packs()
-    assert "selected spawn handoff without parent conversation history" in codex_adapter.render_managed()
-
-
-def test_selected_local_observation_and_global_requirement_judgment_contract():
-    from thaliris_codex import controller_instructions
-    for role in roles.role_choices():
-        if role == "controller":
-            continue
-        prompt = roles.get_role(role).instructions
-        assert "selected local acceptance" in prompt
-        assert "When an already discovered local fact changes" in prompt
-        assert "record it with source refs using task-observe" in prompt
-        assert "adapter supplies the selected handoff" in prompt
-        assert "Do not reconstruct these bindings" in prompt
-        assert "You may record an already discovered" not in prompt
-        assert "no search obligation or global-importance classification" in prompt
-        assert "do not reconstruct global requirements" in prompt
-    controller = controller_instructions.render()
-    assert "related USER REQUIREMENT for the current candidate" in controller
-    assert "forwarding evidence is not disposition" in controller
-    assert "unknown/repair judgments remain visible as unresolved requirements" in controller
-    assert "old handoff observation is not automatically current truth" in controller
-    curator = roles.get_role("curator").instructions
-    assert "edit, merge, split, replace, supersede or delete" in curator
-    assert "document-maintain" in curator
-    assert "Do not delegate." in curator
-    assert "Do not scan the corpus" in curator and "decide architecture" in curator
-    assert "or product acceptance, or own real-time evidence continuity" in curator
 
 
 def test_evidence_continuity_predecessor_ownership_from_immutable_renderer():

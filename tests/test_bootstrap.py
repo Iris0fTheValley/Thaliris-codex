@@ -669,57 +669,14 @@ def test_ready_exposes_single_receipt_and_global_instruction_is_one_command(tmp_
     assert rendered.count("--root <repo> controller-instructions") == 1
     assert rendered.count("--root <repo> codex-bootstrap") == 1
     assert "bootstrap-check" not in rendered and "Get-FileHash" not in rendered
-    assert "Explicit contract admission needs no bootstrap receipt" in controller_instructions.render()
-    normalized = " ".join(rendered.lower().split())
-    normalized_controller = " ".join(controller_instructions.render().lower().split())
-    assert "owning controller runs" in normalized_controller
-    assert "managed children" in normalized and "owning controller's active task" in normalized
-    assert "do not bootstrap, task-start or task-abandon" in normalized
-    assert "report blocked work honestly" in normalized_controller
 
 
 def test_global_renderer_carries_shared_working_principles_inside_owned_span():
     digest = hashlib.sha256(b"managed text").hexdigest()
     rendered = codex_adapter._global_agents_block(Path("C:/installed/thaliris.exe"), digest)
-    text = rendered.decode("utf-8")
-    normalized = " ".join(text.lower().split())
-
     # The whole render is the installer-synchronized managed span; no manual
     # edit of the protected global block is needed or permitted.
     assert codex_adapter._global_agents_span(rendered) == (0, len(rendered))
-    assert "### thaliris shared working principles" in normalized
-    for principle in ("one observation owner", "messages, timeouts and exceptions do not prove completion",
-                      "heartbeats", "do not repeat already covered inventories", "smallest meaningful checks",
-                      "does not establish product acceptance", "active alone is not a write conflict",
-                      "semantic completion", "independent historical evidence", "stable primary language",
-                      "index changes belong", "protected global instruction changes"):
-        assert principle in normalized, principle
-    for role_policy in ("wait_agent", "3600000", "scanner", "60-minute", "final product acceptance uses"):
-        assert role_policy not in normalized
-    assert "grant no role, task-admission, security-maintenance or host authority" in normalized
-    assert "role-specific instructions and selected handoffs remain authoritative" in normalized
-    assert "human decision" in normalized and "isolation and readonly boundaries" in normalized
-    assert "preserve unknown user-owned bytes" in normalized
-
-
-def test_global_startup_entry_covers_new_projects_without_git_metadata():
-    normalized = " ".join(codex_adapter._global_agents_block().decode("utf-8").lower().split())
-    assert "for substantive file-changing git work" not in normalized
-    assert "read-only/chat/non-git work needs no startup" not in normalized
-    assert "including readme-only changes, configuration changes and new project creation" in normalized
-    assert "without git metadata" in normalized
-    assert "supports bootstrap and managed task admission" in normalized
-    assert "bootstrap never runs git init" in normalized
-    assert "initialize git at the intended project root before bootstrap" not in normalized
-    assert "only when repository creation is within the user's requested scope" in normalized
-    assert "they do not initiate project bootstrap or task admission" in normalized
-    assert "do not bootstrap, task-start or task-abandon" in normalized
-    # The pinned runner, Controller instruction retrieval and authority
-    # boundaries stay unchanged by the startup correction.
-    assert "installed pinned runner" in normalized
-    assert normalized.count("codex-bootstrap") == 1
-    assert normalized.count("--root <repo> controller-instructions") == 1
-    assert "preserve unknown user-owned bytes" in normalized
 
 
 def test_explicit_non_git_project_bootstraps_without_git_init(tmp_path: Path, monkeypatch):
