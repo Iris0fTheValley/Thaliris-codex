@@ -120,6 +120,7 @@ _CONTEXT_OPERATIONS = frozenset({
     "task-evidence-register", "task-observe", "task-judge", "document-maintain",
     "identity-status", "identity-get", "identity-trace",
     "identity-amend", "identity-challenge", "identity-relate",
+    "identity-note", "identity-suggest",
 })
 _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "controller-instructions",
@@ -129,6 +130,7 @@ _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "task-abandon", "version", "task-evidence-register", "task-observe", "task-judge", "document-maintain",
     "identity-status", "identity-get", "identity-trace",
     "identity-amend", "identity-challenge", "identity-relate",
+    "identity-note", "identity-suggest",
 })
 _CHILD_CONTEXT_READS = frozenset({
     "controller-instructions",
@@ -142,6 +144,7 @@ _CHILD_CONTEXT_MUTATIONS = frozenset({
     "rollback", "init", "uninstall", "codex-uninstall",
     "task-evidence-register", "task-observe", "task-judge", "document-maintain",
     "identity-amend", "identity-challenge", "identity-relate",
+    "identity-note", "identity-suggest",
 })
 _CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")

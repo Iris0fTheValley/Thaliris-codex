@@ -328,6 +328,20 @@ denies an apparent direct write to the identity record files (`IDENTITY.md`, `le
 like the other guards it is not a sandbox. Detection of any other change relies on Core's
 `UNRECORDED_CHANGE`/`INVALID` status plus Git diff.
 
+Natural formation (Core 0.5.2): `identity-note --role controller` records (`--input FILE|-` or
+`--json`, `{"quote": ..., "kind"?, "context"?, "refs"?}`), retracts (`{"retract": "N-000k",
+"reason": ...}`) or lists (`--list [--include-retracted]`) the user's verbatim long-term
+statements; `identity-suggest --role controller --on|--off|--clear --scope
+session|workspace|project|global` sets the offer preference. Both are Controller-only (children
+are denied like `identity-amend`) but need neither an ACTIVE task nor `--base-revision`, and
+their storage is outside the repository (`THALIRIS_HOME`, default `~/.thaliris`). A successful
+`task-close` adds `identity_offer` to its result when Core has a new pending basis note and
+offers are enabled (Core records it as shown, so it appears once per new note); a failure leaves
+the field absent. The global `--session-id`, when the Controller supplies it, is passed to Core as
+the session key (session-scope preferences, `identity-status`); Codex exposes no other stable
+native session id to the CLI, so without it session scope is unavailable. Nothing is added to
+bootstrap or SessionStart.
+
 ## Enforcement and assurance
 
 Project bootstrap `READY` means definitions are available, not that a Host actor is authenticated. An explicit Controller-selected UTF-8 contract (`human_instruction`, `boundary`, `invariants`, `acceptance`, and optional `execution_mode`, defaulting to `delegated`) admits task intent without requiring a bootstrap receipt or one-shot Hook bearer. Optional legacy proofs remain strictly checked when supplied. The contract is governance, not universal authentication; Host Root assurance remains `UNKNOWN`.

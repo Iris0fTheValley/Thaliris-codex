@@ -30,6 +30,7 @@ TEXT_V2 = TEXT_V1 + "\n## NG-1 Non-goal: hosting\nWe do not host.\n"
 
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
+    monkeypatch.setenv("THALIRIS_HOME", str(tmp_path / "thaliris-home"))
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -238,7 +239,8 @@ def test_identity_guidance_is_resident_and_expresses_the_layered_procedure():
     concepts(section,
              ("task authority", "memory", "milestones", "evidence"),
              ("legacy", "agent-memory", "labels", "confer", "no identity authority"),
-             ("absent identity is normal", "only on the user's decision"),
+             ("most projects start with no identity", "nothing is blocked", "current task always comes first"),
+             ("identity-note", "verbatim", "identity_offer", "identity-suggest", "no answer means no", "never write a draft"),
              ("directional", "architectural", "replanning", "cross-layer", "ordinary local repair"),
              ("locate", "trace up", "repair", "lowest sufficient layer", "challenge up", "amend", "human owner's explicit decision"),
              ("never by editing", "project-identity"),
@@ -248,3 +250,107 @@ def test_identity_guidance_is_resident_and_expresses_the_layered_procedure():
              ("never rewrites a running task's frozen contract",),
              ("no identity text is injected into children", "quote selected item ids and text", "bind the child's work"),
              ("identity-status", "identity-get", "identity-trace", "identity-amend", "identity-challenge", "identity-relate"))
+
+
+NOTE = {"quote": "This project exists to keep our ledger honest.", "kind": "purpose"}
+
+
+def note(capsys, root, value=None, role="controller", *extra):
+    path = packet(root, "note.json", value if value is not None else NOTE)
+    return run(capsys, root, "identity-note", "--role", role, "--input", path, *extra)
+
+
+def test_controller_notes_lists_and_retracts_without_a_task(workspace, capsys):
+    assert core.selected_task(workspace) is None
+    code, added = note(capsys, workspace)
+    assert code == 0 and added["ok"], added
+    code, listed = run(capsys, workspace, "identity-note", "--role", "controller", "--list")
+    assert code == 0 and listed["ok"] and "ledger honest" in json.dumps(listed)
+    code, retracted = note(capsys, workspace, {"retract": "N-0001", "reason": "wrong recording"})
+    assert code == 0 and retracted["ok"], retracted
+    code, listed = run(capsys, workspace, "identity-note", "--role", "controller", "--list")
+    assert "ledger honest" not in json.dumps(listed)
+    code, listed = run(capsys, workspace, "identity-note", "--role", "controller", "--list", "--include-retracted")
+    assert "ledger honest" in json.dumps(listed)
+    code, status = run(capsys, workspace, "identity-status")
+    assert code == 0 and status["state"] == "ABSENT" and status["basis"]["retracted"] == 1
+
+
+def test_inline_json_note_and_missing_source(workspace, capsys):
+    code, added = run(capsys, workspace, "identity-note", "--role", "controller", "--json", json.dumps(NOTE))
+    assert code == 0 and added["ok"], added
+    code, refused = run(capsys, workspace, "identity-note", "--role", "controller")
+    assert code != 0 and not refused["ok"]
+
+
+@pytest.mark.parametrize("role", ["implementer", "reviewer", "curator", "investigator"])
+def test_children_cannot_note_or_suggest_by_cli_or_hook(workspace, capsys, role):
+    code, refused = note(capsys, workspace, role=role)
+    assert code == 2 and "only Controller" in refused["error"]
+    code, refused = run(capsys, workspace, "identity-suggest", "--role", role, "--off", "--scope", "project")
+    assert code == 2 and "only Controller" in refused["error"]
+    assert run(capsys, workspace, "identity-note", "--role", "controller", "--list")[1]["notes"] == []
+    for command in ("thaliris identity-note --role controller --list",
+                    "thaliris identity-suggest --role controller --off --scope project"):
+        assert "THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION" in child_call(workspace, command, role), command
+
+
+def test_controller_hooks_allow_formation_commands(workspace):
+    start(workspace)
+    for command in ("thaliris identity-note --role controller --list",
+                    "thaliris identity-suggest --role controller --off --scope project"):
+        assert lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, command), lifecycle.MANAGED_HOOK_ABI) == "", command
+        assert "deny" in lifecycle.handle_hook(workspace, "PreToolUse", payload(workspace, command, agent_id="child", agent_type="thaliris-implementer"), lifecycle.MANAGED_HOOK_ABI)
+
+
+def test_suggest_scopes_and_session_key_passthrough(workspace, capsys):
+    note(capsys, workspace)
+    code, off = run(capsys, workspace, "identity-suggest", "--role", "controller", "--off", "--scope", "project")
+    assert code == 0 and off["ok"], off
+    code, status = run(capsys, workspace, "identity-status")
+    assert status["suggestions"] == {"enabled": False, "source": "project"}
+    # Session scope needs the native session key; Core refuses it without one.
+    code, refused = run(capsys, workspace, "identity-suggest", "--role", "controller", "--on", "--scope", "session")
+    assert code != 0 and not refused["ok"]
+    code, on = run(capsys, workspace, "--session-id", "s-1", "identity-suggest", "--role", "controller", "--on", "--scope", "session")
+    assert code == 0 and on["ok"], on
+    assert run(capsys, workspace, "--session-id", "s-1", "identity-status")[1]["suggestions"] == {"enabled": True, "source": "session"}
+    assert run(capsys, workspace, "--session-id", "s-2", "identity-status")[1]["suggestions"]["source"] == "project"
+    for scope in ("workspace", "global"):
+        assert run(capsys, workspace, "identity-suggest", "--role", "controller", "--clear", "--scope", scope)[0] == 0
+
+
+def _close(capsys, root, task_id):
+    return run(capsys, root, "--task-id", task_id, "task-close", "--base-revision", "1")
+
+
+def test_close_carries_identity_offer_once_for_a_new_note(workspace, capsys):
+    task_id = start(workspace)["task_id"]
+    note(capsys, workspace)
+    code, closed = _close(capsys, workspace, task_id)
+    assert code == 0 and closed["ok"] and "1 user statement" in closed["identity_offer"] and "identity-suggest" in closed["identity_offer"]
+    task_id = start(workspace)["task_id"]
+    code, again = _close(capsys, workspace, task_id)
+    assert code == 0 and "identity_offer" not in again
+    note(capsys, workspace, {"quote": "We will never host user data."})
+    task_id = start(workspace)["task_id"]
+    assert "identity_offer" in _close(capsys, workspace, task_id)[1]
+
+
+def test_close_has_no_offer_without_notes_or_when_off(workspace, capsys):
+    task_id = start(workspace)["task_id"]
+    assert "identity_offer" not in _close(capsys, workspace, task_id)[1]
+    note(capsys, workspace)
+    run(capsys, workspace, "identity-suggest", "--role", "controller", "--off", "--scope", "project")
+    task_id = start(workspace)["task_id"]
+    assert "identity_offer" not in _close(capsys, workspace, task_id)[1]
+
+
+def test_offer_failure_leaves_close_result_unchanged(workspace, capsys, monkeypatch):
+    from thaliris import identity_basis
+    def boom(*_a, **_k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(identity_basis, "identity_offer", boom)
+    task_id = start(workspace)["task_id"]
+    code, closed = _close(capsys, workspace, task_id)
+    assert code == 0 and closed["ok"] and "identity_offer" not in closed

@@ -18,7 +18,7 @@ Thaliris builds on the native Agent capabilities of Hosts such as Codex, DeepSee
 
 > **Status: Beta.** Real refactoring work has shown an implementer dispatching an investigation, a Controller starting an independent review, and counterevidence driving repairs. The sample is too small to establish a general quality or cost advantage. See [empirical observations](#empirical-observations).
 >
-> **Versions:** this document describes the source versions on each repository's `main` branch: Core 0.5.1, Codex adapter 0.5.1, Claude Code plugin 0.4.1 and DSH plugin 0.3.1. Version numbers describe source, not an installation on a given machine; updated files in a repository or on disk do not prove that a running Host has loaded the new version.
+> **Versions:** this document describes the source versions on each repository's `main` branch: Core 0.5.2, Codex adapter 0.5.2, Claude Code plugin 0.4.1 and DSH plugin 0.3.1. Version numbers describe source, not an installation on a given machine; updated files in a repository or on disk do not prove that a running Host has loaded the new version.
 
 ## Why more than context management
 
@@ -191,7 +191,7 @@ An initialized repository contains:
 
 Task state stores structured facts, observations and judgments, not conversation transcripts. Persistence and handoff are separate choices: recorded information is not automatically passed to every role.
 
-A project may also have an optional, tracked `.project-identity/`: a cross-task identity baseline that changes only through a recorded amendment by the Controller on the human owner's explicit decision. The Codex Adapter shows the Controller one summary line and never injects identity text into child roles; see [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md).
+A project may also have an optional, tracked `.project-identity/`: a cross-task identity baseline that changes only through a recorded amendment by the Controller on the human owner's explicit decision. The Codex Adapter shows the Controller one summary line and never injects identity text into child roles. Without any setup form, the Controller records the user's own explicit long-term statements verbatim with `identity-note`, and may offer once after a task closes (`identity_offer`) to compose a first version for the user's confirmation; `identity-suggest` turns offers off by scope; see [Project Identity](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-project-identity.md).
 
 ## What it is not
 
@@ -210,7 +210,7 @@ Removing Thaliris should not make the underlying development process incorrect.
 
 ## Native Codex integration
 
-Thaliris-codex connects shared semantics to Codex's native Agents, role profiles, Hooks and session lifecycle. It depends on the separately installed Thaliris Core (Core 0.5.1 or later, below 0.6), which provides task records, evidence and the task authority API; the Codex Adapter handles native admission, routing, identity association and lifecycle observation. See the [integration protocol](adapter/codex/README.md).
+Thaliris-codex connects shared semantics to Codex's native Agents, role profiles, Hooks and session lifecycle. It depends on the separately installed Thaliris Core (Core 0.5.2 or later, below 0.6), which provides task records, evidence and the task authority API; the Codex Adapter handles native admission, routing, identity association and lifecycle observation. See the [integration protocol](adapter/codex/README.md).
 
 Default model and effort routing for ordinary roles is shown below. During managed dispatch, the Adapter supplies omitted selection fields only for an exact registered Thaliris role and preserves explicit choices:
 
