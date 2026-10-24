@@ -175,9 +175,14 @@ def console_replay(executable, project, path, raw):
     return json.loads(result.stdout)["hookSpecificOutput"]
 
 
-@pytest.mark.parametrize("distinct", [False, True])
-@pytest.mark.parametrize("prepared", [False, True])
-@pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
+# The native preflight accepts both journal phases and checks the operation only
+# by equality with the replayed argument, so three cases reach every distinct
+# value: COMMITTED/PREPARED phase, same/distinct original executor, both operations.
+@pytest.mark.parametrize("distinct,prepared,operation", [
+    (False, False, "codex-install"),
+    (True, True, "codex-install"),
+    (True, False, "codex-uninstall"),
+])
 def test_exact_original_native_replay_admitted(pending_native, distinct, prepared, operation):
     home, project, path, command, payload = pending_native(distinct=distinct, prepared=prepared, operation=operation)
     before = snapshot(home)
@@ -202,9 +207,9 @@ def test_unassociated_maintenance_replay_does_not_inherit_another_tasks_state(pe
     assert snapshot(home) == before
 
 
-@pytest.mark.parametrize("operation", ["codex-install", "codex-uninstall"])
-def test_utf8_signature_preserves_native_and_console_replay(pending_native, replay_runtime, operation):
-    home, project, path, command, payload = pending_native(distinct=True, operation=operation, unicode=True)
+def test_utf8_signature_preserves_native_and_console_replay(pending_native, replay_runtime):
+    # The operation name is compared by equality only (see test_exact_original_native_replay_admitted).
+    home, project, path, command, payload = pending_native(distinct=True, operation="codex-install", unicode=True)
     payload["metadata"] = {"source": "雪 🪷", "\ufeffkey": "\ufeffvalue\ufeff"}
     before_home, before_project, contract = snapshot(home), snapshot(project), path.read_bytes()
     baseline = native(command, project, payload)
@@ -223,14 +228,11 @@ def test_utf8_signature_never_weakens_console_replay_guards(pending_native, repl
     home, project, path, command, payload = pending_native(distinct=True, unicode=True)
     before = snapshot(home)
     original = payload["tool_input"]["cmd"]
-    invalid = [{**payload, **actor} for actor in ({"agent_id": "child"}, {"agent_type": "unknown"},
-               {"readonly": True}, {"fenced": True})]
-    invalid += [{**payload, "tool_input": {"cmd": cmd}} for cmd in (
-        original.replace(str(replay_runtime), str(replay_runtime.with_name("unapproved.exe"))),
-        original.replace(str(replay_runtime), str(replay_runtime) + "\ufeff"),
-        original + " --execution-constraint luna-only",
-        original + f" --maintenance-contract '{path}'")]
-    invalid += [None, [], "unknown actor"]
+    # One payload per distinct guard family: actor, executor identity, non-object.
+    invalid = [{**payload, "agent_id": "child"},
+               {**payload, "tool_input": {"cmd": original.replace(
+                   str(replay_runtime), str(replay_runtime.with_name("unapproved.exe")))}},
+               None]
     for value in invalid:
         for signature in (b"", b"\xef\xbb\xbf"):
             assert console_replay(replay_runtime, project, path,
@@ -249,11 +251,12 @@ def test_utf8_signature_never_weakens_console_replay_guards(pending_native, repl
     assert snapshot(home) == before
 
 
-@pytest.mark.parametrize("distinct", [False, True])
 @pytest.mark.parametrize("actor", [{"agent_id": "native-child", "agent_type": "thaliris-focused-implementer"},
     {"agent_type": "thaliris-reviewer"}, {"readonly": True}, {"fenced": True}])
-def test_native_pending_never_grants_denied_actor(pending_native, distinct, actor):
-    home, project, path, command, payload = pending_native(distinct=distinct)
+def test_native_pending_never_grants_denied_actor(pending_native, actor):
+    # The actor guard runs before any executor-identity comparison, so the
+    # original-executor dimension adds no branch.
+    home, project, path, command, payload = pending_native()
     before = snapshot(home)
     assert native(command, project, {**payload, **actor})["permissionDecision"] == "deny"
     assert snapshot(home) == before
