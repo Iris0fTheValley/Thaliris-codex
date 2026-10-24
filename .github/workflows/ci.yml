@@ -81,6 +81,10 @@ jobs:
         run: python -m pytest --ignore=tests/test_runtime_setup.py --ignore=tests/test_runtime_identity.py --ignore=tests/test_platform_launcher_parity.py --ignore=tests/test_independent_host_maintenance.py --ignore=tests/test_prompt_contract.py -k 'not generated' --junitxml=results/behavior.xml
         env:
           THALIRIS_CORE_SOURCE: ${{ github.workspace }}/shared-core
+      # tests/test_owned_tool_wait.js is the only non-pytest test; Node is preinstalled on hosted runners.
+      - name: Owned tool wait helper (Node)
+        if: ${{ !cancelled() }}
+        run: node tests/test_owned_tool_wait.js
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

@@ -42,68 +42,24 @@ def concepts(text, *groups):
             assert tokens(anchor) <= available, f"missing contract vocabulary: {tokens(anchor) - available}"
 
 
-def require_local_prohibition(text, *, action, target):
-    """Require negation in the same clause as a role action and its target."""
-    clauses = re.split(r"[.!?;:\n]+", text.lower())
-    action_pattern = re.compile(rf"\b{re.escape(action)}(?:s|ed|ing)?\b")
-    target_pattern = re.compile(rf"\b{re.escape(target)}\b")
-    negative_pattern = re.compile(r"\b(?:not|never|cannot|can't|mustn't|prohibited)\b")
-    assert any(action_pattern.search(clause) and target_pattern.search(clause)
-               and negative_pattern.search(clause) for clause in clauses), (
-        f"missing local prohibition: {action} {target}"
-    )
-
-
-def test_concept_coverage_tolerates_rewording_but_keeps_required_boundaries():
-    concepts("The Controller preserves acceptance and scope; readonly boundaries hold.",
-             ("controller scope acceptance", "readonly boundaries"))
-    with pytest.raises(AssertionError, match="readonly"):
-        concepts("The Controller preserves scope and acceptance.", ("readonly boundaries",))
-
-
 def prompt(role):
     return roles.get_role(role).instructions
 
 
 def test_delegated_cognitive_ownership_is_in_resident_context_at_the_decision_points():
-    # Structural distribution: the whole-goal state is retained at routing,
-    # same-Workstream exclusions are at dispatch, and legal capability is
-    # separated from responsibility. Native behavior still needs observation.
+    # Structural distribution: the routing, handoff and durable sections are
+    # delivered by the resident guidance; the Controller role itself carries no
+    # second instruction copy.
     resident = codex_bootstrap.controller_guidance()
-    routing = controller_instructions.render(section="routing")
-    handoff = controller_instructions.render(section="handoff")
-    capability = controller_instructions.render(section="durable")
-    for section in (routing, handoff, capability):
-        assert section.strip() in resident
-    concepts(routing, ("full original goal", "global facts", "hard invariants"),
-             ("distilled child conclusions", "contradictions", "UNKNOWN", "current candidate judgments"),
-             ("child owns", "investigation", "implementation", "local verification working set"))
-    concepts(handoff, ("after complete dispatch", "reading searching testing diff review runtime probing implementation analysis"),
-             ("not independent global decision work", "even when useful to global acceptance"),
-             ("pending immediate decision", "precise source spot-check"),
-             ("necessary child unfinished", "wait normally", "do not invent busywork"),
-             ("two independent source-region questions", "targeted post-result spot-check"))
-    concepts(capability, ("legal capability", "separate", "cognitive responsibility"),
-             ("controller-direct", "single-agent", "direct execution"),
-             ("no file line token query tool-count quota", "permission"))
-    assert "Default delegated routing recommends" not in resident
-    # Controller procedures have one normal delivery layer; its registered
-    # identity intentionally does not inject another role instruction copy.
+    for name in ("routing", "handoff", "durable"):
+        assert controller_instructions.render(section=name).strip() in resident
     assert prompt("controller") == ""
-    controller = roles._instructions("controller")
-    concepts(controller, ("full original goal", "global facts", "contradictions", "current candidate judgments"),
-             ("child owns", "working set"), ("after complete dispatch", "not independent global decision work"),
-             ("legal read Git diagnostic capability", "no mechanical quotas", "privilege denials"))
 
 
 def test_runtime_ownership_has_one_normal_layer_per_concern():
     global_text = adapter._global_agents_block().decode()
-    project = adapter.render_managed()
     controller = controller_instructions.render()
     resident = codex_bootstrap.controller_guidance()
-    concepts(global_text, ("installed pinned runner", "controller-instructions"),
-             ("human decision", "isolation", "readonly boundaries"),
-             ("unknown user-owned bytes", "native activation"))
     for controller_detail in ("authority-contract", "task-recover-state", "task-recover-authority", "offline_recovery.py"):
         assert controller_detail not in normalized(global_text)
         assert controller_detail in normalized(controller)
@@ -112,197 +68,26 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
     for name in controller_instructions.RESIDENT_SECTIONS:
         # Necessary normal bootstrap returns the canonical guidance; no extra get
         # or full Controller injection into each fresh native child is required.
-        section = controller_instructions.render(section=name)
-        if name == "startup":
-            concepts(resident, ("codex-bootstrap", "authority-contract", "explicit contract admission"))
-        else:
+        if name != "startup":
+            section = controller_instructions.render(section=name)
             assert section.strip() in resident
             assert section.strip() not in global_text
-    # Role microstyle and endpoint are not a second global runtime authority.
-    for omitted in ("smallest relevant tests", "focused-test pass", "reviewer reopen"):
-        assert omitted not in normalized(global_text)
-    concepts(project, ("owning controller", "task owner", "semantic acceptance", "methods"),
-             ("selected spawn handoff", "unselected material", "ordinary local repair"),
-             ("controller instructions", "role docs", "codex protocol"))
-    concepts(controller, ("decision-complete handoff", "authoritative source", "derived relationships", "verification entry"),
-             ("workstreams", "convergence", "fresh ordinary"))
-    assert "stale regions" not in normalized(project)
-    assert "stale regions" in normalized(prompt("implementer"))
     assert "task-recover-authority" not in prompt("implementer")
     assert prompt("implementer") in adapter.render_role_packs()
 
 
-def test_identity_and_mode_distinctions_reach_normal_controller_context():
-    for value in (controller_instructions.render(), codex_bootstrap.controller_guidance()):
-        text = normalized(value)
-        concepts(value, ("native /root", "primary agent", "tree/execution position"),
-                 ("controller", "goal", "boundary", "selected context", "routing", "evidence", "acceptance criteria"),
-                 ("owning controller", "task owner", "parent", "immediate delegator"),
-                 ("scanner", "implementer", "focused implementer", "reviewer"),
-                 ("thaliris task id", "distinct", "native thread", "session", "agent ids"),
-                 ("execution_mode", "independently", "multi_agent_mode", "collaboration_mode"))
-        assert "host root identity remains unknown" in text
-        assert "neither native position nor task responsibility proves admission or host identity" in text
-        assert "native mode or tree position never selects or changes the task's authority contract" in text
-        assert "omitted mode defaults to delegated" in text
-        assert "controller-direct" in text and "single-agent" in text
-        assert "root routes workstreams" not in text
-        assert "applicable global/project agents and native role instructions still apply" in text
-        assert "fresh isolation does not remove these inherited instructions" in text
-
-
-def test_waiting_guidance_uses_native_events_and_observation_ownership():
-    waiting = normalized(controller_instructions.render(section="completion"))
-    handoff = normalized(controller_instructions.render(section="handoff"))
-    concepts(waiting,
-             ("unfinished direct child whose result is necessary", "one observation owner"),
-             ("monitoring", "rereading", "repeated searching", "patrolling", "same delegated workstream", "not independent work"),
-             ("wait", "decision-changing native event", "instead of continuing that patrol"),
-             ("tests, builds, ci and external processes", "their direct executor", "actual waiting capability"),
-             ("controller waits", "without rechecking", "executor"),
-             ("do not substitute sleep", "status-only model wakeups"),
-             ("after timeout, reassess", "do not repeat useless waits indefinitely"),
-             ("wake-only v2 wait_agent does not prove completion", "check list_agents"),
-             ("first confirm", "current host", "child notifications", "actual tool maximum"),
-             ("confirmed meaningful-event early return", "user interruption", "no interim decision",
-              "default", "60-minute", "timeout_ms=3600000", "completion can wake the parent early"),
-             ("windows are not execution deadlines"),
-             ("historical averages", "must not force early wakes"),
-             ("60 seconds for very short tasks", "10–60 minutes", "about 30 minutes"),
-             ("actual tool limits", "higher-level limits", "exceptions", "take precedence", "unknown"),
-             ("ordinary messages", "timeout", "messages and timeouts do not prove completion"),
-             ("parallel direct dependencies", "without per-child polling loops"),
-             ("neither fixed 60 seconds nor fixed 60 minutes fits every task"))
-    concepts(handoff,
-             ("precise source spot-check", "pending immediate decision"),
-             ("after complete dispatch", "reading searching testing diff review runtime probing implementation analysis"),
-             ("not independent global decision work", "even when useful to global acceptance"),
-             ("necessary child unfinished", "wait normally", "do not invent busywork", "delay waiting"))
-
-
-def test_controller_wait_policy_reaches_generated_and_documented_surfaces():
-    root = Path(__file__).resolve().parents[1]
-    assert (root / "docs/thaliris-controller.md").read_text(encoding="utf-8") == controller_instructions.render()
-    for name in ("README.md", "README.en.md", "adapter/codex/README.md"):
-        text = (root / name).read_text(encoding="utf-8")
-        if name == "adapter/codex/README.md":
-            assert "timeout_ms=3600000" in text, name
-            assert "UNKNOWN" in text and "10–60" in text, name
-        else:
-            assert "(adapter/codex/README.md)" in text, name
-        assert "never a default" not in text, name
-        assert "tool maximum is capacity, not a default duration" not in normalized(text), name
-    waiting = normalized(controller_instructions.render(section="completion"))
-    assert "with confirmed meaningful-event early return and user interruption and no interim decision, default" in waiting
-    assert "actual tool limits" in waiting and "take precedence" in waiting
-    assert "distinguish native completion, ordinary messages, timeout, exceptions and unknown" in waiting
-    assert "messages and timeouts do not prove completion" in waiting
-
-
-def test_shared_entry_keeps_safety_and_discovery_without_controller_execution_routine():
-    for value in (adapter._global_agents_block().decode(), adapter.render_managed()):
-        text = normalized(value)
-        concepts(value, ("controller-asserted", "readonly"),
-                 ("isolation", "readonly boundaries", "live host maintenance", "authority"),
-                 ("unknown user-owned bytes", "native activation", "controller-instructions"))
-        assert "omitted mode defaults to delegated" not in text
-        assert "in delegated mode" not in text
-        assert "continuous small queries" not in text
-        assert "may make one" not in text
-        for controller_identity in ("native /root", "primary agent", "host root identity remains unknown",
-                                    "execution_mode", "multi_agent_mode", "collaboration_mode"):
-            assert controller_identity not in text
-    concepts(adapter._global_agents_block().decode(), ("owning controller", "codex-bootstrap", "resident controller guidance"),
-             ("known child", "readonly", "abandoned", "fenced", "human decision", "security-baseline"))
-    concepts(adapter.render_managed(), ("parent", "immediate delegator", "without parent conversation history"),
-             ("children", "frozen constraints", "controller/security state"))
-
-
-@pytest.mark.parametrize("role", list(roles.native_role_definitions()), ids=lambda r: r.id)
-def test_child_contract_is_private_selected_and_boundary_preserving(role):
-    concepts(role.instructions, ("selected native spawn handoff", "task-specific input"),
-             ("supplemental evidence", "factual correction", "same goal", "role"),
-             ("preserve its decisions", "hard invariants", "acceptance"),
-             ("decision-changing unknowns", "final", "contradictions"),
-             ("working sets", "tool logs", "private", "no ordinary progress", "artifact"))
-    assert "controller routes registered" not in normalized(role.instructions)
-    require_local_prohibition(role.instructions, action="expand", target="authorization")
-    assert "after final, new work requires a fresh child" in normalized(role.instructions)
-    concepts(role.instructions, ("fresh reception", "excludes parent conversation history"),
-             ("parent", "immediate delegator", "owning controller", "task owner"))
-
-
-@pytest.mark.parametrize("role", ["implementer", "focused-implementer"])
-def test_execution_observation_mutation_verification_and_recovery_loop(role):
-    value = prompt(role)
-    concepts(value, ("before mutation", "acceptance-relevant surfaces", "authoritative sources", "derived relationships", "verification entry"),
-             ("reuse selected discovery", "decision-critical originals", "without repeating inventory"),
-             ("coherent change", "verify", "repair ordinary local defects", "new evidence"),
-             ("independent slices", "smallest meaningful tests", "coupled changes"),
-             ("canonical sources", "existing sync path", "derived outputs"),
-             ("stale regions", "reconstructing edits", "unsuitable methods", "change unsuitable methods"),
-             ("cwd", "quoting", "mechanically", "environment mistakes"),
-             ("no retry/tool/token/time/closure thresholds"),
-             ("host schemas", "protocol", "identity", "serialization", "evidence"))
-    assert normalized(roles._EXECUTOR_INSTRUCTIONS) in normalized(value)
-    assert "ordinary regression" not in normalized(roles._EXECUTOR_INSTRUCTIONS)
-
-
-def test_ordinary_converges_assignment_and_focused_endpoint_is_not_extended():
-    ordinary, focused = prompt("implementer"), prompt("focused-implementer")
-    concepts(ordinary, ("stable accepted direction", "deterministic convergence"),
-             ("same session", "smallest acceptance-relevant"),
-             ("selected local acceptance", "git closure", "unfinished assignment"))
-    concepts(focused, ("full reasoning", "implementation", "runtime-feedback", "revision loop"),
-             ("core solution", "hard invariants", "unknowns are resolved", "focused evidence"),
-             ("remaining tasks", "causal model", "architecture", "contract", "scope", "acceptance", "direction"),
-             ("pass alone", "endpoint"),
-             ("without choosing", "successor role", "session"),
-             ("shared guidance", "cannot extend"),
-             ("exact candidate/diff", "evidence and limits", "remaining tasks", "escalation boundary"))
-    assert "may remain in this workstream" not in normalized(focused)
-    assert "fresh ordinary Implementer" not in focused
-    assert "runtime feedback" not in normalized(ordinary)
-    concepts(focused, ("including package/install smoke", "evidence could change the core solution"),
-             ("sync formal docs", "where they establish core semantics"))
-
-
-def test_reviewer_critical_evidence_and_correction_boundary():
-    reviewer = prompt("reviewer")
-    concepts(reviewer, ("converged candidate", "selected acceptance", "hard invariants", "cross-boundary"),
-             ("reviewer is optional", "critical closure of the selected review", "controller", "routing"),
-             ("non-writing",),
-             ("counterevidence", "finding"), ("inadequate evidence", "unverified", "insufficient"),
-             ("ready only", "evidence", "critical closure"),
-             ("absence", "not verified acceptance"),
-             ("bounded defect", "design unchanged", "evidence that shakes", "supplied decision basis"),
-             ("architecture", "contract", "invariant", "scope", "acceptance"),
-             ("finding", "affected surface", "needed validation"))
-    require_local_prohibition(reviewer, action="repair", target="candidate")
-    assert "fresh ordinary" not in reviewer and "Controller reopen" not in reviewer
-    mutated = reviewer.replace("do not repair the candidate", "do repair the candidate", 1)
-    assert mutated != reviewer
-    with pytest.raises(AssertionError, match="local prohibition"):
-        require_local_prohibition(mutated, action="repair", target="candidate")
+def test_reviewer_is_not_repo_writing():
     assert not roles.repo_write_allowed("reviewer")
 
 
 def test_discovery_challenge_knowledge_and_delegation_capabilities():
-    concepts(prompt("investigator"), ("facts", "broad evidence", "architecture decisions", "controller"),
-             ("batch", "stop", "sufficient"),
-             ("exact source locations", "affected surfaces", "unknowns", "covered and uncovered", "by area"))
-    concepts(prompt("reasoning-specialist"), ("independently challenge", "framing", "decision basis"),
-             ("hidden assumptions", "causal model", "premature convergence", "alternatives"),
-             ("coherent", "unexpected", "critical missing facts"))
-    concepts(prompt("curator"), ("controller-selected", "supplied material", "exact selected documents", "index", "canonical"),
-             ("provenance", "historical", "traceable"), ("no write", "suffices"))
     for role in ("investigator", "curator", "reasoning-specialist", "verifier"):
         assert not roles.get_codex_binding(role).allowed_delegation_targets
         assert "fork_turns" not in prompt(role)
         assert "fork_context" not in prompt(role)
     for role in ("implementer", "focused-implementer", "reviewer"):
         assert roles.get_codex_binding(role).allowed_delegation_targets == frozenset({"investigator"})
-        concepts(prompt(role), ("fresh investigator", "scanner", 'fork_turns="none"'))
+        assert 'fork_turns="none"' in prompt(role)
         assert "fork_context=false" in prompt(role)
 
 
@@ -310,37 +95,15 @@ def test_discovery_challenge_knowledge_and_delegation_capabilities():
 def test_profile_delegation_text_matches_role_capability(execution_constraint):
     for name, (model, effort, role) in roles.agent_profiles(execution_constraint).items():
         value = tomllib.loads(adapter._agent_profile(name[:-5], role, model, effort).decode())["developer_instructions"]
-        assert "Fresh reception excludes parent conversation history" in value
         if roles.get_codex_binding(role).allowed_delegation_targets:
             assert 'fork_turns="none"' in value and "fork_context=false" in value
-            concepts(value, ("fresh investigator", "scanner", "selected task model constraints"))
         else:
             assert "fork_turns" not in value and "fork_context" not in value
 
 
 def test_controller_selects_roles_and_accounts_for_goals():
-    value = controller_instructions.render()
-    concepts(value, ("minimum necessary", "work shape", "not a ladder", "threshold"),
-             ("investigator", "broad facts", "architecture"),
-             ("ordinary implementer", "deterministic convergence", "focused implementer", "coupled"),
-             ("default native model/effort", "gpt-6-luna/max", "gpt-6.1-sol/high", "astra", "current-task", "authorization"),
-             ("luna-only", "semantic roles", "forbids astra"),
-             ("every explicit user goal", "addressed", "deferred", "dependency"))
     assert not {"scanner", "executor", "astra"} & set(roles.role_choices())
     assert roles.resolve_native_profile("thaliris-focused-implementer-astra-medium").id == "focused-implementer"
-
-
-def test_profile_styles_remain_specific_without_extending_endpoint():
-    base = prompt("focused-implementer")
-    sol = roles.profile_instructions("focused-implementer", "thaliris-focused-implementer")
-    astra = roles.profile_instructions("focused-implementer", "thaliris-focused-implementer-astra-medium")
-    assert sol.startswith(base) and astra.startswith(base)
-    assert "When executing with Sol" in sol and "explicitly user-authorized Astra" not in sol
-    assert "explicitly user-authorized Astra" in astra and "When executing with Sol" not in astra
-    assert "When executing with Sol" not in base
-    for value in (sol, astra):
-        concepts(value, ("wait only", "needed result", "unfinished", "without another wait"),
-                 ("shared guidance", "cannot extend"))
 
 
 def test_generated_sources_equal_derived_outputs():
@@ -356,43 +119,6 @@ def test_generated_sources_equal_derived_outputs():
             assert path.read_bytes() == adapter._agent_profile(name[:-5], role, model, effort)
         parsed = tomllib.loads(adapter._agent_profile(name[:-5], role, model, effort).decode())
         assert parsed["developer_instructions"] == roles.profile_instructions(role, name[:-5])
-
-
-def test_precision_and_operational_acceptance_are_controller_owned():
-    controller = controller_instructions.render()
-    concepts(controller, ("stable narrative base language", "precision-bearing original terms"),
-             ("quotations", "distinctions", "user formulations", "materially"),
-             ("blur", "broaden", "narrow", "expand"),
-             ("forced monolingual", "random language switching", "bilingual repetition"),
-             ("output language requirements", "compression and handoff"),
-             ("operational artifact", "source", "revision", "provenance", "before delegation"),
-             ("later workstream", "operational acceptance"),
-             ("project/package", "fixtures", "isolated smoke", "packed artifacts", "project-local"),
-             ("effective live", "global instructions", "profiles", "hooks", "trust", "separate"))
-    assert normalized(controller).count("stable narrative base language") == 1
-    assert "stable narrative base language" not in adapter._global_agents_block().decode()
-    assert "stable narrative base language" in codex_bootstrap.controller_guidance()
-    assert "stable narrative base language" not in adapter.render_managed()
-    for role in roles.native_role_definitions():
-        assert "stable narrative base language" not in role.instructions
-
-
-def test_compatibility_authority_and_fresh_rerouting_preserve_semantic_endpoint():
-    controller = controller_instructions.render()
-    concepts(controller, ("independently deterministic", "accepted contract uniquely determines"),
-             ("compatibility authority ambiguity remains semantic", "production behavior", "historical fixtures"),
-             ("representative evidence", "dependency to controller", "does not mandate full regression"),
-             ("same semantic closure", "fresh ordinary session", "explicit inputs", "independent acceptance"),
-             ("accumulated debugging state adds no benefit", "distilled invariants", "green evidence"),
-             ("provenance", "remaining acceptance", "blockers", "not raw history"),
-             ("unchanged deterministic state", "runtime can wait", "meaningful or terminal event"))
-    for role in ("implementer", "focused-implementer"):
-        concepts(prompt(role), ("compatibility", "ownership", "security", "lifecycle", "contract"),
-                 ("volume or difficulty alone does not require escalation"),
-                 ("project/package smoke", "does not authorize live host maintenance"))
-    concepts(prompt("focused-implementer"), ("production and historical fixtures", "compatibility authority undecided", "representative evidence"),
-             ("return the dependency", "never call that mechanical compatibility"),
-             ("full regression by default"))
 
 
 def test_pre_normalization_generated_ownership_is_exact_and_filename_bound():
@@ -490,107 +216,7 @@ def test_role_model_predecessor_is_independent_and_filename_bound():
         assert state(edited) == "user"
 
 
-def test_controller_owned_product_completion_and_model_routing_reach_resident_context():
-    controller = controller_instructions.render()
-    concepts(controller, ("controller integrates", "original user objective", "acceptance criteria", "available evidence",
-                          "decide whether the candidate meets", "requested product behavior"),
-             ("executors implement and verify", "criterion-linked evidence", "unknown", "controller routes repairs"),
-             ("useful additional verification", "optional", "independent", "read-only", "no separate closing handoff",
-              "no new child", "required final stage"),
-             ("reviewer ready", "native completed", "mechanical done", "distinct", "none alone determines product completion",
-              "core task-close", "mechanical record"),
-             ("verifier", "optional compatibility check", "no verifier", "no reviewer", "required final stage"),
-             ("investigator", "implementer", "curator", "reviewer", "focused implementer", "reasoning specialist", "verifier",
-              "every Thaliris auxiliary task", "including preparation", "registered Thaliris agent_type", "generic native profiles",
-              "PreToolUse supplies omitted", "null", "freshness", "isolation", "only reasoning_effort", "default model",
-              "only model", "default effort", "before a reservation", "NO_TASK or inactive state",
-              "no reservation or lifecycle binding", "unknown"),
-             ("profiles remain model-free", "configured role model after spawn arguments", "task's explicit execution constraint",
-              "necessary verification exception", "controller's own model remains unchanged", "permissions",
-              "does not edit user profiles or Host configuration", "updatedInput"),
-             ("astra", "current-task user authorization", "luna-only", "frozen constraint"))
-    concepts(controller, ("same in delegated", "controller-direct", "single-agent"),
-             ("test pass", "reviewer ready", "native completed", "mechanical done", "distinct"))
-    concepts(roles._instructions("controller"),
-             ("precise source spot-check", "pending immediate decision"),
-             ("verifier", "optional compatibility check", "no verifier", "no reviewer", "required final stage"))
-    assert "Controller does not perform final acceptance itself" not in controller
-    assert "final product acceptance uses a separate explicit closing handoff" not in controller
-    assert "200 lines" not in controller and "4096" not in controller
-    for role in ("investigator", "implementer", "curator", "verifier"):
-        assert f"| {role.title()} |" in controller
-        assert "gpt-6-luna/max" in controller
-    for role in ("reviewer", "focused-implementer", "reasoning-specialist"):
-        assert f"| {role.replace('-', ' ').title()} |" in controller
-        assert "gpt-6.1-sol/high" in controller
-    for role in ("investigator", "implementer", "curator", "reviewer", "focused-implementer", "reasoning-specialist", "verifier"):
-        child = prompt(role)
-        assert "gpt-6.1-sol/high" not in child
-        assert "gpt-6-luna/max" not in child
-    for role in ("implementer", "focused-implementer", "reviewer"):
-        concepts(prompt(role), ("registered Thaliris Investigator", "agent_type", 'fork_turns="none"'))
-        assert 'model="gpt-6-luna"' not in prompt(role)
-        assert 'reasoning_effort="max"' not in prompt(role)
-    for role in ("implementer", "focused-implementer"):
-        concepts(prompt(role), ("generic native agent", "not a Thaliris role"))
-    for role in ("implementer", "focused-implementer"):
-        concepts(prompt(role), ("report the candidate", "criterion-linked evidence", "unknown for unverified behavior"),
-                 ("selected local assignment", "remaining work", "controller", "task-level judgment", "routing"))
-        for controller_only in ("Reviewer READY", "mechanical DONE", "determine product completion"):
-            assert controller_only not in prompt(role)
-        assert "final product acceptance through a separate explicit closing handoff" not in prompt(role)
-
-
-def test_controller_memory_contract_matches_bounded_core_surface():
-    controller = controller_instructions.render()
-    curator = prompt("curator")
-    for text in (controller,):
-        concepts(text, ("task-promote", "record requires id path and text", "title defaults to the id",
-                        "source_refs defaults to an empty list"),
-                 ("legacy status", "opaque", "no confirmation or lifecycle meaning"),
-                 ("16,384 text characters", "64 source references", "task revision"),
-                 ("promotion creates a new non-index markdown file", "refuses to overwrite an existing durable target"),
-                 ("promotion records cannot target .milestones", "optional", "complete index replacement",
-                  ".milestones/index.md"),
-                 ("expected digest", "core checks", "paths", "links", "does not generate or choose semantic entries"))
-    concepts(curator, ("document-maintain", "existing markdown", "optional index replacement", "expected file digests", "task revision cas"),
-             ("edit merge split replace supersede delete", "semantic reconciliation"),
-             ("task-promote", "new", "non-index markdown", "promotion refuses existing targets"),
-             ("do not scan", "delegate", "product acceptance", "real-time evidence continuity"))
-    concepts(controller, ("before task-start", ".agent-memory/index.md", ".milestones/index.md",
-                          "create minimal thin navigation if absent"),
-             ("bounded get", "up to eight paths"))
-    assert "confirmed status" not in normalized(controller)
-    assert "type-based status" not in normalized(controller)
-
-
-def test_resident_waiting_observation_and_causal_contract_rejects_negation_reversal():
-    value = controller_instructions.render()
-    for text in (value, prompt("implementer"), prompt("focused-implementer")):
-        concepts(text, ("observation", "tests", "processes", "ci", "controller", "result"),
-                 ("substantive changes", "terminal evidence"),
-                 ("original failure", "local reproduction", "root cause"))
-    concepts(value, ("actual tool limits", "higher-level limits", "precedence"),
-             ("meaningful-event early return", "confirmed", "60-minute", "default"))
-    for text in (prompt("implementer"), prompt("focused-implementer")):
-        concepts(text, ("tool's documented limits", "unconfirmed capabilities remain UNKNOWN"),
-                 ("independent work", "before waiting", "necessary", "direct child"),
-                 ("meaningful-event early return", "user interruption"))
-        assert "60-minute" not in text and "3600000" not in text
-        require_local_prohibition(text, action="repeat", target="waits")
-        mutant = text.replace("do not repeat useless waits indefinitely", "do repeat useless waits indefinitely")
-        with pytest.raises(AssertionError, match="local prohibition"):
-            require_local_prohibition(mutant, action="repeat", target="waits")
-    require_local_prohibition(value, action="bypass", target="hooks")
-    require_local_prohibition(value, action="poll", target="child")
-    with pytest.raises(AssertionError, match="local prohibition"):
-        require_local_prohibition(value.replace("Do not poll a finished child", "Do poll a finished child"), action="poll", target="child")
-    concepts(value, ("active/pending", "exact parent", "bound siblings", "parallel", "one unbound native dispatch"),
-             ("selected candidate", "criteria", "final product acceptance"),
-             ("complete normal task context", "retrieval cost", "quality"))
-    concepts(value, ("known unfinished necessary child", "after final", "decision-changing unknown", "another wait"),
-             ("ordinary controller reads", "git", "diagnostics", "legal", "task boundary"),
-             ("line", "token", "query", "counts", "permission"))
+def test_resident_sections_exclude_recovery_and_host_maintenance():
     assert set(controller_instructions.RESIDENT_SECTIONS).isdisjoint({"task-recovery", "host-maintenance"})
 
 

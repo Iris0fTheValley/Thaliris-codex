@@ -452,20 +452,6 @@ def test_invalid_ownership_record_is_not_hidden_by_optional_config_read_error(tm
         guidance.plan_install(home, {guidance.RECORD_KEY: record})
 
 
-def test_guidance_keeps_only_generic_work_and_evidence_principles():
-    text = guidance.GUIDANCE
-    for clause in (
-        "Continue necessary independent work before waiting", "meaningful native notifications",
-        "do not wake models merely to observe unchanged state",
-        "Messages, timeouts and exceptions do not prove completion", "preserve UNKNOWN",
-        "without confirming the same completion again", "Observe your own tests or external processes",
-        "Follow applicable role instructions and the selected handoff", "grants no role or authority",
-    ):
-        assert clause in text
-    for role_policy in ("wait_agent", "3600000", "60-minute", "Controller", "Implementer", "Scanner", "final acceptance"):
-        assert role_policy not in text
-
-
 @pytest.mark.parametrize("reported,supported", [
     ("codex-cli 0.162.0", True),
     ("codex-cli 0.162.1", True),

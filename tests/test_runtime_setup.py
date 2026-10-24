@@ -58,8 +58,9 @@ def test_pipless_installed_updater_can_create_new_immutable_runtime(tmp_path):
     assert not list(second.rglob("*.pyc"))
 
 
-@pytest.mark.parametrize("project_kind", ["git", "nongit"])
-def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, monkeypatch, project_kind):
+def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, monkeypatch):
+    # Non-Git bootstrap/admission is covered with a synthetic runtime in
+    # test_nongit_projects.py; this slow real-runtime test runs the Git case once.
     import thaliris
     import thaliris_codex
     core = source_wheel(tmp_path, "thaliris", Path(thaliris.__file__).parent)
@@ -116,10 +117,7 @@ def test_python311_pip_bootstrap_creates_runtime_without_pth_repair(tmp_path, mo
     installed = codex_adapter.codex_install(maintenance_contract=contract)
     assert installed["ok"], installed
     project = tmp_path / "project"
-    if project_kind == "git":
-        subprocess.run(["git", "init", "-q", str(project)], check=True)
-    else:
-        project.mkdir()
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
     (project / "docs").mkdir()
     (project / "docs/thaliris-role-packs.md").write_bytes(b"user-owned role description")
     # Bootstrap executes the installed console launcher and installed Core,
@@ -157,7 +155,7 @@ raise SystemExit(cli.main(sys.argv[2:]))
         cwd=tmp_path, env=runtime_identity.child_environment(), capture_output=True, text=True, timeout=30)
     assert continued.returncode == 0, continued.stderr or continued.stdout
     assert json.loads(continued.stdout)["status"] == "CURRENT_CONTINUATION"
-    assert (project / ".git").exists() == (project_kind == "git")
+    assert (project / ".git").exists()
     assert not (tmp_path / ".git").exists()
     assert not (tmp_path / ".context").exists()
     assert runtime_identity.manifest_bytes(executable) == before

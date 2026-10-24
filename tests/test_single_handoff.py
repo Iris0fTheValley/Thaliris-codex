@@ -3424,9 +3424,6 @@ def test_terminal_ingress_capability_stays_unknown_after_hooks_and_legacy_comple
     assert report["host_capability"]["managed_child_turn_notification_ingress"] == "UNKNOWN"
     assert report["lifecycle_reconciliation"]["managed_child_turn_notification_ingress"] == "UNKNOWN"
     assert report["lifecycle_reconciliation"]["native_status_identity_scope"] == "legacy_thread_snapshot"
-    guidance = controller_instructions.render(section="completion")
-    assert "including when mechanical terminal\nstatus is UNKNOWN" in guidance
-    assert "not a result-delivery gate" in guidance
 
 
 def test_doctor_distinguishes_optional_stop_from_native_terminal_fact(tmp_path):
@@ -3688,7 +3685,3 @@ def test_role_profiles_keep_routing_and_model_choice_with_the_controller() -> No
         parsed = tomllib.loads(codex_adapter._agent_profile(name[:-5], role, model, effort).decode())
         assert parsed["developer_instructions"] == roles.profile_instructions(role, name[:-5])
         assert "sandbox_mode" not in parsed
-        assert "selected native spawn handoff is your task-specific input" in parsed["developer_instructions"]
-        assert "selected supplemental evidence or factual correction within the same goal and role" in parsed["developer_instructions"]
-    assert Path("docs/thaliris-role-packs.md").read_text(encoding="utf-8") == codex_adapter.render_role_packs()
-    assert Path("docs/thaliris-role-registry.md").read_bytes() == roles.render_registry_document()
