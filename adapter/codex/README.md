@@ -337,10 +337,11 @@ are denied like `identity-amend`) but need neither an ACTIVE task nor `--base-re
 their storage is outside the repository (`THALIRIS_HOME`, default `~/.thaliris`). A successful
 `task-close` adds `identity_offer` to its result when Core has a new pending basis note and
 offers are enabled (Core records it as shown, so it appears once per new note); a failure leaves
-the field absent. The global `--session-id`, when the Controller supplies it, is passed to Core as
-the session key (session-scope preferences, `identity-status`); Codex exposes no other stable
-native session id to the CLI, so without it session scope is unavailable. Nothing is added to
-bootstrap or SessionStart.
+the field absent. The session key is derived mechanically: the sha256 of the global `--session-id`
+when supplied, otherwise the selected task's recorded Controller owner hash (set at `task-start`),
+so suggest, status and the `task-close` offer share one key without the flag; with neither,
+session scope is unavailable. Raw Core `identity-offer|identity-note|identity-suggest` is denied
+to children. Nothing is added to bootstrap or SessionStart.
 
 ## Enforcement and assurance
 

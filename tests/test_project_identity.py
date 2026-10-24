@@ -346,6 +346,24 @@ def test_close_has_no_offer_without_notes_or_when_off(workspace, capsys):
     assert "identity_offer" not in _close(capsys, workspace, task_id)[1]
 
 
+def test_session_scope_off_reaches_the_close_offer_without_a_flag(workspace, capsys):
+    task_id = start(workspace)["task_id"]  # task-start records the Controller session "first"
+    note(capsys, workspace)
+    code, off = run(capsys, workspace, "--task-id", task_id, "identity-suggest", "--role", "controller", "--off", "--scope", "session")
+    assert code == 0 and off["ok"], off
+    assert run(capsys, workspace, "--task-id", task_id, "identity-status")[1]["suggestions"] == {"enabled": False, "source": "session"}
+    code, closed = _close(capsys, workspace, task_id)
+    assert code == 0 and closed["ok"] and "identity_offer" not in closed
+
+
+@pytest.mark.parametrize("command", [
+    "thaliris-core identity-offer", "thaliris-core identity-note --list", "thaliris-core identity-suggest --off --scope project",
+    "python -m thaliris identity-offer"])
+def test_children_are_refused_raw_core_identity_state_commands(workspace, command):
+    start(workspace)
+    assert "deny" in child_call(workspace, command)
+
+
 def test_offer_failure_leaves_close_result_unchanged(workspace, capsys, monkeypatch):
     from thaliris import identity_basis
     def boom(*_a, **_k):

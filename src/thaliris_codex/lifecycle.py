@@ -146,6 +146,7 @@ _CHILD_CONTEXT_MUTATIONS = frozenset({
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
 })
+_RAW_CORE_IDENTITY_STATE = re.compile(r"(?i)thaliris[-_]?(?:core)?[^|;&]*identity-(?:offer|note|suggest)(?![-\w])")
 _CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
 _START_ATTESTATION_TTL_NS = 120 * 1_000_000_000
@@ -4681,6 +4682,10 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: only Investigator delegation is permitted.")
         return _pre_admission_role_route(root, payload)
     operation, context_targets = _context_call(payload)
+    raw_command = _bash_command(payload)
+    if isinstance(raw_command, str) and _RAW_CORE_IDENTITY_STATE.search(raw_command):
+        _best_effort_record(_record_protocol_deviation, root, payload, operation="identity-raw-core", target="thaliris-core identity", blocked=True)
+        return _permission_deny(f"THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION: a {role_names} session may not run Controller-owned identity state commands.")
     if operation in {"task-observe", "document-maintain"}:
         task_id = _active_task_id(root)
         if task_id is None:

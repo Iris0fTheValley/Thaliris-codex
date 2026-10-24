@@ -359,6 +359,23 @@ def _requested_command(argv: list[str]) -> str | None:
     return args.command
 
 
+def _identity_session_key(root: Path, args: argparse.Namespace) -> str | None:
+    """One stable, adapter-derived session key for identity suggestion scope.
+
+    An explicit --session-id wins (hashed); otherwise the selected task's
+    recorded Controller owner hash is used, so suggest, status and the close
+    offer agree without the Controller repeating a flag. None when neither
+    exists, which Core treats as "no session scope".
+    """
+    if getattr(args, "session_id", None):
+        return lifecycle._identity_hash(args.session_id)
+    try:
+        task_id = core.selected_task(root)
+        return lifecycle.active_controller_owner(root, str(task_id)) if task_id else None
+    except Exception:  # noqa: BLE001 - a missing key only disables session scope
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     # Let formatting be placed before or after a subcommand without changing
     # the command schema or emitting non-JSON normal output.
@@ -548,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
                 out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, source, compact_evidence=True)
         elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
         elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
-        elif args.command == "identity-status": out = identity.identity_status(root, session_key=args.session_id)
+        elif args.command == "identity-status": out = identity.identity_status(root, session_key=_identity_session_key(root, args))
         elif args.command == "identity-note":
             from thaliris import identity_basis
             actor = codex_adapter.controller_actor(args.role)
@@ -560,7 +577,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "identity-suggest":
             from thaliris import identity_basis
             actor = codex_adapter.controller_actor(args.role)
-            out = identity_basis.identity_suggest(root, actor, args.scope, "on" if args.on else "off" if args.off else "clear", session_key=args.session_id)
+            out = identity_basis.identity_suggest(root, actor, args.scope, "on" if args.on else "off" if args.off else "clear", session_key=_identity_session_key(root, args))
         elif args.command == "identity-get": out = identity.identity_get(root, version=args.version, items=args.item, amendment=args.amendment, challenge=args.challenge)
         elif args.command == "identity-trace": out = identity.identity_trace(root, args.ref, args.direction, args.depth)
         elif args.command in project_identity.MUTATIONS: out = getattr(identity, args.command.replace("-", "_"))(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
@@ -577,7 +594,7 @@ def main(argv: list[str] | None = None) -> int:
         if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-judge", *project_identity.MUTATIONS}:
             task_authority.checkpoint(root)
         if args.command == "task-close" and out.get("ok"):
-            line = project_identity.offer(root, args.session_id)
+            line = project_identity.offer(root, _identity_session_key(root, args))
             if line:
                 out = {**out, "identity_offer": line}
         out = _controller_evidence_output(root, args, out)

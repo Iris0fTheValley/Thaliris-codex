@@ -559,7 +559,7 @@ quoting their confirmation and the cited notes (date, N id) verbatim in
 `decision.human_instruction`; never write a draft `IDENTITY.md` yourself. "Stop suggesting" means
 `identity-suggest --role controller --off --scope session|workspace|project|global` at the scope
 named (unstated: session, and mention the other scopes in one short line); `--on` and `--clear`
-undo it. Codex passes `--session-id` to Core as the session key only when you supply it.
+undo it. Codex derives the session key mechanically: the global `--session-id` if given, else the selected task's recorded Controller session (the same key for suggest, status and the `task-close` offer), so session scope needs no flag after `task-start`.
 
 When identity exists, bootstrap and `task-status` show one summary line. Read more on demand with the installed pinned runner:
 `identity-status`, `identity-get` (`--version`, repeatable `--item`,
