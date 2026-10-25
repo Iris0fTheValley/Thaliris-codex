@@ -18,7 +18,7 @@ Thaliris 不另造 Agent Runtime，而是建在 Codex、DeepSeek Harness、Claud
 
 > **状态：Beta。** 在真实的复杂重构任务上，已经观察到实现者自主派发调查、Controller 发起独立审查、反证推动修复的完整链路。样本量还小，不足以证明普遍的质量或成本优势。见[实测观察](#实测观察)。
 >
-> **版本：** 本文描述各仓库 `main` 分支上的源码版本：Core 0.5.2、Codex adapter 0.5.3、Claude Code plugin 0.4.2、DSH plugin 0.3.2。版本号描述源码，不描述某台机器上的安装；仓库或磁盘上的文件更新，也不证明正在运行的 Host 已经加载新版本。
+> **版本：** 本文描述各仓库 `main` 分支上的源码版本：Core 0.5.3、Codex adapter 0.5.3、Claude Code plugin 0.4.2、DSH plugin 0.3.2。版本号描述源码，不描述某台机器上的安装；仓库或磁盘上的文件更新，也不证明正在运行的 Host 已经加载新版本。
 
 ## 为什么不止于上下文管理
 
@@ -210,7 +210,7 @@ thaliris-core --root . --task-id "$TASK_ID" task-status
 
 ## Codex 原生集成
 
-Thaliris-codex 将共享语义接入 Codex 原生 Agent、角色 profile、Hooks 与 session lifecycle。它依赖单独安装的 Thaliris Core（Core 0.5.2 及以上、0.6 以下），由 Core 提供任务记录、证据和任务授权（authority）API；Codex adapter 负责原生准入、路由、身份关联和生命周期观察。详见[集成协议](adapter/codex/README.md)。
+Thaliris-codex 将共享语义接入 Codex 原生 Agent、角色 profile、Hooks 与 session lifecycle。它依赖单独安装的 Thaliris Core（Core 0.5.3 及以上、0.6 以下），由 Core 提供任务记录、证据和任务授权（authority）API；Codex adapter 负责原生准入、路由、身份关联和生命周期观察。详见[集成协议](adapter/codex/README.md)。
 
 普通角色的模型/effort 默认路由如下；Controller 会在受管派发检查后为精确注册的 Thaliris 角色补齐省略的选择字段，显式选择保留：
 

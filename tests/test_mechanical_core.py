@@ -1054,15 +1054,31 @@ def test_production_package_has_no_benchmark_authority_module() -> None:
         assert benchmark_only not in production
 
 
-def test_only_current_task_state_schema_is_accepted(tmp_path: Path) -> None:
+def test_only_current_or_compatible_prior_task_state_schema_is_accepted(tmp_path: Path) -> None:
     root = repo(tmp_path)
     core.task_start(root, "current schema", None, None)
     path = core._state_path(root)
     state = json.loads(path.read_text(encoding="utf-8"))
-    state["schema_version"] -= 1
+    state["schema_version"] = core._STATE_SCHEMA_VERSION - 2
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid task state schema"):
         core.task_show(root)
+    state["schema_version"] = core._STATE_SCHEMA_VERSION + 1
+    path.write_text(json.dumps(state), encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid task state schema"):
+        core.task_show(root)
+
+
+def test_schema_six_task_state_is_read_without_rewriting(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    core.task_start(root, "prior schema", None, None)
+    path = core._state_path(root)
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state["schema_version"] = 6
+    path.write_text(json.dumps(state), encoding="utf-8")
+    before = path.read_bytes()
+    assert "prior schema" in json.dumps(core.task_show(root))
+    assert path.read_bytes() == before
 
 
 def test_old_task_schema_reports_explicit_archive_recovery_without_mutation(tmp_path: Path, capsys) -> None:

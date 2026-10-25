@@ -1954,12 +1954,12 @@ def task_state_schema_error(root: Path, error: core.TaskStateSchemaIncompatible)
     """Add lifecycle recoverability without exposing the archived task ID."""
     result = dict(error.diagnostic)
     if result.get("recoverable") is True:
-        action = str(result.get("recovery_action", ""))
-        if action.startswith("thaliris "):
-            action = "thaliris --task-id <task-id> " + action[len("thaliris "):]
+        # Core words the action neutrally; the Codex adapter supplies its own command.
+        digest = result.get("state_sha256")
+        if isinstance(digest, str) and digest:
+            action = f"thaliris --task-id <task-id> task-recover-state --expected-sha256 {digest}"
             if result.get("abandon_active_confirmation_required") is True:
                 action += " --abandon-active"
-        if action:
             result["recovery_action"] = f"{action} --controller-bridge-sha256 <current-bridge-sha256>"
     if result.get("recoverable") is True and error.task_id is not None:
         blocker = lifecycle.task_state_recovery_blocker(core._repo_root(root), error.task_id)
