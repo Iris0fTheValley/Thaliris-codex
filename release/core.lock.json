@@ -1,5 +1,5 @@
 {
   "repository": "Iris0fTheValley/Thaliris",
-  "commit": "fc170edddbc41ce09aba57d3cf30d9a50344c570",
-  "reason": "Core 0.5.2 (natural Project Identity formation: user-statement basis notes, a once-per-new-basis offer and suggestion preferences stored outside the repository); keeps explicit non-Git project lifecycle, the Project Identity plane, structured errors and task state schema 7. Persisted state stays valid for Core 0.5.1 and 0.5.0."
+  "commit": "f0ee56320a7e3d8bcd04ca9369804af66851fee9",
+  "reason": "Core 0.5.3 (ledger continuity: schema-6 task state is read as 7 without rewriting, named capacity refusals, anchor corruption reported as TASK_AUTHORITY_INVALID, bounded Git calls, adapter-neutral recovery_action); keeps natural Project Identity formation, explicit non-Git project lifecycle, structured errors and task state schema 7. Persisted state stays valid for Core 0.5.2, 0.5.1 and 0.5.0."
 }

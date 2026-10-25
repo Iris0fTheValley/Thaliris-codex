@@ -90,7 +90,7 @@ function ManagedTarget($h) {
   } catch {}
   return $false
 }
-function Degraded($detail) {
+function Degraded($detail,$code='THALIRIS_RUNTIME_DRIFT') {
   if ($env:THALIRIS_HOOK_EVENT -cne 'PreToolUse') { return }
   try { $h=[Console]::In.ReadToEnd()|ConvertFrom-Json } catch { $h=$null }
   $tool=[string]$h.tool_name; if (-not $tool) { $tool=[string]$h.tool }
@@ -115,7 +115,7 @@ function Degraded($detail) {
   # A pending generation never exempts maintenance through another executor.
   if ($command -match '(?i)(?:^|[;&|])\s*&?\s*["'']?[^\r\n;|&]*?\s+codex-(install|uninstall)\b') { $control=$true }
   if ((Fenced $h) -or ($write -and ($h.readonly -eq $true -or [string]$h.agent_type -match '^thaliris-(reviewer|verifier)(-|$)'))) { $control=$true }
-  $o=@{hookEventName='PreToolUse';additionalContext=('THALIRIS_RUNTIME_DRIFT: '+$detail+'; assurance UNKNOWN.')}
+  $o=@{hookEventName='PreToolUse';additionalContext=($code+': '+$detail+'; assurance UNKNOWN.')}
   if ($control) { $o.permissionDecision='deny';$o.permissionDecisionReason='THALIRIS_CONTROL_AUTHORITY_UNAVAILABLE: '+$detail }
   @{hookSpecificOutput=$o}|ConvertTo-Json -Depth 32 -Compress|Write-Output
 }
@@ -247,6 +247,31 @@ function Replay($hostHome,$journal,$raw) {
 
 def script_bytes() -> bytes:
     return (_platform_source() + r'''
+# Failure path only: the Host's old hook arguments name a previously
+# committed generation, and the current files are a verified committed
+# generation. This changes the diagnosis only, never the decision.
+$stale='Codex still runs hook arguments of an earlier committed Thaliris install generation; the installed generation is current and verified. Restart Codex (app-server) once; Task, Authority and Controller associations are kept. No hot reload'
+function StaleHost($manifest,$identity) {
+  try {
+    $bytes=[IO.File]::ReadAllBytes($manifest);$now=HashBytes $bytes
+    if ($identity -cnotmatch '^[0-9a-f]{64}$' -or $now -ceq $identity) { return $false }
+    $gh=[IO.Path]::GetDirectoryName($manifest);$old=$false;$new=$false
+    foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $gh 'thaliris-host-generations') -Filter '*.json' -File -Force)) {
+      SafePath $f.FullName;$r=[IO.File]::ReadAllText($f.FullName)|ConvertFrom-Json
+      if ($r.phase -cne 'COMMITTED') { continue }
+      foreach ($v in @($r.before.'thaliris-install.json',$r.after.'thaliris-install.json')) { if ($v -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $identity) { $old=$true } }
+      $v=$r.after.'thaliris-install.json'
+      if ($v -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $now) {
+        $ok=$true
+        foreach ($n in 'thaliris-hook.cmd','thaliris-preflight.ps1') { $w=$r.after.$n; if ($w -and (HashBytes ([Convert]::FromBase64String($w))) -cne (FileHash (Join-Path $gh $n))) { $ok=$false } }
+        if ($ok) { $new=$true }
+      }
+    }
+    if (-not ($old -and $new)) { return $false }
+    AssertRuntime $bytes (([Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json).executable) $now
+    return $true
+  } catch { return $false }
+}
 try {
   $manifest=$env:THALIRIS_INSTALL_MANIFEST; $identity=$env:THALIRIS_RUNTIME_SHA256; $exe=$env:THALIRIS_EXECUTABLE
   $hostHome=[IO.Path]::GetDirectoryName($manifest);$journal=Join-Path $hostHome 'thaliris-host-transition.json'
@@ -273,15 +298,20 @@ try {
   }
   exit 0
 } catch {
-  $detail=$_.Exception.Message
+  $detail=$_.Exception.Message;$code='THALIRIS_RUNTIME_DRIFT'
+  if ($detail -ceq 'runtime manifest identity mismatch' -and (StaleHost $manifest $identity)) { $code='THALIRIS_RUNTIME_STALE_HOST_LOAD';$detail=$stale }
   if ($env:THALIRIS_HOOK_EVENT -ceq 'PreToolUse') {
     if ($null -eq $raw) { $raw=[Console]::In.ReadToEnd() }
     # Degraded reads Console.In; supply the already consumed payload directly.
     $reader=[IO.StringReader]::new($raw); [Console]::SetIn($reader)
-    Degraded $detail
-  } elseif ($env:THALIRIS_HOOK_EVENT -ceq 'SessionStart') {
-    [Console]::Error.WriteLine('THALIRIS_CATALOG_RECOVERY_UNKNOWN: '+$detail)
-  } elseif (-not $env:THALIRIS_HOOK_EVENT) {
+    Degraded $detail $code
+  } else {
+    if ($code -cne 'THALIRIS_RUNTIME_DRIFT') { $detail=$code+': '+$detail }
+    if ($env:THALIRIS_HOOK_EVENT -ceq 'SessionStart') {
+      [Console]::Error.WriteLine('THALIRIS_CATALOG_RECOVERY_UNKNOWN: '+$detail)
+    }
+  }
+  if (-not $env:THALIRIS_HOOK_EVENT) {
     @{ok=$false;status='THALIRIS_RUNTIME_IDENTITY_MISMATCH';execution_assurance='UNKNOWN';diagnostic=$detail;decision_required=$true}|ConvertTo-Json -Depth 32 -Compress|Write-Output
   }
   exit 1
