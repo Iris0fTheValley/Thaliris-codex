@@ -110,9 +110,10 @@ An unbound dispatch can be disposed through this task-local endpoint. A native i
 conflict (a reused child turn or an identity collision) blocks only new authorization
 and close, and the refusal names each conflict with its exact disposal; use
 `--conflict-id <id>` instead of `--handoff-id` for a conflict without a handoff. Disposed
-records stay as history, their actors stay fenced and their execution stays UNKNOWN. Reused sessions
-or ambiguous replaced reservations need an exact native dispatch return ID to bind
-new managed work; ordinary reading is not subject to this qualification restriction.
+records stay as history and their execution stays UNKNOWN; an actor still bound to another
+undisposed handoff keeps that grant and is not fenced (the result reports `agent_fenced`).
+Reused sessions or ambiguous replaced reservations need an exact native dispatch return
+ID to bind new managed work; ordinary reading is not subject to this qualification restriction.
 On FOREIGN_RECOVERY_DECISION or UNKNOWN, Controller decides continuation/recovery.
 On INVALID_STATE/bootstrap failure diagnose the affected surface; preserve evidence,
 label managed assurance UNKNOWN, and route ordinary source work through assigned roles.

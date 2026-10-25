@@ -273,3 +273,154 @@ def test_stale_controller_session_hash_names_the_current_source(evidence_task):
                " --base-revision 9 --input x.json --controller-session-id-hash " + "0" * 64)
     denied = _reason(lifecycle_module.handle_hook(root, "PreToolUse", _event(tool_name="Bash", tool_input={"command": command})))
     assert denied.startswith("THALIRIS_EVIDENCE_DISPATCH_CONFLICT") and "Omit --controller-session-id-hash" in denied
+
+
+def _duplicate_start(root) -> None:
+    """A second Start for the same managed actor and turn: one identity collision."""
+    assert handle_hook(root, "SubagentStart", _child()) == ""
+
+
+def _collision_ids(root) -> list[str]:
+    return [lifecycle_module._conflict_id("collision", index, item)
+            for index, item in enumerate(lifecycle(root)["identity_collisions"])]
+
+
+def _completed_child_task(root, name: str) -> None:
+    _owned_task_start(root, name, None, None)
+    spawn_start(root, "child")
+    reconcile(root, "child", {"completed": "result"})
+    assert lifecycle_module.native_execution_closed(root)
+
+
+def test_disposed_collision_history_never_hides_a_later_collision(tmp_path):
+    root = repo(tmp_path)
+    _completed_child_task(root, "disposed history stays bounded but never hides a conflict")
+    disposed: list[str] = []
+    for round_ in range(17):
+        _duplicate_start(root)
+        ids = _collision_ids(root)
+        # Earlier ids never move: history is not removed or reordered.
+        assert len(ids) == round_ + 1 and ids[:round_] == disposed
+        assert not lifecycle_module.native_execution_closed(root)
+        denied = _reason(handle_hook(root, "PreToolUse", _spawn_request()))
+        assert denied.startswith("THALIRIS_NATIVE_IDENTITY_COLLISION") and f"--conflict-id {ids[-1]}" in denied
+        assert lifecycle(root)["pending_authorized_spawn"] is None
+        result = _dispose_from_denial(root, denied, f"duplicate Start {round_}")
+        assert result["disposed_collision_ids"] == [ids[-1]]
+        disposed.append(ids[-1])
+        assert lifecycle_module.native_execution_closed(root)
+    # The 17th collision after 16 disposals was recorded, blocked and is now history.
+    assert all(item["management_disposition"] == "ABANDONED_DEPENDENCY" for item in lifecycle(root)["identity_collisions"])
+    assert _allowed(handle_hook(root, "PreToolUse", _spawn_request("after seventeen disposals")))
+
+
+def test_collisions_beyond_undisposed_capacity_block_through_one_overflow_sentinel(tmp_path):
+    root = repo(tmp_path)
+    _completed_child_task(root, "overflow sentinel blocks unrecorded collisions")
+    for _ in range(lifecycle_module.MAX_UNDISPOSED_IDENTITY_COLLISIONS + 2):
+        _duplicate_start(root)
+    state = lifecycle(root)
+    collisions = state["identity_collisions"]
+    assert len(collisions) == lifecycle_module.MAX_UNDISPOSED_IDENTITY_COLLISIONS + 1
+    sentinel = collisions[-1]
+    assert sentinel["overflow"] == "IDENTITY_COLLISION_OVERFLOW" and sentinel["unrecorded_count"] == 2
+    assert "agent_id_hash" not in sentinel and "pending_handoff_id" not in sentinel
+    sentinel_id = _collision_ids(root)[-1]
+    # A further collision only counts on the sentinel; its id stays stable.
+    before = _collision_ids(root)
+    _duplicate_start(root)
+    assert _collision_ids(root) == before and lifecycle(root)["identity_collisions"][-1]["unrecorded_count"] == 3
+
+    for _ in range(lifecycle_module.MAX_UNDISPOSED_IDENTITY_COLLISIONS):
+        assert not lifecycle_module.native_execution_closed(root)
+        denied = _reason(handle_hook(root, "PreToolUse", _spawn_request()))
+        assert denied.startswith("THALIRIS_NATIVE_IDENTITY_COLLISION")
+        _dispose_from_denial(root, denied, "duplicate Start")
+    assert _collision_ids(root) == before
+    # Only the sentinel is left, and it still blocks dispatch and close.
+    assert not lifecycle_module.native_execution_closed(root)
+    denied = _reason(handle_hook(root, "PreToolUse", _spawn_request()))
+    assert f"identity collision overflow {sentinel_id} (3 collisions unrecorded, actors UNKNOWN)" in denied
+    assert f"--conflict-id {sentinel_id}" in denied
+    task_id = core.task_show(root)["state"]["task_id"]
+    path = lifecycle_module._lifecycle_path(root, task_id)
+    # A handoff disposal never retires the sentinel implicitly.
+    handoff = lifecycle(root)["children"][0]["handoff_id"]
+    lifecycle_module.task_dispose_dependency(root, handoff, core.task_show(root)["state"]["revision"],
+        task_authority.digest(path), "abandon the child itself")
+    assert not lifecycle_module.native_execution_closed(root)
+    denied = _reason(handle_hook(root, "PreToolUse", _spawn_request()))
+    result = _dispose_from_denial(root, denied, "unrecorded collisions accepted as UNKNOWN")
+    assert result["disposed_collision_ids"] == [sentinel_id]
+    assert result["agent_fenced"] is False and "overflow sentinel records no actor" in result["agent_fence_reason"]
+    assert lifecycle_module.native_execution_closed(root)
+    assert _allowed(handle_hook(root, "PreToolUse", _spawn_request("after the overflow sentinel")))
+
+
+def test_spent_collision_record_cap_blocks_without_an_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(lifecycle_module, "MAX_UNDISPOSED_IDENTITY_COLLISIONS", 1)
+    monkeypatch.setattr(lifecycle_module, "MAX_IDENTITY_COLLISION_RECORDS", 3)
+    root = repo(tmp_path)
+    _completed_child_task(root, "exhausted collision record cap")
+    _duplicate_start(root)
+    _dispose_from_denial(root, _reason(handle_hook(root, "PreToolUse", _spawn_request())))
+    _duplicate_start(root)
+    _duplicate_start(root)  # undisposed capacity spent: the last slot becomes the sentinel
+    assert lifecycle(root)["identity_collisions"][-1]["overflow"] == "IDENTITY_COLLISION_OVERFLOW"
+    for _ in range(2):
+        _dispose_from_denial(root, _reason(handle_hook(root, "PreToolUse", _spawn_request())))
+    assert lifecycle_module.native_execution_closed(root)
+    ids = _collision_ids(root)
+    _duplicate_start(root)
+    state = lifecycle(root)
+    assert len(state["identity_collisions"]) == 3 and _collision_ids(root) == ids
+    assert state["identity_collisions_unrecorded"] == 1
+    assert not lifecycle_module.native_execution_closed(root)
+    denied = _reason(handle_hook(root, "PreToolUse", _spawn_request()))
+    assert "identity collision record capacity exhausted (1 further collisions unrecorded" in denied
+    assert "--conflict-id" not in denied and lifecycle(root)["pending_authorized_spawn"] is None
+
+
+def test_disposal_reports_whether_the_actor_was_fenced(tmp_path):
+    root = repo(tmp_path)
+    _owned_task_start(root, "disposal reports fencing", None, None)
+    spawn_start(root, "child")
+    handoff = lifecycle(root)["children"][0]["handoff_id"]
+    _duplicate_start(root)
+    reconcile(root, "child", {"completed": "result"})
+    denied = _reason(handle_hook(root, "PreToolUse", _spawn_request()))
+    assert "fences the disposed actor unless that actor is still bound to another undisposed handoff" in denied
+    result = _dispose_from_denial(root, denied, "duplicate Start")
+    assert result["agent_fenced"] is False
+    assert result["agent_fence_reason"] == f"actor still bound to undisposed handoff {handoff}"
+    assert result["fencing"] == [{"kind": "collision", "conflict_id": result["disposed_collision_ids"][0],
+                                  "agent_fenced": False, "agent_fence_reason": result["agent_fence_reason"]}]
+    assert lifecycle(root)["dependency_dispositions"][-1]["agent_fence_reason"] == result["agent_fence_reason"]
+    # The still-bound actor is not fenced as abandoned; its own handoff decides.
+    assert "THALIRIS_ABANDONED_ROLE_SESSION" not in _reason(handle_hook(root, "PreToolUse",
+        _child(tool_name="Bash", tool_input={"command": "Set-Content a.py x"})))
+
+    # Disposing the handoff itself fences its actor and says so.
+    task_id = core.task_show(root)["state"]["task_id"]
+    path = lifecycle_module._lifecycle_path(root, task_id)
+    result = lifecycle_module.task_dispose_dependency(root, handoff, core.task_show(root)["state"]["revision"],
+        task_authority.digest(path), "abandon the child")
+    assert result["agent_fenced"] is True and result["agent_fence_reason"] is None
+    assert result["fencing"] == [{"kind": "child", "agent_fenced": True, "agent_fence_reason": None}]
+
+
+def test_dispatch_corroboration_collisions_share_the_bounded_blocking_record(tmp_path, monkeypatch):
+    # The second write site: a returned native id that cannot bind its reservation.
+    monkeypatch.setattr(lifecycle_module, "_pending_parent_live", lambda _state, _pending: False)
+    disposed = {"source": "earlier", "agent_id_hash": "a" * 64, "pending_handoff_id": "H0",
+                "management_disposition": "ABANDONED_DEPENDENCY", "disposition_reason": "history"}
+    state = {"children": [], "identity_collisions": [dict(disposed, source=f"earlier-{n}") for n in range(16)]}
+    pending = {"handoff_id": "H1"}
+    lifecycle_module._corroborate_dispatch_identity(tmp_path, "task", state, pending, "returned-agent", "PostToolUse")
+    assert len(state["identity_collisions"]) == 17
+    assert [item["kind"] for item in lifecycle_module._undisposed_identity_conflicts(state)] == ["collision"]
+    for _ in range(lifecycle_module.MAX_UNDISPOSED_IDENTITY_COLLISIONS):
+        lifecycle_module._corroborate_dispatch_identity(tmp_path, "task", state, pending, "returned-agent", "PostToolUse")
+    assert state["identity_collisions"][-1]["overflow"] == "IDENTITY_COLLISION_OVERFLOW"
+    assert state["identity_collisions"][-1]["first_unrecorded"]["pending_handoff_id"] == "H1"
+    assert len(lifecycle_module._undisposed_identity_conflicts(state)) == lifecycle_module.MAX_UNDISPOSED_IDENTITY_COLLISIONS + 1
