@@ -2821,8 +2821,11 @@ def _reserve_managed_spawn(
             )
             if route_decision:
                 return route_decision
-            if state.get("identity_collisions") or any(isinstance(child, dict) and child.get("native_status_conflict") for child in state["children"]):
-                return _permission_deny("THALIRIS_NATIVE_IDENTITY_COLLISION: conflicting native spawn identities block new role-session authorization.")
+            # A Controller-disposed conflict remains history, never authority.
+            # Undisposed conflicts still block: name each so only it is disposed.
+            blocking = _undisposed_identity_conflicts(state)
+            if blocking:
+                return _permission_deny(_identity_conflict_denial(root, task_id, path, blocking))
             if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
                 return _permission_deny("THALIRIS_SCANNER_SLOT_ACTIVE: this exact parent already has a live Scanner; coordinate its result before another same-parent Scanner")
             if state["pending_authorized_spawn"] is not None:
@@ -2833,7 +2836,11 @@ def _reserve_managed_spawn(
                     or active_controller_owner(root, task_id) != session_id_hash
                     or selection["role"] != role
                     or selection["expected_agent_type"] != expected_agent_type):
-                return _permission_deny("THALIRIS_EVIDENCE_DISPATCH_CONFLICT: selected dispatch requires its exact owning Controller, role and native profile.")
+                return _permission_deny(
+                    "THALIRIS_EVIDENCE_DISPATCH_CONFLICT: selected dispatch requires its exact owning Controller, role and native profile"
+                    f" (selected: {selection['expected_agent_type']}). It stays unconsumed. Spawn that profile, or the owning"
+                    " Controller cancels or replaces it with task-evidence-register input"
+                    ' {"cancel_next_dispatch":{"reason":"<actual decision>"}} (optionally with a new "next_dispatch").')
             state["sequence"] = int(state.get("sequence", 0)) + 1
             task_state = core._load_state(root, active=True)
             if task_state.get("task_id") != task_id:
@@ -2885,11 +2892,86 @@ def _reserve_managed_spawn(
     return ""
 
 
-def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, expected_lifecycle: str, reason: str) -> dict[str, object]:
-    """Controller abandonment of a dependency, without native stop evidence."""
+_DISPOSED = "ABANDONED_DEPENDENCY"
+_CONFLICT_DISPOSITION_FIELDS = frozenset({"management_disposition", "disposition_reason"})
+
+
+def _conflict_id(kind: str, index: int, record: object) -> str:
+    """Stable id for one append-only conflict record, excluding its disposition."""
+    material = ({key: value for key, value in record.items() if key not in _CONFLICT_DISPOSITION_FIELDS}
+                if isinstance(record, dict) else record)
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str)
+    return f"{kind}-" + hashlib.sha256(f"{index}\0{encoded}".encode("utf-8")).hexdigest()[:24]
+
+
+def _undisposed_identity_conflicts(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """List conflicts that still block new authorization and close.
+
+    Each item names its exact local disposal: a handoff for a handoff-bearing
+    child, otherwise an explicit conflict id. Malformed records stay blocking
+    without an id; they are evidence for a separate repair decision.
+    """
+    blocking: list[dict[str, Any]] = []
+    for index, child in enumerate(state.get("children", [])):
+        if not isinstance(child, dict) or not child.get("native_status_conflict") or child.get("management_disposition") == _DISPOSED:
+            continue
+        handoff = child.get("handoff_id")
+        blocking.append({"kind": "child", "handoff_id": handoff if isinstance(handoff, str) else None,
+            "conflict_id": None if isinstance(handoff, str) else _conflict_id("child", index, child.get("agent_id_hash")),
+            "role": child.get("role"), "turn_identity": "UNKNOWN" if child.get("native_turn_identity_unknown") else "RECORDED"})
+    collisions = state.get("identity_collisions")
+    if collisions and not isinstance(collisions, list):
+        return blocking + [{"kind": "collision", "handoff_id": None, "conflict_id": None}]
+    for index, item in enumerate(collisions or []):
+        if isinstance(item, dict) and item.get("management_disposition") == _DISPOSED:
+            continue
+        handoff = item.get("pending_handoff_id") if isinstance(item, dict) else None
+        blocking.append({"kind": "collision", "handoff_id": handoff if isinstance(handoff, str) else None,
+            "conflict_id": _conflict_id("collision", index, item) if isinstance(item, dict) else None})
+    return blocking
+
+
+def _identity_conflict_denial(root: Path, task_id: str, path: Path, blocking: list[dict[str, Any]]) -> str:
+    """Name each blocking conflict and its exact Controller disposal command."""
+    try:
+        revision: object = core._load_state(root, active=True)["revision"]
+        lifecycle_sha: object = task_authority.digest(path)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        revision, lifecycle_sha = "<revision>", "<lifecycle-sha256>"
+    items = []
+    for item in blocking[:4]:
+        if item["kind"] == "child":
+            label = f"child handoff {item['handoff_id']}" if item["handoff_id"] else f"unbound child {item['conflict_id']}"
+            label += f" (role {item.get('role')}, native turn identity {item.get('turn_identity')})"
+        else:
+            label = f"identity collision {item['conflict_id']}" + (f" during handoff {item['handoff_id']}" if item["handoff_id"] else "")
+        if item["handoff_id"]:
+            selector = f"--handoff-id {item['handoff_id']}"
+        elif item["conflict_id"]:
+            selector = f"--conflict-id {item['conflict_id']}"
+        else:
+            items.append(label + ": malformed record; preserve it for a separate repair decision")
+            continue
+        items.append(f"{label}: --task-id {task_id} task-dispose-dependency {selector} --base-revision {revision}"
+                     f" --expected-lifecycle-sha256 {lifecycle_sha} --reason <actual decision>")
+    more = f"; {len(blocking) - 4} more" if len(blocking) > 4 else ""
+    return ("THALIRIS_NATIVE_IDENTITY_COLLISION: undisposed conflicting native identity blocks new role-session"
+            " authorization and close. Other bound children keep their own grants. Disposal keeps the record as"
+            " history, fences the disposed actor and leaves native execution UNKNOWN. " + " | ".join(items) + more)
+
+
+def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: int, expected_lifecycle: str, reason: str,
+                            conflict_id: str | None = None) -> dict[str, object]:
+    """Controller abandonment of a dependency, without native stop evidence.
+
+    Select one handoff (its children, pending reservation and the identity
+    collisions observed for it) or one exact conflict id that has no handoff.
+    """
     task_id = core.selected_task(root)
     if task_id is None or not isinstance(reason, str) or not reason.strip() or len(reason) > 4096:
         raise ValueError("TASK_DEPENDENCY_DISPOSITION_REQUIRED")
+    if (handoff_id is None) == (conflict_id is None):
+        raise ValueError("TASK_DEPENDENCY_DISPOSITION_REQUIRED: select exactly one --handoff-id or --conflict-id")
     with task_authority._lock(root):
         task_authority.check(root)
         state = core._load_state(root, active=True)
@@ -2900,12 +2982,34 @@ def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, exp
         if task_authority.digest(path) != expected_lifecycle:
             raise ValueError("TASK_LIFECYCLE_CHANGED")
         ledger = _load_lifecycle(path, task_id)
-        selected = [child for child in ledger["children"] if isinstance(child, dict)
-            and (child.get("handoff_id") == handoff_id or child.get("root_handoff_id") == handoff_id)]
         pending = ledger.get("pending_authorized_spawn")
-        pending_selected = isinstance(pending, dict) and (pending.get("handoff_id") == handoff_id or pending.get("root_handoff_id") == handoff_id)
-        if not selected and not pending_selected:
-            raise ValueError("TASK_DEPENDENCY_HANDOFF_NOT_FOUND")
+        collisions = ledger.get("identity_collisions") or []
+        if not isinstance(collisions, list):
+            raise ValueError("TASK_DEPENDENCY_CONFLICT_MALFORMED: preserve identity collision evidence for a separate repair decision")
+        if handoff_id is not None:
+            selected = [child for child in ledger["children"] if isinstance(child, dict)
+                and (child.get("handoff_id") == handoff_id or child.get("root_handoff_id") == handoff_id)]
+            pending_selected = isinstance(pending, dict) and (pending.get("handoff_id") == handoff_id or pending.get("root_handoff_id") == handoff_id)
+            if not selected and not pending_selected:
+                raise ValueError("TASK_DEPENDENCY_HANDOFF_NOT_FOUND")
+            # Collisions observed for this dispatch, or naming one of its actors.
+            actors = {child.get("agent_id_hash") for child in selected if isinstance(child.get("agent_id_hash"), str)}
+            if pending_selected and isinstance(pending.get("native_agent_id_hash"), str):
+                actors.add(pending["native_agent_id_hash"])
+            selected_collisions = [(index, item) for index, item in enumerate(collisions) if isinstance(item, dict)
+                and item.get("management_disposition") != _DISPOSED
+                and (item.get("pending_handoff_id") == handoff_id or item.get("agent_id_hash") in actors)]
+        else:
+            selected = [child for index, child in enumerate(ledger["children"]) if isinstance(child, dict)
+                and not isinstance(child.get("handoff_id"), str) and child.get("native_status_conflict")
+                and child.get("management_disposition") != _DISPOSED
+                and _conflict_id("child", index, child.get("agent_id_hash")) == conflict_id]
+            selected_collisions = [(index, item) for index, item in enumerate(collisions) if isinstance(item, dict)
+                and item.get("management_disposition") != _DISPOSED
+                and _conflict_id("collision", index, item) == conflict_id]
+            pending_selected = False
+            if len(selected) + len(selected_collisions) != 1:
+                raise ValueError("TASK_DEPENDENCY_CONFLICT_NOT_FOUND")
         records = ledger.setdefault("dependency_dispositions", [])
         fence = _read_abandoned_child_fence(root)
         agents = _read_abandoned_agent_hashes(root)
@@ -2918,6 +3022,21 @@ def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, exp
             identity = {key: child.get(key) for key in ("agent_id_hash", "session_id_hash", "turn_id_hash")}
             if all(isinstance(value, str) for value in identity.values()) and identity not in fence:
                 fence.append(identity)
+        # A live actor of another, undisposed handoff keeps that handoff's own
+        # grants; disposing this collision never silently abandons it.
+        retained = {child.get("agent_id_hash") for child in ledger["children"] if isinstance(child, dict)
+            and child.get("managed") is True and child.get("management_disposition") != _DISPOSED}
+        for index, item in selected_collisions:
+            identifier = _conflict_id("collision", index, item)
+            agent = item.get("agent_id_hash")
+            fenced = isinstance(agent, str) and re.fullmatch(r"[0-9a-f]{64}", agent) is not None and agent not in retained
+            if fenced:
+                agents.add(agent)
+            records.append({"kind": "collision", "conflict_id": identifier, "record": dict(item), "reason": reason,
+                "management_disposition": _DISPOSED, "native_execution": "UNKNOWN",
+                "agent_fenced": fenced})
+            item["management_disposition"] = _DISPOSED
+            item["disposition_reason"] = reason
         if pending_selected:
             records.append({"kind": "pending", "record": dict(pending), "reason": reason,
                 "management_disposition": "ABANDONED_DEPENDENCY", "native_execution": "UNKNOWN"})
@@ -2932,6 +3051,8 @@ def task_dispose_dependency(root: Path, handoff_id: str, base_revision: int, exp
         core._write_state(root, state)
         task_authority.checkpoint(root)
     return {"ok": True, "task_id": task_id, "revision": state["revision"], "handoff_id": handoff_id,
+        **({"conflict_id": conflict_id} if conflict_id is not None else {}),
+        "disposed_collision_ids": [_conflict_id("collision", index, item) for index, item in selected_collisions],
         "management_disposition": "ABANDONED_DEPENDENCY", "native_execution": "UNKNOWN", "death_proof": "UNKNOWN",
         "writing_risk": "UNKNOWN", "coordination_required": "ISOLATE_OR_COORDINATE_ACTUAL_SHARED_WRITES"}
 
@@ -3317,7 +3438,8 @@ def _corroborate_dispatch_identity(root: Path, task_id: str, state: dict[str, An
             or not _claim_agent_association(root, task_id, agent_hash)):
         collisions = state.setdefault("identity_collisions", [])
         if len(collisions) < 16:
-            collisions.append({"source": source, "agent_id_hash": agent_hash})
+            collisions.append({"source": source, "agent_id_hash": agent_hash,
+                "pending_handoff_id": pending.get("handoff_id")})
         return
     pending["native_agent_id_hash"] = agent_hash
     pending["native_identity_source"] = source
@@ -3556,9 +3678,18 @@ def native_execution_closed(root: Path) -> bool:
     if (not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION
             or value.get("task_id_hash") != _task_key(task_id)
             or not isinstance(value.get("children"), list)
-            or value.get("pending_authorized_spawn") is not None
-            or value.get("identity_collisions")):
+            or value.get("pending_authorized_spawn") is not None):
         return False
+    collisions = value.get("identity_collisions") or []
+    if not isinstance(collisions, list):
+        return False
+    for index, item in enumerate(collisions):
+        # Only an exact recorded Controller disposition retires a collision.
+        if not isinstance(item, dict) or item.get("management_disposition") != "ABANDONED_DEPENDENCY" or not any(
+                isinstance(disposition, dict) and disposition.get("kind") == "collision"
+                and disposition.get("conflict_id") == _conflict_id("collision", index, item)
+                for disposition in value.get("dependency_dispositions", [])):
+            return False
     abandoned = [child for child in value["children"] if isinstance(child, dict)
         and child.get("management_disposition") == "ABANDONED_DEPENDENCY"]
     if abandoned:
@@ -5233,6 +5364,22 @@ def _isolation_classification(tool: str, tool_input: dict[str, Any], _role: str)
     return {"required": "YES", "fork_turns": "OTHER", "status": "FAIL"}
 
 
+def _managed_handoff_target(root: Path, payload: dict[str, Any]) -> bool:
+    """Whether a Controller collaboration call names a handoff-bound child."""
+    task_id = _active_task_id(root)
+    tool_input = _delegation_input(payload)
+    target = next((tool_input[key] for key in ("target", "agent_id", "id", "task_id", "task_name")
+                   if isinstance(tool_input.get(key), str)), None)
+    if task_id is None or target is None:
+        return False
+    try:
+        state = _load_lifecycle(_lifecycle_path(root, task_id), task_id, verify_authority=False)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+    child = _child_for_native_name(state["children"], target)
+    return bool(child is not None and child.get("managed") is True and child.get("handoff_bound") is True)
+
+
 def _active_child_communication(root: Path, payload: dict[str, Any]) -> bool:
     """Supplement an existing live handoff; never reuse a FINAL child."""
     task_id = _active_task_id(root)
@@ -5372,6 +5519,15 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             if _managed_control_dependency(payload, root):
                 return _permission_deny("THALIRIS_ACTIVE_OWNER_REQUIRED: ACTIVE control requires the owning Hook session; use direct codex-bootstrap for recovery evidence.")
             return ""
+        if normalized == "followup_task" and _managed_handoff_target(root, payload):
+            # followup_task asks the native child to run another turn. A new
+            # turn never inherits the old handoff, so refuse it before it
+            # becomes an after-the-fact identity conflict.
+            _best_effort_record(_record_controller_guard_event, root, payload, "CHILD_FOLLOWUP", "blocked")
+            return _permission_deny(
+                "THALIRIS_FOLLOWUP_NEW_TURN: followup_task starts a new native turn on a managed child, and that turn"
+                " cannot inherit its handoff. Give a live child selected supplemental evidence with send_message, or put"
+                " the selected evidence in a new handoff and spawn a fresh named-role child with fork_turns=\"none\".")
         if normalized in {"send_message", "followup_task", "send_input"} and _active_child_communication(root, payload):
             return ""
         if operation == "task-evidence-register":
@@ -5381,7 +5537,10 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             supplied = _direct_context_option(payload, {"--controller-session-id-hash"})
             session_hash = _session_id_hash(payload)
             if session_hash is None or supplied is not None and supplied != session_hash:
-                return _permission_deny("THALIRIS_EVIDENCE_DISPATCH_CONFLICT: Controller session association differs from the Hook actor.")
+                return _permission_deny(
+                    "THALIRIS_EVIDENCE_DISPATCH_CONFLICT: Controller session association differs from the Hook actor."
+                    " Omit --controller-session-id-hash: the Hook supplies this session's current value. A copied value"
+                    " from another session or an earlier thread is not current.")
             if supplied is None:
                 return _updated_command_output(payload, "--controller-session-id-hash " + session_hash)
         if normalized in _FRESH_CHILD_REUSE_TOOL_NAMES and _managed_collaboration_target(root, payload) or normalized == "Agent":

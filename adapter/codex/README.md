@@ -130,6 +130,9 @@ consumes it once and registers the newly generated exact handoff
 before Native execution, including opaque Host messages. A wrong profile/role/owner or
 conflicting readable marker refuses without consuming it; nested children inherit their
 already associated parent's provenance and cannot consume the top-level selection.
+Only the owning Controller withdraws an unconsumed selection, with
+`"cancel_next_dispatch":{"reason":"..."}` alone or with a replacement `next_dispatch`.
+The ledger keeps the withdrawn selection in `evidence_dispatch_cancellations`.
 Model/effort defaults and permitted explicit overrides are independent of this metadata.
 Optionally include the identical association in an own-line spawn marker
 `thaliris-evidence: {"candidate":"C1","requirement_refs":["R1"]}`;

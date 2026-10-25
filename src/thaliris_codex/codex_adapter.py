@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import tomllib
 
 from thaliris import core
@@ -2150,8 +2151,13 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
     from . import task_authority
     actor = controller_actor(role)
     payload = core._read_input(input_file)
-    if set(payload) - {"requirements", "handoffs", "next_dispatch"}:
+    if set(payload) - {"requirements", "handoffs", "next_dispatch", "cancel_next_dispatch"}:
         raise ValueError("invalid evidence registration")
+    cancel = payload.get("cancel_next_dispatch")
+    if "cancel_next_dispatch" in payload and (not isinstance(cancel, dict) or set(cancel) != {"reason"}
+            or not isinstance(cancel["reason"], str) or not cancel["reason"].strip() or len(cancel["reason"]) > 4096):
+        raise ValueError("cancel_next_dispatch requires exactly one nonempty reason")
+    payload = {key: value for key, value in payload.items() if key != "cancel_next_dispatch"}
     selection = payload.get("next_dispatch")
     if "next_dispatch" in payload and (not isinstance(selection, dict)
             or set(selection) - {"role", "expected_agent_type", "candidate", "requirement_refs", "durable_paths"}
@@ -2169,15 +2175,40 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
         task_id = state["task_id"]
         path = lifecycle._lifecycle_path(root, task_id)
         ledger = lifecycle._load_lifecycle(path, task_id)
+        cancelled = None
+        if cancel is not None:
+            # Only the exact owning Controller withdraws its own selection.
+            # The withdrawn selection stays as history; nothing was dispatched.
+            if task_authority.check(root) is None:
+                raise ValueError("dispatch selection cancellation requires current task authority")
+            owner = lifecycle.active_controller_owner(root, task_id)
+            if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
+                raise ValueError("dispatch selection cancellation requires the unfenced owning Controller")
+            cancelled = ledger.get("next_evidence_dispatch")
+            if cancelled is None:
+                raise ValueError("no unconsumed dispatch selection to cancel")
+            history = ledger.setdefault("evidence_dispatch_cancellations", [])
+            history.append({"selection": dict(cancelled), "reason": cancel["reason"],
+                            "task_revision": state["revision"], "cancelled_at_ns": time.time_ns()})
+            del history[:-lifecycle.MAX_RAW_RECORDS]
+            del ledger["next_evidence_dispatch"]
+            if selection is None and not payload:
+                state["revision"] += 1
+                lifecycle._write_evidence_reservation(root, state, path, ledger)
+                return {**core.task_write_response(state, ["evidence_continuity"], appended=[]),
+                        "cancelled_next_dispatch": {key: cancelled[key] for key in ("role", "expected_agent_type", "candidate", "requirement_refs")}}
         if selection is None:
             appended = core._append_continuity_state(state, actor, payload, "register")
-            lifecycle._write_evidence_reservation(root, state, path, None)
-            return core.task_write_response(state, ["evidence_continuity"], appended=appended)
+            lifecycle._write_evidence_reservation(root, state, path, ledger if cancelled is not None else None)
+            response = core.task_write_response(state, ["evidence_continuity"], appended=appended)
+            if cancelled is not None:
+                response["cancelled_next_dispatch"] = {key: cancelled[key] for key in ("role", "expected_agent_type", "candidate", "requirement_refs")}
+            return response
         owner = lifecycle.active_controller_owner(root, task_id)
         if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
             raise ValueError("dispatch selection requires an unfenced owning Controller")
         if ledger.get("next_evidence_dispatch") is not None or ledger["pending_authorized_spawn"] is not None:
-            raise ValueError("dispatch selection or reservation already pending")
+            raise ValueError("dispatch selection or reservation already pending; the owning Controller may replace an unconsumed selection with cancel_next_dispatch")
         data = core._continuity(state)
         for field in ("requirements", "handoffs"):
             if field in payload:

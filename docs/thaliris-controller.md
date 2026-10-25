@@ -106,7 +106,11 @@ packet. Native termination and Controller disposition are different facts.
 and fences its managed grants without inventing native terminal evidence. Original
 UNKNOWN execution, death proof and writing risk remain UNKNOWN. Isolate or coordinate
 possible shared writes before new work; a late result cannot reactivate disposed work.
-An unbound dispatch can be disposed through this task-local endpoint. Reused sessions
+An unbound dispatch can be disposed through this task-local endpoint. A native identity
+conflict (a reused child turn or an identity collision) blocks only new authorization
+and close, and the refusal names each conflict with its exact disposal; use
+`--conflict-id <id>` instead of `--handoff-id` for a conflict without a handoff. Disposed
+records stay as history, their actors stay fenced and their execution stays UNKNOWN. Reused sessions
 or ambiguous replaced reservations need an exact native dispatch return ID to bind
 new managed work; ordinary reading is not subject to this qualification restriction.
 On FOREIGN_RECOVERY_DECISION or UNKNOWN, Controller decides continuation/recovery.
@@ -361,7 +365,9 @@ exact owning Controller's matching top-level spawn consumes it once and register
 new exact handoff before Native execution. A wrong role/profile/owner refuses without
 consuming it; children cannot create, change or consume a top-level selection. Register
 each selection before its corresponding dispatch, after any preceding selection is
-consumed. No postspawn association, child retry or parent acknowledgement is needed.
+consumed. The owning Controller may withdraw an unconsumed selection with
+`{"cancel_next_dispatch":{"reason":"<actual decision>"}}`, alone or with a replacement
+`next_dispatch`; the withdrawn selection is kept as history. No postspawn association, child retry or parent acknowledgement is needed.
 Optionally repeat the same association in an own-line readable handoff marker:
 `thaliris-evidence: {"candidate":"C1","requirement_refs":["R1"],"durable_paths":[".agent-memory/selected.md"]}`.
 Readable conflicting markers refuse; opaque messages use the preselected association
@@ -496,8 +502,10 @@ Keep working sets private; return distilled conclusions, facts, unknowns,
 contradictions, verification and optional Artifact pointers. Child communication,
 mutation/verification practice and role endpoints are defined in native role prompts.
 An active child may receive selected supplemental evidence or factual correction
-inside its existing goal and role. Communication cannot alter its authorization.
-After FINAL, assign new work to a fresh child.
+inside its existing goal and role through `send_message`. Communication cannot alter
+its authorization. `followup_task` to a managed child is refused: it starts a new
+native turn, which never inherits the handoff. After FINAL, or for more work, put the
+selected evidence in a new handoff for a fresh child.
 
 ## Durable retrieval and knowledge admission
 

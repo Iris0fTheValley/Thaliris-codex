@@ -78,6 +78,24 @@ candidate records this new execution risk without changing the old handoff's
 turn or granting fresh permissions. Old thread snapshots cannot close that
 unidentified execution. A new selected task still requires fresh delegation.
 
+Update (adapter 0.5.3). V2 `wait_agent` is wake-only, so a child that has natively
+completed can still look live in the ledger, and a Controller `followup_task` then
+runs a new turn on it. The Controller's `followup_task` to a handoff-bound child is
+now refused at PreToolUse with `THALIRIS_FOLLOWUP_NEW_TURN`. The refusal points to
+`send_message` for selected supplemental evidence to a live child, or to a new
+handoff for a fresh child. Whether `followup_task` to a child that is still inside
+its turn joins that turn is UNKNOWN: no captured payload separates the two cases, so
+both are refused. `send_message` stays allowed to a ledger-live child. Its delivery
+semantics (queued without a new turn) are inferred from the V2 tool pair, not
+observed. A new turn reached by any route, such as an older Controller, an earlier
+Host session or `send_message` to an idle child, still produces the same after-the-fact
+conflict. That conflict is local. It blocks new authorization and close, and the
+refusal names the child's handoff and the exact `task-dispose-dependency` command.
+Other bound children keep their grants. Disposal fences the actor and keeps the
+conflict record and UNKNOWN turn identity as history. Identity collisions are
+disposed with the handoff they were observed for. A collision without a handoff is
+disposed by the `--conflict-id` that the refusal prints.
+
 Doctor reports Start observation separately from `managed=true` /
 `handoff_bound=true`, records the latest privacy-safe decoded shape for each
 tool, and does not derive spawn/schema support from a wait-capability pin.
