@@ -455,6 +455,56 @@ def test_windows_degraded_fresh_delegation_has_no_managed_grant(tmp_path, pinned
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows platform preflight")
+@pytest.mark.parametrize("generation", ["committed", "absent", "uncommitted", "unrelated", "damaged_current"])
+def test_windows_stale_host_load_is_distinguished_from_drift(tmp_path, pinned_test_thaliris, generation):
+    """A still-running Host with old hook arguments versus genuine drift.
+
+    Both keep control denied and assurance UNKNOWN; only the diagnosis differs,
+    and only when the old pin is an archived committed generation and the
+    current files verify as the committed successor.
+    """
+    import base64
+    exe, _ = pinned_test_thaliris
+    command, home = _windows_hook(tmp_path, exe, drift=False)
+    launcher = exe.parent / "dispatch.cmd"
+    old = (home / runtime_identity.MANIFEST_NAME).read_bytes()
+    # A legitimate upgrade: new runtime bytes and their committed manifest.
+    (exe.parent.parent / "Lib/site-packages/thaliris_upgrade_marker.py").write_text("upgraded = True\n")
+    new = runtime_identity.manifest_bytes(launcher)
+    (home / runtime_identity.MANIFEST_NAME).write_bytes(new)
+    encode = lambda data: base64.b64encode(data).decode("ascii")
+    record = {"format": "thaliris-host-transition-v1", "phase": "PREPARED" if generation == "uncommitted" else "COMMITTED",
+              "before": {runtime_identity.MANIFEST_NAME: encode(b"{}" if generation == "unrelated" else old)},
+              "after": {runtime_identity.MANIFEST_NAME: encode(new),
+                        lifecycle.HOST_HOOK_SCRIPT_NAME: encode((home / lifecycle.HOST_HOOK_SCRIPT_NAME).read_bytes()),
+                        host_preflight.NAME: encode((home / host_preflight.NAME).read_bytes())}}
+    if generation != "absent":
+        archive = home / "thaliris-host-generations" / (hashlib.sha256(json.dumps(record).encode()).hexdigest() + ".json")
+        archive.parent.mkdir()
+        archive.write_text(json.dumps(record, sort_keys=True) + "\n")
+    if generation == "damaged_current":
+        (exe.parent.parent / "Lib/site-packages/thaliris_codex/cli.py").write_text("tampered runtime")
+    stale = generation == "committed"
+    for tool_input, denied in (({"command": "pytest tests/test_roles.py"}, False),
+                               ({"command": "Set-Content .context/state.json '{}'"}, True)):
+        payload = json.dumps({"tool_name": "Bash", "tool_input": tool_input}).encode()
+        result = subprocess.run(command, shell=True, cwd=tmp_path, input=payload, capture_output=True, timeout=60,
+                                env={**os.environ, "CODEX_HOME": str(home)})
+        assert result.returncode == 0, result.stderr
+        assert b"SHOULD_NOT_EXECUTE" not in result.stdout
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        assert (output.get("permissionDecision") == "deny") == denied
+        context = output["additionalContext"]
+        assert context.endswith("assurance UNKNOWN.")
+        if stale:
+            assert context.startswith("THALIRIS_RUNTIME_STALE_HOST_LOAD: ")
+            assert "Restart Codex (app-server) once" in context and "THALIRIS_RUNTIME_DRIFT" not in context
+        else:
+            assert context.startswith("THALIRIS_RUNTIME_DRIFT: ")
+            assert "STALE_HOST_LOAD" not in context
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows platform preflight")
 def test_windows_packed_hook_preserves_exact_ownership_and_healthy_dispatch(tmp_path, pinned_test_thaliris):
     exe, _ = pinned_test_thaliris
     command, _home = _windows_hook(tmp_path, exe, drift=False)

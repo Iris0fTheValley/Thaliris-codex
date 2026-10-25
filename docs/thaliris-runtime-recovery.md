@@ -33,6 +33,65 @@ evaluate hook input as code. A damaged runtime,
 preflight, or trampoline emits a precise diagnostic and preserves ordinary
 work. Managed state writes and unsafe authority grants remain denied.
 
+## A running Host that still loads an earlier install
+
+`codex-install` changes files on disk. A running Codex app-server keeps the
+hook commands it loaded at startup, which is why a changing install reports
+`install_status: RESTART_CODEX_ONCE`. Those loaded commands still pin the
+earlier runtime manifest digest. If that digest fails against the current
+`thaliris-install.json`, the on-disk preflight checks three things, on this
+failure path only:
+
+- the old pin is the runtime manifest of an archived committed generation in
+  `thaliris-host-generations/`;
+- the current manifest is the `after` manifest of a committed generation, and
+  that generation's trampoline and preflight bytes match the files on disk;
+- the current runtime passes the full runtime check.
+
+If all three hold, the preflight reports `THALIRIS_RUNTIME_STALE_HOST_LOAD`:
+the process still runs hook arguments of an earlier committed generation and the
+installed generation is current. Otherwise it keeps `THALIRIS_RUNTIME_DRIFT`.
+Both diagnoses apply the same degraded policy. Control stays denied, ordinary
+work stays available and assurance stays UNKNOWN. Neither proves which identity
+the Host loaded. There is no hot reload, so restart Codex (the app-server) once.
+Task, authority and Controller association are kept on disk.
+
+The diagnosis cannot reach every stale load. If the upgrade also replaced the
+trampoline or preflight, the loaded command's own inline check fails first, and
+its inline recovery code (from the earlier install) reports
+`THALIRIS_RUNTIME_DRIFT: platform preflight unavailable`. The new check cannot
+be added to that loaded command: the old code is embedded in it, and the
+generated command already sits close to cmd's 8191-character line limit. Right
+after an install that reported `RESTART_CODEX_ONCE`, treat this diagnosis the
+same way and restart once. If it persists after the restart, it is real drift.
+The upgrade from adapter 0.5.2 to 0.5.3 is such a case.
+
+### Continuing the same Controller after the restart
+
+- **Resumed thread.** The session association
+  (`.context/audit/session-tasks/<session hash>.json`), the immutable lifecycle
+  owner and the persistent task authority are files, and the restart does not
+  touch them. A resumed thread that keeps its native session id needs no
+  `task-associate`; re-read with `task-status` and continue. That Codex keeps
+  the session id on resume is expected but has not been observed for every Host
+  version.
+- **New thread.** Associate it with `task-associate --expected-authority-sha256
+  <hash>`. It is not the immutable owner, so it cannot create or consume a
+  `next_dispatch` preselection. Use a readable `thaliris-evidence:` handoff
+  marker instead. Managed spawns rely on the persistent task authority.
+- **Controller session hash.** Do not pass `--controller-session-id-hash` by
+  hand. The Hook supplies the current value, and a copied value from another
+  thread is refused.
+- **Children from before the restart.** Their ledger records stay. Whether
+  their native threads survived is UNKNOWN. Observe them with `list_agents`,
+  and do not reuse them with `followup_task`. Dispose any that you no longer need
+  and that stay unresolved with `task-dispose-dependency`, then dispatch fresh
+  children. A conflict that a refusal names is disposed with exactly the command
+  that refusal prints.
+- **Unconsumed preselection.** The owning Controller can withdraw a stale
+  `next_dispatch` with `{"cancel_next_dispatch":{"reason":"..."}}` in
+  `task-evidence-register`.
+
 Codex 0.159.2's immutable source supplies `agent_id`/`agent_type` on native
 ThreadSpawn PreToolUse/PostToolUse events. Its shared `session_id` is inherited
 by descendants. Built-in Review delegates use another source variant and omit
