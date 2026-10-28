@@ -228,10 +228,13 @@ def _run(executable: str, root: Path, sink: _Sink, field: str, value: object,
         env[name] = env[name.lower()] = sink.url
     env["NO_PROXY"] = env["no_proxy"] = "localhost,127.0.0.1"
     start = len(sink.requests)
+    # exec appends piped stdin to the prompt and waits for EOF; an inherited
+    # open pipe would otherwise hold the probe until its timeout.
     result = subprocess.run(
         [executable, "exec", "--disable", "hooks", "--disable", "plugins",
          "--skip-git-repo-check", "--json", task],
-        cwd=cwd, env=env, capture_output=True, text=True, timeout=15, check=False,
+        cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=15, check=False,
     )
     return result, sink.requests[start:]
 
@@ -267,6 +270,15 @@ def probe(executable: str, field: str) -> str:
                         diagnostic, re.IGNORECASE | re.DOTALL,
                     )
                     if result.returncode != 0 and field in diagnostic and type_error is not None:
+                        return "SUPPORTED"
+                    # The mode hint sits inside the untagged bool-or-table
+                    # FeatureToml, so serde names the enclosing feature, not
+                    # the leaf. Only the leaf differs from the accepted runs.
+                    feature_error = re.search(
+                        r"did not match any variant of untagged enum FeatureToml\s+"
+                        r"in\s+`features\.multi_agent_v2`", diagnostic)
+                    if (result.returncode != 0 and field == "multi_agent_mode_hint_text"
+                            and feature_error is not None):
                         return "SUPPORTED"
                     return "UNKNOWN"
                 if result.returncode != 0 or len(requests) != 1:

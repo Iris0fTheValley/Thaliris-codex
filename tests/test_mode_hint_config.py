@@ -382,6 +382,7 @@ def test_field_management_with_real_trust_code_and_disk_rpc_fake(tmp_path, targe
     "codex-cli 0.162.0-alpha.17.3", "codex-cli 0.162.0-alpha.17.20",
     "codex-cli 0.162.2", "codex-cli 0.162.1-alpha.1",
     "codex-cli 0.17.2", "codex-cli 0.161.0", "codex-cli 0.163.0", "garbage",
+    "codex-cli 0.165.0", "codex-cli 0.165.0-alpha.3", "codex-cli 0.166.0-alpha.5",
 ])
 def test_version_support_boundary(monkeypatch, reported):
     import subprocess
@@ -392,7 +393,7 @@ def test_version_support_boundary(monkeypatch, reported):
     monkeypatch.setattr(config_capability, "probe", lambda *args: probed.append(args) or "UNKNOWN")
     supported = reported in {
         "codex-cli 0.162.0-alpha.17.2", "codex-cli 0.162.0-alpha.2",
-        "codex-cli 0.162.0", "codex-cli 0.162.1",
+        "codex-cli 0.162.0", "codex-cli 0.162.1", "codex-cli 0.165.0",
     }
     assert hint.capability() == ("SUPPORTED" if supported else "UNKNOWN")
     assert probed == ([] if supported else [("controlled-fake-codex", "multi_agent_mode_hint_text")])

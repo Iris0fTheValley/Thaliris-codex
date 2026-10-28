@@ -48,6 +48,10 @@ if not isinstance(value, str) and behavior != "wrong_type_accepted":
     if behavior == "ambiguous_type_failure":
         print(field + ": string configuration unavailable", file=sys.stderr)
         sys.exit(2)
+    if behavior == "untagged_feature_error":
+        print("Error loading config.toml: data did not match any variant of untagged enum "
+              "FeatureToml\nin `features.multi_agent_v2`", file=sys.stderr)
+        sys.exit(1)
     print(field + ": invalid type: integer, expected a string", file=sys.stderr)
     sys.exit(2)
 developer = config["developer_instructions"]
@@ -107,7 +111,16 @@ def test_unknown_patch_uses_actual_isolated_cli_effect(tmp_path, monkeypatch, mo
         assert args[args.index("--disable"):args.index("--disable") + 4] == [
             "--disable", "hooks", "--disable", "plugins"]
         assert kwargs["env"]["HTTP_PROXY"].startswith("http://127.0.0.1:")
+        assert kwargs["stdin"] is subprocess.DEVNULL  # exec would wait on an inherited pipe
         assert not Path(kwargs["env"]["CODEX_HOME"]).exists()  # scratch removed
+
+
+@pytest.mark.parametrize("module,expected", [(hint, "SUPPORTED"), (guidance, "UNKNOWN")])
+def test_untagged_feature_rejection_proves_only_the_mode_hint_leaf(
+        tmp_path, monkeypatch, module, expected):
+    # Codex reports a wrong-typed mode hint through its bool-or-table feature enum.
+    simulated_cli(tmp_path, monkeypatch, "untagged_feature_error")
+    assert module.capability() == expected
 
 
 @pytest.mark.parametrize("module", [hint, guidance])

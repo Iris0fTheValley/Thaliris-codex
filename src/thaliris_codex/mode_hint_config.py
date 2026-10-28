@@ -19,6 +19,7 @@ SUPPORTED_VERSIONS = frozenset({
     "codex-cli 0.162.0-alpha.2",
     "codex-cli 0.162.0",
     "codex-cli 0.162.1",
+    "codex-cli 0.165.0",
 })
 MARKER = '# thaliris:multi-agent-mode-hint\nmulti_agent_mode_hint_text = ""\n'
 BOOL_MARKER = '# thaliris:multi-agent-v2-bool '

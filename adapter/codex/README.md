@@ -473,7 +473,8 @@ user's live process, and it records two separate native fork/resume delivery lim
 
 The separate `multi_agent_mode_hint_text` and optional Controller wait-guidance
 compatibility paths use the exact source-verified builds `0.162.0-alpha.17.2`,
-`0.162.0-alpha.2`, `0.162.0` and `0.162.1` as a fast path. Other CLI builds that
+`0.162.0-alpha.2`, `0.162.0`, `0.162.1` and `0.165.0` as a fast path (see the
+[0.165 compatibility record](../../docs/codex-host-compatibility-20261028.md)). Other CLI builds that
 report a version undergo an isolated prompt/type capability check in a disposable
 `CODEX_HOME` and workspace, using a loopback Responses sink. It does not copy the
 current user's configuration or authentication. On Windows it resolves the
@@ -484,8 +485,11 @@ errors or a platform whose managed configuration cannot be proven absent block
 `exec` and leave support `UNKNOWN`; macOS managed preferences therefore remain
 UNKNOWN. When clear, it passes `--disable hooks --disable plugins`; those flags
 do not disable managed hooks on their own, which is why this preflight is
-required. The check verifies string acceptance, actual
-prompt effect and wrong-type rejection; complete consistent evidence is required
+required. The probe CLI gets a closed stdin, because `exec` otherwise waits on an
+inherited pipe. The check verifies string acceptance, actual
+prompt effect and wrong-type rejection (for the mode hint, Codex reports the
+rejection through the untagged `features.multi_agent_v2` feature enum rather than
+the leaf); complete consistent evidence is required
 before planning a write. Contradictory evidence reports `CAPABILITY_INCOMPATIBLE`,
 while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`.
 Native wait capabilities are separate from these configuration probes. A selected
