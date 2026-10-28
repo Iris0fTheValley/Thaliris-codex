@@ -245,21 +245,23 @@ function Replay($hostHome,$journal,$raw) {
 ''').replace('__WINDOWS_LAUNCHER_BINDING__', WINDOWS_LAUNCHER_BINDING)
 
 
-def script_bytes() -> bytes:
-    return (_platform_source() + r'''
-# Failure path only: the Host's old hook arguments name a previously
-# committed generation, and the current files are a verified committed
-# generation. This changes the diagnosis only, never the decision.
-$stale='Codex still runs hook arguments of an earlier committed Thaliris install generation; the installed generation is current and verified. Restart Codex (app-server) once; Task, Authority and Controller associations are kept. No hot reload'
-function StaleHost($manifest,$identity) {
+def _stale_source() -> str:
+    return r'''
+# Failure path only: the Host still holds a pin ($pin over file $name) from a
+# previously committed generation, and the current files are a verified
+# committed generation. This changes the diagnosis only, never the decision.
+$stale='Codex still runs hook arguments of an earlier committed Thaliris install generation; the installed generation is current and verified. Restart Codex (app-server) once; Task, Authority, Controller associations and delegated mode are kept, so do not switch execution mode. No hot reload'
+function StaleHost($manifest,$name,$pin) {
   try {
     $bytes=[IO.File]::ReadAllBytes($manifest);$now=HashBytes $bytes
-    if ($identity -cnotmatch '^[0-9a-f]{64}$' -or $now -ceq $identity) { return $false }
-    $gh=[IO.Path]::GetDirectoryName($manifest);$old=$false;$new=$false
+    $gh=[IO.Path]::GetDirectoryName($manifest)
+    $disk=if ($name -ceq 'thaliris-install.json') {$now} else {FileHash (Join-Path $gh $name)}
+    if ($pin -cnotmatch '^[0-9a-f]{64}$' -or $disk -ceq $pin) { return $false }
+    $old=$false;$new=$false
     foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $gh 'thaliris-host-generations') -Filter '*.json' -File -Force)) {
       SafePath $f.FullName;$r=[IO.File]::ReadAllText($f.FullName)|ConvertFrom-Json
       if ($r.phase -cne 'COMMITTED') { continue }
-      foreach ($v in @($r.before.'thaliris-install.json',$r.after.'thaliris-install.json')) { if ($v -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $identity) { $old=$true } }
+      foreach ($v in @($r.before.$name,$r.after.$name)) { if ($v -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $pin) { $old=$true } }
       $v=$r.after.'thaliris-install.json'
       if ($v -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $now) {
         $ok=$true
@@ -272,6 +274,11 @@ function StaleHost($manifest,$identity) {
     return $true
   } catch { return $false }
 }
+'''
+
+
+def script_bytes() -> bytes:
+    return (_platform_source() + _stale_source() + r'''
 try {
   $manifest=$env:THALIRIS_INSTALL_MANIFEST; $identity=$env:THALIRIS_RUNTIME_SHA256; $exe=$env:THALIRIS_EXECUTABLE
   $hostHome=[IO.Path]::GetDirectoryName($manifest);$journal=Join-Path $hostHome 'thaliris-host-transition.json'
@@ -299,7 +306,7 @@ try {
   exit 0
 } catch {
   $detail=$_.Exception.Message;$code='THALIRIS_RUNTIME_DRIFT'
-  if ($detail -ceq 'runtime manifest identity mismatch' -and (StaleHost $manifest $identity)) { $code='THALIRIS_RUNTIME_STALE_HOST_LOAD';$detail=$stale }
+  if ($detail -ceq 'runtime manifest identity mismatch' -and (StaleHost $manifest 'thaliris-install.json' $identity)) { $code='THALIRIS_RUNTIME_STALE_HOST_LOAD';$detail=$stale }
   if ($env:THALIRIS_HOOK_EVENT -ceq 'PreToolUse') {
     if ($null -eq $raw) { $raw=[Console]::In.ReadToEnd() }
     # Degraded reads Console.In; supply the already consumed payload directly.
@@ -346,13 +353,15 @@ try {
                          + result.stderr.decode("utf-8", errors="replace").strip())
 
 
-def recovery_source() -> str:
+def recovery_source(previous: bool = False, pin: bool = False) -> str:
     """Literal recovery policy survives removed uninstall entrypoints.
 
     This uses the same runtime verifier and replay parser as the on-disk
     preflight. It imports no damaged/new disk policy to decide admission.
+    The caller sets $cause; with ``pin`` also $expected, its Hook script pin. ``previous`` renders the exact 0.5.4 literal for recognition.
     """
-    source = _platform_source() + r'''
+    if previous:
+        return _strip(_platform_source() + r'''
 try {
   $hostHome=[IO.Path]::GetDirectoryName($env:THALIRIS_INSTALL_MANIFEST)
   $journal=Join-Path $hostHome 'thaliris-host-transition.json'
@@ -363,32 +372,94 @@ try {
   if ($null -ne $raw) { [Console]::SetIn([IO.StringReader]::new($raw)) }
   Degraded $_.Exception.Message
 }
-'''
+''')
+    stale = r'''
+# The Host pins $expected for thaliris-hook.cmd. A committed upgrade
+# replaced it and the current committed install verifies: only an unrestarted
+# Host remains. Compact twin of StaleHost to fit the Hook command line.
+function Stale($m,$n,$w) {
+  try {
+    $o=$false;$c=$false;$k=FileHash $m;$gh=[IO.Path]::GetDirectoryName($m);$d=FileHash (Join-Path $gh $n)
+    if ($w -cnotmatch '^[0-9a-f]{64}$' -or $d -ceq $w) { return $false }
+    foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $gh 'thaliris-host-generations') -Filter '*.json' -File -Force)) {
+      SafePath $f.FullName;$r=[IO.File]::ReadAllText($f.FullName)|ConvertFrom-Json
+      if ($r.phase -cne 'COMMITTED') { continue }
+      foreach ($v in @($r.before.$n,$r.after.$n)) { if ($v -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $w) { $o=1 } }
+      $v=$r.after.'thaliris-install.json';$u=$r.after.$n
+      if ($v -and $u -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $k -and (HashBytes ([Convert]::FromBase64String($u))) -ceq $d) { $c=1 }
+    }
+    if (-not ($o -and $c)) { return $false }
+    $b=[IO.File]::ReadAllBytes($m);AssertRuntime $b (([Text.Encoding]::UTF8.GetString($b)|ConvertFrom-Json).executable) $k
+    return $true
+  } catch { return $false }
+}
+''' if pin else ""
+    return _strip(_platform_source() + stale + r'''
+try {
+  $hostHome=[IO.Path]::GetDirectoryName($env:THALIRIS_INSTALL_MANIFEST)
+  $journal=Join-Path $hostHome 'thaliris-host-transition.json'
+  if ($env:THALIRIS_HOOK_EVENT -cne 'PreToolUse' -or -not (Exists $journal)) { throw 'platform preflight unavailable' }
+  $raw=[Console]::In.ReadToEnd()
+  Replay $hostHome $journal $raw
+} catch {
+  if ($null -ne $raw) { [Console]::SetIn([IO.StringReader]::new($raw)) }
+  # Keep the concrete cause instead of a generic message.
+  $e=$_.Exception.Message;$code='THALIRIS_RUNTIME_DRIFT';if ($cause) { $e=$e+' ('+$cause+')' }
+''' + (r'''
+  if (Stale $env:THALIRIS_INSTALL_MANIFEST 'thaliris-hook.cmd' $expected) { $code='THALIRIS_RUNTIME_STALE_HOST_LOAD';$e='Codex still runs hooks of an earlier committed Thaliris install; the current install verifies. Restart Codex once; Task, Authority, Controller and delegated mode are kept' }
+''' if pin else "") + r'''
+  Degraded $e $code
+}
+''')
+
+
+def _strip(source: str) -> str:
     # Recovery is also packed inside the global Hook command. Keep canonical
     # on-disk comments, but leave cmd enough space for its shell wrapper.
     return "\n".join(line.strip() for line in source.splitlines()
                      if line.strip() and not line.lstrip().startswith("#"))
 
 
-def entry_source() -> str:
+# The on-disk preflight digest pinned by 0.5.4 and earlier entry literals.
+_PREVIOUS_PREFLIGHT_SHA256 = "e8974be7983125d9c3d592df9e1121b07608623f87926302984f7c24b436c542"
+
+
+def entry_source(previous: bool = False) -> str:
+    if previous:
+        return (
+            "$ErrorActionPreference='Stop';try{"
+            "$p=$env:THALIRIS_PREFLIGHT;"
+            "$s=[Security.Cryptography.SHA256]::Create();"
+            "try{$a=([BitConverter]::ToString($s.ComputeHash([IO.File]::ReadAllBytes($p)))).Replace('-','').ToLowerInvariant()}finally{$s.Dispose()};"
+            f"if($a -cne '{_PREVIOUS_PREFLIGHT_SHA256}'){{throw 'preflight hash mismatch'}};"
+            "& $p;exit $LASTEXITCODE}catch{"
+            + "if($env:THALIRIS_HOOK_EVENT){"
+            + recovery_source(previous=True)
+            + "}else{"
+            + "@{ok=$false;status='THALIRIS_RUNTIME_IDENTITY_MISMATCH';execution_assurance='UNKNOWN';diagnostic=$_.Exception.Message}|ConvertTo-Json -Compress|Write-Output};exit 1}"
+        )
     digest = hashlib.sha256(script_bytes()).hexdigest()
+    # Run the hashed bytes themselves: `& file.ps1` is refused under the
+    # default Restricted execution policy and would reread a mutable file.
+    # The preflight digest is part of the Hook script the Host pins, so a
+    # replaced preflight is diagnosed there (see recovery_source's pin).
     return (
         "$ErrorActionPreference='Stop';try{"
-        "$p=$env:THALIRIS_PREFLIGHT;"
+        "$b=[IO.File]::ReadAllBytes($env:THALIRIS_PREFLIGHT);"
         "$s=[Security.Cryptography.SHA256]::Create();"
-        "try{$a=([BitConverter]::ToString($s.ComputeHash([IO.File]::ReadAllBytes($p)))).Replace('-','').ToLowerInvariant()}finally{$s.Dispose()};"
+        "try{$a=([BitConverter]::ToString($s.ComputeHash($b))).Replace('-','').ToLowerInvariant()}finally{$s.Dispose()};"
         f"if($a -cne '{digest}'){{throw 'preflight hash mismatch'}};"
-        "& $p;exit $LASTEXITCODE}catch{"
-        + "if($env:THALIRIS_HOOK_EVENT){"
+        "& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($b)));exit $LASTEXITCODE}catch{"
+        + "$cause=$_.Exception.Message;if($env:THALIRIS_HOOK_EVENT){"
         + recovery_source()
         + "}else{"
-        + "@{ok=$false;status='THALIRIS_RUNTIME_IDENTITY_MISMATCH';execution_assurance='UNKNOWN';diagnostic=$_.Exception.Message}|ConvertTo-Json -Compress|Write-Output};exit 1}"
+        + "@{ok=$false;status='THALIRIS_RUNTIME_IDENTITY_MISMATCH';execution_assurance='UNKNOWN';diagnostic=$cause}|ConvertTo-Json -Compress|Write-Output};exit 1}"
     )
 
 
-def command_entry() -> str:
+def command_entry(previous: bool = False) -> str:
     """Pack one literal policy to fit cmd's physical 8191-character line."""
-    return packed_literal_without_variables(entry_source())
+    return packed_literal_without_variables(entry_source(previous))
 
 
 def encoded_entry() -> str:

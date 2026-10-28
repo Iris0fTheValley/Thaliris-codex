@@ -56,15 +56,35 @@ work stays available and assurance stays UNKNOWN. Neither proves which identity
 the Host loaded. There is no hot reload, so restart Codex (the app-server) once.
 Task, authority and Controller association are kept on disk.
 
-The diagnosis cannot reach every stale load. If the upgrade also replaced the
-trampoline or preflight, the loaded command's own inline check fails first, and
-its inline recovery code (from the earlier install) reports
-`THALIRIS_RUNTIME_DRIFT: platform preflight unavailable`. The new check cannot
-be added to that loaded command: the old code is embedded in it, and the
-generated command already sits close to cmd's 8191-character line limit. Right
-after an install that reported `RESTART_CODEX_ONCE`, treat this diagnosis the
-same way and restart once. If it persists after the restart, it is real drift.
-The upgrade from adapter 0.5.2 to 0.5.3 is such a case.
+If the upgrade also replaced the trampoline (and with it the preflight digest
+the trampoline pins), the loaded Host command's own inline check fails first
+with `script drift`. Since adapter 0.5.5 that command's inline recovery runs a
+compact form of the same check against the trampoline the Host pinned: the old
+pin is in a committed generation, the trampoline and manifest on disk are a
+committed generation's `after` bytes, and the current runtime verifies. Then it
+reports `THALIRIS_RUNTIME_STALE_HOST_LOAD` too; otherwise
+`THALIRIS_RUNTIME_DRIFT: platform preflight unavailable (script drift)`. Inline
+recovery keeps the concrete cause in parentheses instead of a generic message.
+To fit cmd's 8191-character line, the command carries its pin payload as plain
+JSON rather than base64.
+
+Commands loaded from 0.5.4 or earlier carry the earlier recovery code and still
+report only `platform preflight unavailable` for this case. Right after an
+install that reported `RESTART_CODEX_ONCE`, treat that as an unrestarted Host
+and restart once. If it persists after the restart, it is real drift.
+
+### Restricted PowerShell execution policy
+
+Through 0.5.4 the trampoline ran the hash-checked preflight as a script file
+(`& thaliris-preflight.ps1`). Windows client editions default to the
+`Restricted` execution policy, which refuses every script file, so on such a
+machine each hook fell into inline recovery and reported
+`THALIRIS_RUNTIME_DRIFT: platform preflight unavailable` even right after a
+clean install and restart. This blocked managed child dispatch indefinitely.
+Since 0.5.5 the trampoline reads the preflight once, checks that hash, and
+runs those same bytes as a script block. Execution policy does not apply to
+it, and the file cannot change between the check and the run. Verification
+and policy are unchanged; this does not set or rely on any execution policy.
 
 ### Continuing the same Controller after the restart
 

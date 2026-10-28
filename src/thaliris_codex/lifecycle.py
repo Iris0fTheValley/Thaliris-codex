@@ -324,21 +324,21 @@ def _v041_host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
     ).encode("ascii")
 
 
-def host_hook_script_bytes() -> bytes:
+def host_hook_script_bytes(previous: bool = False) -> bytes:
     """Reach exact actor navigation even when cwd has no ancestor marker.
 
     The verified receiver performs repository selection. This does not create
     an activation marker or merge independent worktrees into one authority.
     """
-    old = _pre_repository_association_host_hook_script_bytes()
+    old = _pre_repository_association_host_hook_script_bytes(previous)
     begin = old.index(b'set "_thaliris_search_dir=%CD%"\r\n')
     end = old.index(b':thaliris_dispatch\r\n', begin)
     return old[:begin] + old[end:]
 
 
-def _pre_repository_association_host_hook_script_bytes() -> bytes:
+def _pre_repository_association_host_hook_script_bytes(previous: bool = True) -> bytes:
     """Check the independent SessionStart recovery before project dispatch."""
-    old = _pre_catalog_recovery_host_hook_script_bytes()
+    old = _pre_catalog_recovery_host_hook_script_bytes(previous)
     preparation = (
         'set "THALIRIS_HOOK_EVENT=%~4"\r\n'
         f'set "{THALIRIS_EXECUTABLE_ENV}=%~1"\r\n'
@@ -347,7 +347,7 @@ def _pre_repository_association_host_hook_script_bytes() -> bytes:
         f'set "THALIRIS_INSTALL_MANIFEST=%~dp0{runtime_identity.MANIFEST_NAME}"\r\n'
         f'set "THALIRIS_PREFLIGHT=%~dp0{HOST_PREFLIGHT_SCRIPT_NAME}"\r\n'
         'set "THALIRIS_SESSION_START_ABI=%~5"\r\n'
-        f'powershell.exe -NoProfile -NonInteractive -Command "{host_preflight.command_entry()}"\r\n'
+        f'powershell.exe -NoProfile -NonInteractive -Command "{host_preflight.command_entry(previous)}"\r\n'
         'exit /b %ERRORLEVEL%\r\n'
     )
     prefix = ('if /i not "%~4"=="SessionStart" goto thaliris_find_project\r\n' + preparation +
@@ -357,9 +357,9 @@ def _pre_repository_association_host_hook_script_bytes() -> bytes:
     return result
 
 
-def _pre_catalog_recovery_host_hook_script_bytes() -> bytes:
+def _pre_catalog_recovery_host_hook_script_bytes(previous: bool = True) -> bytes:
     """Render the Host trampoline with a pre-Python runtime file check."""
-    entry = host_preflight.command_entry()
+    entry = host_preflight.command_entry(previous)
     return (
         "@echo off\r\n"
         "setlocal DisableDelayedExpansion\r\n"
@@ -394,13 +394,13 @@ def _pre_catalog_recovery_host_hook_script_bytes() -> bytes:
     ).encode("ascii")
 
 
-def host_run_script_bytes(executable: Path, runtime_sha256: str) -> bytes:
+def host_run_script_bytes(executable: Path, runtime_sha256: str, previous: bool = False) -> bytes:
     """Render the installed command used for bootstrap and managed CLI calls."""
     if not re.fullmatch(r"[0-9a-f]{64}", runtime_sha256):
         raise ValueError("invalid installed runtime identity")
     if any(character in str(executable) for character in ('"', "%", "!", "`", "\r", "\n")):
         raise ValueError("runtime path is unsafe for cmd")
-    entry = host_preflight.command_entry()
+    entry = host_preflight.command_entry(previous)
     return (
         "@echo off\r\n"
         "setlocal DisableDelayedExpansion\r\n"
@@ -439,6 +439,7 @@ def installed_run_script_identity(contents: bytes) -> tuple[Path, str] | None:
     try:
         return (path, identity.group(1)) if contents in {
             host_run_script_bytes(path, identity.group(1)),
+            host_run_script_bytes(path, identity.group(1), previous=True),
             _previous_host_run_script_bytes(path, identity.group(1)),
             _v041_host_run_script_bytes(path, identity.group(1)),
         } else None
@@ -538,17 +539,30 @@ def _v041_pinned_host_command(script: Path, executable: Path, executable_sha256:
 
 
 def _pinned_host_source(script: Path, executable: Path, executable_sha256: str,
-                        runtime_sha256: str | None, event: str, *, previous: bool = False) -> str:
-    """Build the generated inline Host check; modified trampoline bytes cannot skip it."""
+                        runtime_sha256: str | None, event: str, *, previous: bool = False,
+                        v054: bool = False) -> str:
+    """Build the generated inline Host check; modified trampoline bytes cannot skip it.
+
+    ``previous`` and ``v054`` render earlier registrations for exact recognition.
+    """
     payload = {
         "script": str(script), "executable": str(executable), "sha": executable_sha256,
         "runtime": runtime_sha256, "event": event, "abi": MANAGED_HOOK_ABI,
     }
-    data = base64.b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).decode("ascii")
-    script_sha = hashlib.sha256(_pre_repository_association_host_hook_script_bytes() if previous else host_hook_script_bytes()).hexdigest()
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    script_sha = hashlib.sha256(_pre_repository_association_host_hook_script_bytes() if previous
+                                else host_hook_script_bytes(previous=v054)).hexdigest()
+    old = previous or v054
+    if old:
+        data = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        loader = f"$p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{data}'))|ConvertFrom-Json);"
+    else:
+        # Plain JSON compresses far better than base64 inside the packed
+        # literal, which leaves room for the stale-Host proof on cmd's line.
+        loader = "$p=('" + text.replace("'", "''") + "'|ConvertFrom-Json);"
     source = (
         "$ErrorActionPreference='Stop';"
-        f"$p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{data}'))|ConvertFrom-Json);"
+        + loader +
         f"$expected='{script_sha}';"
         "try {"
         "$stream=[IO.File]::OpenRead($p.script); $sha=[Security.Cryptography.SHA256]::Create();"
@@ -558,7 +572,8 @@ def _pinned_host_source(script: Path, executable: Path, executable_sha256: str,
         "} catch {"
         "$env:THALIRIS_HOOK_EVENT=$p.event;$env:THALIRIS_EXECUTABLE=$p.executable;"
         "$env:THALIRIS_INSTALL_MANIFEST=Join-Path ([IO.Path]::GetDirectoryName($p.script)) 'thaliris-install.json';"
-        + "\n" + host_preflight.recovery_source()
+        + ("" if old else "$cause=$_.Exception.Message;")
+        + "\n" + host_preflight.recovery_source(previous=old, pin=not old)
         + "\nexit 0}"
 
     )
@@ -568,7 +583,7 @@ def _pinned_host_source(script: Path, executable: Path, executable_sha256: str,
 def _legacy_pinned_host_command(script: Path, executable: Path, executable_sha256: str,
                                 runtime_sha256: str | None, event: str) -> str:
     """Render the previously registered packed -Command form for exact legacy recognition."""
-    source = _pinned_host_source(script, executable, executable_sha256, runtime_sha256, event)
+    source = _pinned_host_source(script, executable, executable_sha256, runtime_sha256, event, v054=True)
     return 'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal(source) + '"'
 
 
@@ -594,17 +609,26 @@ def _pinned_host_payload(command: str) -> dict[str, Any] | None:
         else:
             source = base64.b64decode(command[len(prefix):], validate=True).decode("utf-16le")
             source = host_preflight.unpack_literal(source)
+        start = "$ErrorActionPreference='Stop';"
         marker = "$p=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
-        if not source.startswith("$ErrorActionPreference='Stop';" + marker):
+        plain = re.match(r"\$p=\('((?:[^']|'')*)'\|ConvertFrom-Json\);", source[len(start):])
+        if not source.startswith(start):
             return None
-        data = source.split(marker, 1)[1].split("'", 1)[0]
-        payload = json.loads(base64.b64decode(data, validate=True))
+        if source.startswith(start + marker):
+            data = source.split(marker, 1)[1].split("'", 1)[0]
+            payload = json.loads(base64.b64decode(data, validate=True))
+        elif plain is not None:
+            payload = json.loads(plain.group(1).replace("''", "'"))
+        else:
+            return None
         if not isinstance(payload, dict) or set(payload) != {"script", "executable", "sha", "runtime", "event", "abi"}:
             return None
         if command not in {
             _pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"]),
             _legacy_pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"]),
             _v041_pinned_host_command(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"], payload["abi"]),
+            'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal_without_variables(
+                _pinned_host_source(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"], v054=True)) + '"',
             'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal_without_variables(
                 _pinned_host_source(Path(payload["script"]), Path(payload["executable"]), payload["sha"], payload["runtime"], payload["event"], previous=True)) + '"',
             'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal(
@@ -685,7 +709,7 @@ def _host_hook_command_is_managed(
         if not script.is_absolute() or script.resolve(strict=True) != (codex_home / HOST_HOOK_SCRIPT_NAME).resolve(strict=True):
             return False
         if script.is_symlink() or script.read_bytes() not in {
-            host_hook_script_bytes(), _pre_repository_association_host_hook_script_bytes(), _pre_catalog_recovery_host_hook_script_bytes(), _v041_host_hook_script_bytes(), _previous_host_hook_script_bytes(), _legacy_host_hook_script_bytes()
+            host_hook_script_bytes(), host_hook_script_bytes(previous=True), _pre_repository_association_host_hook_script_bytes(), _pre_catalog_recovery_host_hook_script_bytes(), _v041_host_hook_script_bytes(), _previous_host_hook_script_bytes(), _legacy_host_hook_script_bytes()
         }:
             return False
         if not executable.is_absolute() or executable.is_symlink():

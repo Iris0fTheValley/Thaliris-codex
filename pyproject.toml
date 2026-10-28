@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thaliris-codex"
-version = "0.5.4"
+version = "0.5.5"
 description = "Codex Host adapter for the shared Thaliris Core"
 dependencies = ["thaliris>=0.5.3,<0.6"]
 requires-python = ">=3.11"
