@@ -60,8 +60,10 @@ If the upgrade also replaced the trampoline (and with it the preflight digest
 the trampoline pins), the loaded Host command's own inline check fails first
 with `script drift`. Since adapter 0.5.5 that command's inline recovery runs a
 compact form of the same check against the trampoline the Host pinned: the old
-pin is in a committed generation, the trampoline and manifest on disk are a
-committed generation's `after` bytes, and the current runtime verifies. Then it
+pin is in a committed generation, the trampoline, preflight and manifest on
+disk are a committed generation's `after` bytes, and the current runtime
+verifies. A damaged or missing preflight therefore stays drift: a restart
+would not repair it. Then it
 reports `THALIRIS_RUNTIME_STALE_HOST_LOAD` too; otherwise
 `THALIRIS_RUNTIME_DRIFT: platform preflight unavailable (script drift)`. Inline
 recovery keeps the concrete cause in parentheses instead of a generic message.

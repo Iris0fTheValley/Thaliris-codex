@@ -380,13 +380,15 @@ try {
 function Stale($m,$n,$w) {
   try {
     $o=$false;$c=$false;$k=FileHash $m;$gh=[IO.Path]::GetDirectoryName($m);$d=FileHash (Join-Path $gh $n)
+    # The Host never ran this preflight; a damaged one would survive a restart.
+    $y=FileHash (Join-Path $gh 'thaliris-preflight.ps1')
     if ($w -cnotmatch '^[0-9a-f]{64}$' -or $d -ceq $w) { return $false }
     foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $gh 'thaliris-host-generations') -Filter '*.json' -File -Force)) {
       SafePath $f.FullName;$r=[IO.File]::ReadAllText($f.FullName)|ConvertFrom-Json
       if ($r.phase -cne 'COMMITTED') { continue }
       foreach ($v in @($r.before.$n,$r.after.$n)) { if ($v -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $w) { $o=1 } }
-      $v=$r.after.'thaliris-install.json';$u=$r.after.$n
-      if ($v -and $u -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $k -and (HashBytes ([Convert]::FromBase64String($u))) -ceq $d) { $c=1 }
+      $v=$r.after.'thaliris-install.json';$u=$r.after.$n;$z=$r.after.'thaliris-preflight.ps1'
+      if ($v -and $u -and $z -and (HashBytes ([Convert]::FromBase64String($v))) -ceq $k -and (HashBytes ([Convert]::FromBase64String($u))) -ceq $d -and (HashBytes ([Convert]::FromBase64String($z))) -ceq $y) { $c=1 }
     }
     if (-not ($o -and $c)) { return $false }
     $b=[IO.File]::ReadAllBytes($m);AssertRuntime $b (([Text.Encoding]::UTF8.GetString($b)|ConvertFrom-Json).executable) $k

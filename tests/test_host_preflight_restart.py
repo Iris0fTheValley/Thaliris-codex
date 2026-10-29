@@ -108,12 +108,16 @@ def _upgrade(tmp_path, exe, monkeypatch, generation):
         (exe.parent.parent / "Lib/site-packages/thaliris_codex/cli.py").write_text("tampered runtime")
     if generation == "foreign_hook":
         hook.write_bytes(real() + b"rem not the committed generation\r\n")
+    if generation == "damaged_preflight":
+        (home / host_preflight.NAME).write_bytes(host_preflight.script_bytes() + b"\n# damaged after upgrade\n")
+    if generation == "missing_preflight":
+        (home / host_preflight.NAME).unlink()
     return stale_command, home
 
 
 @windows
 @pytest.mark.parametrize("generation", ["committed", "absent", "uncommitted", "unrelated", "damaged_current",
-                                        "foreign_hook"])
+                                        "foreign_hook", "damaged_preflight", "missing_preflight"])
 def test_unrestarted_host_after_upgrade_is_distinguished_from_drift(tmp_path, pinned_test_thaliris, monkeypatch,
                                                                      generation):
     exe, _ = pinned_test_thaliris
