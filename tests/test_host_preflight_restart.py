@@ -50,7 +50,9 @@ def test_frozen_054_renderings_keep_installed_bytes_recognizable():
     home, exe = PureWindowsPath(r"C:\h"), PureWindowsPath(r"C:\x\Scripts\thaliris.exe")
     source = lifecycle._pinned_host_source(home / lifecycle.HOST_HOOK_SCRIPT_NAME, exe, "b" * 64, "a" * 64, "PreToolUse",
                                            v054=True)
-    assert digest(source) == "29d70ad7afeb89929c1d788148b9be3b79173e7567157878e77e9d55663563d8"
+    pin = hashlib.sha256(lifecycle.host_hook_script_bytes(previous=True)).hexdigest()
+    assert f"$expected='{pin}';" in source  # hash of zlib-packed bytes, masked below
+    assert digest(source.replace(pin, "PIN")) == "3c7c0f0ccee8b375897baea3eef3587c96cc0ddd332bfceac15715dfa666cd7c"
     old = 'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal_without_variables(source) + '"'
     assert lifecycle._pinned_host_payload(old)["runtime"] == "a" * 64
     assert "& $p;" not in host_preflight.entry_source()  # never a policy-gated script file
