@@ -35,18 +35,22 @@ def _context(result):
 def test_frozen_054_renderings_keep_installed_bytes_recognizable():
     # Hosts upgraded from 0.5.4 still hold these exact bytes; ownership must
     # recognize them so codex-install replaces rather than refuses them.
-    digest = lambda data: hashlib.sha256(data if isinstance(data, bytes) else data.encode()).hexdigest()
+    # Pin the source text: packed bytes also depend on the platform's zlib.
+    digest = lambda text: hashlib.sha256(text.encode()).hexdigest()
     assert host_preflight._PREVIOUS_PREFLIGHT_SHA256 == "e8974be7983125d9c3d592df9e1121b07608623f87926302984f7c24b436c542"
-    assert digest(lifecycle.host_hook_script_bytes(previous=True)) == (
-        "9895da6b5b5738432f674c9529765b9274d3d6a5c7fc495ba5fcbf3219442b31")
-    assert digest(lifecycle.host_run_script_bytes(Path(r"C:\x\Scripts\thaliris.exe"), "a" * 64, previous=True)) == (
-        "b93f7ca17162724cacefc7016e397da6e43d924ce2d3ac8f189dcd93cafba744")
+    assert digest(host_preflight.entry_source(previous=True)) == (
+        "853d0492f52ed932146c0bf821115d0ff9b00d8fa4c04b85ddb125dc3cf97756")
+    assert digest(host_preflight.recovery_source(previous=True)) == (
+        "8c8ad23b7e18afec8418cf361553d44d30ce52b0fb649290030b72c8fe4011e9")
+    entry = 'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.command_entry(previous=True) + '"'
+    assert entry.encode() in lifecycle.host_hook_script_bytes(previous=True)
+    assert entry.encode() in lifecycle.host_run_script_bytes(Path(r"C:\x\Scripts\thaliris.exe"), "a" * 64, previous=True)
     assert lifecycle.host_hook_script_bytes() != lifecycle.host_hook_script_bytes(previous=True)
     home, exe = Path(r"C:\h"), Path(r"C:\x\Scripts\thaliris.exe")
-    old = 'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal_without_variables(
-        lifecycle._pinned_host_source(home / lifecycle.HOST_HOOK_SCRIPT_NAME, exe, "b" * 64, "a" * 64, "PreToolUse",
-                                      v054=True)) + '"'
-    assert digest(old) == "39c5846692fc6b723eddf262950215d0a31d2a5e8798dc42d4b9491738c392f6"
+    source = lifecycle._pinned_host_source(home / lifecycle.HOST_HOOK_SCRIPT_NAME, exe, "b" * 64, "a" * 64, "PreToolUse",
+                                           v054=True)
+    assert digest(source) == "29d70ad7afeb89929c1d788148b9be3b79173e7567157878e77e9d55663563d8"
+    old = 'powershell.exe -NoProfile -NonInteractive -Command "' + host_preflight.packed_literal_without_variables(source) + '"'
     assert lifecycle._pinned_host_payload(old)["runtime"] == "a" * 64
     assert "& $p;" not in host_preflight.entry_source()  # never a policy-gated script file
 
