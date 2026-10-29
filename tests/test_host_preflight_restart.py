@@ -6,7 +6,7 @@ import base64
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 
 import pytest
@@ -46,7 +46,8 @@ def test_frozen_054_renderings_keep_installed_bytes_recognizable():
     assert entry.encode() in lifecycle.host_hook_script_bytes(previous=True)
     assert entry.encode() in lifecycle.host_run_script_bytes(Path(r"C:\x\Scripts\thaliris.exe"), "a" * 64, previous=True)
     assert lifecycle.host_hook_script_bytes() != lifecycle.host_hook_script_bytes(previous=True)
-    home, exe = Path(r"C:\h"), Path(r"C:\x\Scripts\thaliris.exe")
+    # Windows paths on every platform: the pinned payload text embeds them.
+    home, exe = PureWindowsPath(r"C:\h"), PureWindowsPath(r"C:\x\Scripts\thaliris.exe")
     source = lifecycle._pinned_host_source(home / lifecycle.HOST_HOOK_SCRIPT_NAME, exe, "b" * 64, "a" * 64, "PreToolUse",
                                            v054=True)
     assert digest(source) == "29d70ad7afeb89929c1d788148b9be3b79173e7567157878e77e9d55663563d8"
