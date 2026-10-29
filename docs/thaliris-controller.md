@@ -123,7 +123,8 @@ Never delete invalid state or treat it as absent. Runtime drift is evidence for
 Controller repair/restore/accepted-upgrade judgment, not a blanket source-work ban.
 `THALIRIS_RUNTIME_STALE_HOST_LOAD` means this Codex process still runs an earlier
 committed install: ask the user to restart Codex once; task, authority and session
-association are kept.
+association are kept. A restart-pending or drift diagnosis does not change the task's
+execution mode: keep delegated routing and wait for the restart or repair.
 UNKNOWN missing Host fields, actual authority conflict and role violation are distinct.
 Damaged authority blocks only controls, authorization and certification that depend
 on it; ordinary diagnostics and independent work may proceed within existing role

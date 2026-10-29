@@ -31,6 +31,7 @@ _SUPPORTED_VERSIONS = frozenset({
     "codex-cli 0.162.0-alpha.17.2",
     "codex-cli 0.162.0",
     "codex-cli 0.162.1",
+    "codex-cli 0.165.0",
 })
 
 
