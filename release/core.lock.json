@@ -1,5 +1,5 @@
 {
   "repository": "Iris0fTheValley/Thaliris",
-  "commit": "4f4137fedf6746a9f7b054083098378ac1340dda",
-  "reason": "Core 0.6.0 (verification-first ledger: declared checks, verify, withholding gate, typed claims, dispatch usage, adaptive lane; task-state schema 9, promoted one-way at the first managed child stop)"
+  "commit": "ca4661168d3499c693c5ba9559ed84fdd4a943f9",
+  "reason": "Core 0.6.0 (verification-first ledger: declared checks, verify, withholding gate, typed claims, dispatch usage, adaptive lane; task-state schema 9, promoted one-way at the first managed child stop); parallel_dispatch is user-directed: budget and workstreams optional, no program cap, only write-write scope overlap refused"
 }

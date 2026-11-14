@@ -476,7 +476,7 @@ def test_disjoint_write_scopes_run_in_parallel(tmp_path, monkeypatch):
 
 
 def _policy(monkeypatch, *streams: dict, budget: int | None = None) -> None:
-    """A user contract shape Core 4f4137f does not yet admit (see the report)."""
+    """Patch in a contract shape Core now refuses at admission (overlapping or unscoped writes), to prove the adapter's own dispatch-time guard."""
     policy = {"enabled": True, "workstreams": list(streams)}
     if budget is not None:
         policy["budget"] = budget
@@ -519,10 +519,9 @@ def test_write_workstream_without_scope_cannot_run_beside_another_write(parallel
     assert denied(output, "THALIRIS_PARALLEL_DOMAIN_OVERLAP") and "no declared scope" in output
 
 
-def test_an_explicit_user_number_is_honored_and_otherwise_there_is_no_cap(parallel, monkeypatch):
-    root = parallel
+def test_an_explicit_user_number_is_honored_and_otherwise_there_is_no_cap(tmp_path, monkeypatch):
     streams = [_write(f"w-{index}", f"src/w{index}") for index in range(14)]
-    _policy(monkeypatch, *streams, budget=3)
+    root = _task(tmp_path, monkeypatch, {"enabled": True, "budget": 3, "workstreams": streams})
     for index in range(3):
         assert pre(root, request(workstream=f"w-{index}")) == ""
     output = pre(root, request(workstream="w-3"))
@@ -530,17 +529,17 @@ def test_an_explicit_user_number_is_honored_and_otherwise_there_is_no_cap(parall
     # The stated number counts writing dispatches only: review is never counted.
     assert pre(root, request("reviewer", message="Review the live candidates")) == ""
     # Without a stated number the adapter imposes none.
-    _policy(monkeypatch, *streams)
-    for index in range(3, 14):
+    root = _task(tmp_path / "uncapped", monkeypatch, {"enabled": True, "workstreams": streams})
+    for index in range(14):
         assert pre(root, request(workstream=f"w-{index}")) == ""
-    assert len(reservations(root)) == 15
+    assert len(reservations(root)) == 14
 
 
 # D11: non-writing roles never need a workstream and never contend.
 
-def test_non_writing_roles_need_no_workstream_and_are_never_counted(parallel, monkeypatch):
-    root = parallel
-    _policy(monkeypatch, _write("w-a", "src/a"), {**_stream("r-a", "read"), "scope": "src/a"}, budget=1)
+def test_non_writing_roles_need_no_workstream_and_are_never_counted(tmp_path, monkeypatch):
+    root = _task(tmp_path, monkeypatch, {"enabled": True, "budget": 1, "workstreams": [
+        _write("w-a", "src/a"), {**_stream("r-a", "read"), "scope": "src/a"}]})
     assert pre(root, request(workstream="w-a")) == ""
     # The one writing slot the user stated is taken; reads still fan out freely.
     roles_cycle = ("investigator", "reasoning-specialist", "reviewer")
@@ -559,23 +558,23 @@ def test_non_writing_roles_need_no_workstream_and_are_never_counted(parallel, mo
     assert lifecycle._parallel_writing_role("curator") and lifecycle._parallel_writing_role("implementer")
 
 
-def test_uncapped_overlapping_read_contract_once_core_admits_it(tmp_path, monkeypatch):
-    """The shape Core will admit after its re-pin: no budget, overlapping reads, optional worktree."""
+def test_uncapped_overlapping_read_contract_admitted_by_core(tmp_path, monkeypatch):
+    """Core admits no budget, no worktree, overlapping reads and workstream-free fan-out; overlapping writes are refused at admission."""
     policy = {"enabled": True, "workstreams": [
         {"id": "w-a", "domain": "one", "scope": "src/a", "worktree": None, "mode": "write"},
         {"id": "w-b", "domain": "two", "scope": "src/b", "worktree": None, "mode": "write"},
-        {"id": "w-c", "domain": "three", "scope": "src/a/inner", "worktree": None, "mode": "write"},
         {"id": "r-all", "domain": "one", "scope": "src", "worktree": None, "mode": "read"},
+        {"id": "r-inner", "domain": "one", "scope": "src/a/inner", "worktree": None, "mode": "read"},
     ]}
-    try:
-        root = _task(tmp_path, monkeypatch, policy)
-    except (core.ThalirisError, ValueError) as error:
-        pytest.skip("Core pin 4f4137f still requires parallel_dispatch.budget (1..256, >= workstreams), a unique"
-                    " worktree per write stream, and disjoint scopes per domain for read streams too"
-                    f" (thaliris/authority.py:89-146): {error}")
+    root = _task(tmp_path, monkeypatch, policy)
     for index in range(20):
         assert pre(root, request("investigator", message=f"Uncapped read {index}")) == ""
     assert pre(root, request(workstream="w-a")) == "" and pre(root, request(workstream="w-b")) == ""
-    # Overlap between write streams is refused whatever their domain label.
-    assert denied(pre(root, request(workstream="w-c")), "THALIRIS_PARALLEL_DOMAIN_OVERLAP")
     assert pre(root, request("investigator", workstream="r-all", message="Read everything")) == ""
+    assert pre(root, request("investigator", workstream="r-inner", message="Read inner")) == ""
+    # Write-write overlap, whatever the domain label, is refused by Core when the contract is established.
+    with pytest.raises(core.ThalirisError) as refused:
+        _task(tmp_path / "overlap", monkeypatch, {"enabled": True, "workstreams": [
+            {"id": "w-a", "domain": "one", "scope": "src/a", "worktree": None, "mode": "write"},
+            {"id": "w-c", "domain": "three", "scope": "src/a/inner", "worktree": None, "mode": "write"}]})
+    assert refused.value.code == "TASK_AUTHORITY_CONTRACT_REQUIRED"
