@@ -15,9 +15,11 @@ def isolated_thaliris_home(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def isolated_repository_navigation(tmp_path, monkeypatch):
-    from thaliris_codex import repository_association, maintenance_capability
+    from thaliris_codex import repository_association, maintenance_capability, config_capability
     monkeypatch.setattr(repository_association, "directory", lambda: tmp_path.parent / (tmp_path.name + "-navigation"))
     monkeypatch.setattr(maintenance_capability, "directory", lambda: tmp_path.parent / (tmp_path.name + "-maintenance"))
+    # A probe result cached for a real Host binary must never leak in or out.
+    monkeypatch.setattr(config_capability, "cache_directory", lambda: tmp_path.parent / (tmp_path.name + "-host-capability"))
 
 
 @pytest.fixture
@@ -57,6 +59,9 @@ def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # This fixture does not model the Codex CLI's separate 0.162 config field;
     # compatibility tests opt in explicitly instead of probing the developer host.
     monkeypatch.setattr(wait_guidance_config, "capability", lambda: "UNKNOWN")
+    # Installer unit tests must not read whichever Codex binary is on PATH.
+    monkeypatch.setattr(codex_adapter, "host_hook_shape", lambda *_args, **_kwargs: {
+        "status": "UNKNOWN", "reason": "test runtime models no Host binary", "runtime_refusal": "NEVER"})
 
     venv = tmp_path / "test-runtime"
     executable = venv / "Scripts" / "test-host-executable.exe"

@@ -1,4 +1,5 @@
-"""Run the fallback's actual CLI/HTTP boundary with a minimal simulated CLI."""
+"""Run the probe's actual CLI/HTTP boundary with a minimal simulated CLI."""
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -44,10 +45,24 @@ value = config["features"]["multi_agent_v2"][field] if "features" in config else
 if behavior == "unavailable":
     print("unrelated startup failure", file=sys.stderr)
     sys.exit(2)
+runs = home.parent / "runs"
+count = int(runs.read_text()) + 1 if runs.exists() else 1
+runs.write_text(str(count))
+if behavior == "control_fails" and count >= 4:
+    print("environment stopped working after the integer run", file=sys.stderr)
+    sys.exit(2)
 if not isinstance(value, str) and behavior != "wrong_type_accepted":
     if behavior == "ambiguous_type_failure":
         print(field + ": string configuration unavailable", file=sys.stderr)
         sys.exit(2)
+    if behavior == "unworded_type_failure":
+        sys.exit(1)
+    if behavior == "integer_silent":
+        sys.exit(0)
+    if behavior == "misattributed_type_failure":
+        print("Error loading config.toml: invalid type: integer `123`, expected a string\n"
+              "in `model_providers.config_probe.base_url`", file=sys.stderr)
+        sys.exit(1)
     if behavior == "untagged_feature_error":
         print("Error loading config.toml: data did not match any variant of untagged enum "
               "FeatureToml\nin `features.multi_agent_v2`", file=sys.stderr)
@@ -81,6 +96,7 @@ def simulated_cli(tmp_path, monkeypatch, behavior):
         calls.append((args, kwargs))
         return run([sys.executable, str(script), behavior, *args[1:]], **kwargs)
 
+    monkeypatch.delenv("THALIRIS_CODEX_EXECUTABLE", raising=False)
     monkeypatch.setattr(probe.shutil, "which", lambda _name: "controlled-cli")
     monkeypatch.setattr(probe.subprocess, "run", execute)
     monkeypatch.setattr(probe, "_system_config_paths", lambda: (
@@ -98,7 +114,15 @@ def simulated_cli(tmp_path, monkeypatch, behavior):
     ("ignored", "INCOMPATIBLE"),
     ("wrong_type_accepted", "INCOMPATIBLE"),
     ("unavailable", "UNKNOWN"),
-    ("ambiguous_type_failure", "UNKNOWN"),
+    # Typed rejection is shown by behaviour, not by matching error wording.
+    ("ambiguous_type_failure", "SUPPORTED"),
+    ("unworded_type_failure", "SUPPORTED"),
+    # Exit 0 without a request proves neither acceptance nor rejection.
+    ("integer_silent", "UNKNOWN"),
+    # The Host attributes its failure to an unrelated location.
+    ("misattributed_type_failure", "UNKNOWN"),
+    # The accepted run no longer works, so the failure is not attributable.
+    ("control_fails", "UNKNOWN"),
 ])
 def test_unknown_patch_uses_actual_isolated_cli_effect(tmp_path, monkeypatch, module, behavior, expected):
     calls = simulated_cli(tmp_path, monkeypatch, behavior)
@@ -223,3 +247,126 @@ def test_existing_user_value_never_invokes_unknown_probe(tmp_path, monkeypatch, 
     monkeypatch.setattr(module, "capability", lambda: pytest.fail("user value must precede probe"))
     assert module.plan_install(home, {})[1]["status"] == "USER_EMPTY_PRESERVED"
     assert (home / "config.toml").read_bytes() == original
+
+
+def cached_cli(tmp_path, monkeypatch, behavior, *, name="codex.exe"):
+    """A real file stands in for the resolved binary so its bytes can be hashed."""
+    calls = simulated_cli(tmp_path, monkeypatch, behavior)
+    binary = tmp_path / "bin" / name
+    binary.parent.mkdir(exist_ok=True)
+    binary.write_bytes(b"MZ simulated Codex binary one")
+    run = probe.subprocess.run
+
+    def execute(args, **kwargs):
+        return run(["controlled-cli", *args[1:]], **kwargs)
+
+    monkeypatch.setattr(probe.shutil, "which", lambda _name: str(binary))
+    monkeypatch.setattr(probe.subprocess, "run", execute)
+    return calls, binary
+
+
+@pytest.mark.parametrize("module,field", [(hint, "multi_agent_mode_hint_text"),
+                                          (guidance, "developer_instructions")])
+def test_definitive_probe_result_is_reused_only_for_identical_binary_bytes(
+        tmp_path, monkeypatch, module, field):
+    calls, binary = cached_cli(tmp_path, monkeypatch, "compatible")
+    assert module.capability() == "SUPPORTED"
+    probed = len(calls)
+    assert probed >= 5  # --version plus the four isolated exec runs
+    assert module.capability() == "SUPPORTED"
+    assert len(calls) == probed  # cache hit: no process at all
+    cached = probe.cached_capability(field)
+    assert cached["status"] == "SUPPORTED" and cached["evidence"] == "BINARY_SHA256_PROBE_CACHE"
+    assert cached["cli_sha256"] == probe.binary_sha256(str(binary))
+    entries = list(probe.cache_directory().glob("*.json"))
+    assert len(entries) == 1
+    assert json.loads(entries[0].read_bytes())["cli_version"] == "codex-cli 0.162.2"
+    # Replaced bytes are a different Host: the old result does not apply.
+    binary.write_bytes(b"MZ simulated Codex binary two")
+    assert probe.cached_capability(field)["status"] == "UNKNOWN"
+    assert module.capability() == "SUPPORTED"
+    assert len(calls) > probed
+
+
+def test_unknown_results_are_never_cached(tmp_path, monkeypatch):
+    calls, _ = cached_cli(tmp_path, monkeypatch, "unavailable")
+    assert hint.capability() == "UNKNOWN"
+    first = len(calls)
+    assert hint.capability() == "UNKNOWN"
+    assert len(calls) == 2 * first
+    assert not list(probe.cache_directory().glob("*.json"))
+
+
+def test_incompatible_result_is_cached_and_still_preserves_user_bytes(tmp_path, monkeypatch):
+    calls, _ = cached_cli(tmp_path, monkeypatch, "ignored")
+    assert hint.capability() == "INCOMPATIBLE"
+    first = len(calls)
+    home = tmp_path / "user-home"
+    home.mkdir()
+    original = b'model = "user-selected"\n'
+    (home / "config.toml").write_bytes(original)
+    record, status = hint.plan_install(home, {})
+    assert record is None and status["status"] == "CAPABILITY_INCOMPATIBLE"
+    assert len(calls) == first
+    assert (home / "config.toml").read_bytes() == original
+
+
+@pytest.mark.parametrize("tamper", ["result", "binary", "contract", "format", "garbage"])
+def test_tampered_or_foreign_cache_entries_grant_nothing(tmp_path, monkeypatch, tamper):
+    calls, binary = cached_cli(tmp_path, monkeypatch, "unavailable")
+    digest = probe.binary_sha256(str(binary))
+    contract = probe._probe_contract()
+    path = probe._cache_path(digest, "multi_agent_mode_hint_text", contract)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {"format": probe.CACHE_FORMAT, "cli_sha256": digest, "field": "multi_agent_mode_hint_text",
+             "probe_contract": contract, "result": "SUPPORTED", "cli_version": "codex-cli 0.162.2"}
+    if tamper == "result":
+        entry["result"] = "UNKNOWN"
+    elif tamper == "binary":
+        entry["cli_sha256"] = "f" * 64
+    elif tamper == "contract":
+        entry["probe_contract"] = "0" * 64
+    elif tamper == "format":
+        entry["format"] = "thaliris-config-capability-v0"
+    path.write_bytes(b"not json" if tamper == "garbage" else json.dumps(entry).encode())
+    assert hint.capability() == "UNKNOWN"
+    assert len(calls) > 0  # the forged entry did not stand in for a probe
+
+
+@pytest.mark.parametrize("name", ["codex.cmd", "codex.ps1", "codex.js"])
+def test_launcher_scripts_are_probed_but_never_cached(tmp_path, monkeypatch, name):
+    calls, binary = cached_cli(tmp_path, monkeypatch, "compatible", name=name)
+    assert probe.binary_sha256(str(binary)) is None
+    assert hint.capability() == "SUPPORTED"
+    first = len(calls)
+    assert hint.capability() == "SUPPORTED"
+    assert len(calls) == 2 * first
+    assert not list(probe.cache_directory().glob("*.json"))
+
+
+def test_shebang_script_is_not_a_binary_identity(tmp_path):
+    script = tmp_path / "codex"
+    script.write_bytes(b"#!/usr/bin/env node\nrequire('codex')\n")
+    assert probe.binary_sha256(str(script)) is None
+    assert probe.binary_sha256(str(tmp_path / "missing.exe")) is None
+
+
+def test_executable_resolution_matches_adapter_override(tmp_path, monkeypatch):
+    selected = tmp_path / "selected" / "codex.exe"
+    selected.parent.mkdir()
+    selected.write_bytes(b"MZ selected")
+    monkeypatch.setattr(probe.shutil, "which", lambda name: None if name == str(selected) else "path-codex")
+    monkeypatch.setenv("THALIRIS_CODEX_EXECUTABLE", str(selected))
+    assert probe.resolve_executable() == str(selected)
+    monkeypatch.delenv("THALIRIS_CODEX_EXECUTABLE")
+    assert probe.resolve_executable() == "path-codex"
+
+
+def test_behavioural_rejection_never_follows_from_wording_alone():
+    # Corroboration only: a named unrelated location blocks attribution, while
+    # the leaf, its untagged parent or no location at all does not.
+    assert probe._misattributed("in `model_providers.x.base_url`", "developer_instructions")
+    assert not probe._misattributed("in `developer_instructions`", "developer_instructions")
+    assert not probe._misattributed("no location", "developer_instructions")
+    assert not probe._misattributed("in `features.multi_agent_v2`", "multi_agent_mode_hint_text")
+    assert probe._misattributed("in `features.multi_agent_v2`", "developer_instructions")

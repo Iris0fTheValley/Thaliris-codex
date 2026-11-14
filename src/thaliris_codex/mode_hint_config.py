@@ -14,22 +14,19 @@ from .config_capability import capability as config_capability
 
 KEY = "features.multi_agent_v2.multi_agent_mode_hint_text"
 RECORD_KEY = "native_mode_hint"
-SUPPORTED_VERSIONS = frozenset({
-    "codex-cli 0.162.0-alpha.17.2",
-    "codex-cli 0.162.0-alpha.2",
-    "codex-cli 0.162.0",
-    "codex-cli 0.162.1",
-    "codex-cli 0.165.0",
-    "codex-cli 0.167.1",
-})
 MARKER = '# thaliris:multi-agent-mode-hint\nmulti_agent_mode_hint_text = ""\n'
 BOOL_MARKER = '# thaliris:multi-agent-v2-bool '
 BOOL_LINE = r'[ \t]*(?:features\.)?multi_agent_v2[ \t]*=[ \t]*(true|false)[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)'
 
 
 def capability() -> str:
-    """Use source evidence or an isolated check of the actual config effect."""
-    return config_capability("multi_agent_mode_hint_text", SUPPORTED_VERSIONS)
+    """Isolated check of the actual config effect, cached per exact binary.
+
+    No version string decides support. ``VERSION_SUPPORT_UNKNOWN`` remains the
+    persisted status name for "capability not demonstrated" so existing
+    receipts and transition journals stay readable.
+    """
+    return config_capability("multi_agent_mode_hint_text")
 
 
 def read(home: Path) -> tuple[bytes, dict]:

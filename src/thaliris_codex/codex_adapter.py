@@ -957,6 +957,28 @@ def host_wait_mode(executable: str | None = None, *, wait_schema: object = None,
     return {**provenance, **native_wait_capability.classify(wait_schema, runtime_observations)}
 
 
+def host_hook_shape(codex_home: Path | None = None, *, observed_tool_names: object = (),
+                    runtime_gaps: object = ()) -> dict[str, object]:
+    """Diagnose Host hook shape and cached config capability; never a refusal.
+
+    Compatibility is capability and hook-shape based. A version string is
+    neither consulted nor reported as support evidence here.
+    """
+    from . import config_capability, hook_shape
+    try:
+        report: dict[str, object] = hook_shape.host_report(
+            codex_home=codex_home, observed_tool_names=observed_tool_names or ())
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        report = {"status": "UNKNOWN", "reason": "hook shape check failed: " + type(exc).__name__,
+                  "runtime_refusal": "NEVER"}
+    report["runtime_payload_gaps"] = list(runtime_gaps or ())[:16]
+    try:
+        report["config_capability"] = config_capability.cached_capabilities()
+    except (OSError, ValueError, TypeError):
+        report["config_capability"] = "UNKNOWN"
+    return report
+
+
 def host_explicit_blocking_wait(executable: str | None = None, *, wait_schema: object = None,
                                 runtime_observations: object = None) -> dict[str, object]:
     """Report selected schema support separately from unproven runtime facts."""
@@ -2634,6 +2656,8 @@ def doctor(root: Path) -> dict[str, object]:
     observations: list[tuple[int, int, dict[str, object]]] = []
     events: set[str] = set()
     pretool_tools: set[str] = set()
+    host_tool_names: set[str] = set()
+    hook_shape_gaps: list[dict[str, object]] = []
     compatible_profile_observed = False
     orchestration = {
         "wait_calls": 0,
@@ -2657,6 +2681,12 @@ def doctor(root: Path) -> dict[str, object]:
             events.update(name for name, observed in runtime["events_observed"].items() if observed is True)
         if current and isinstance(runtime.get("pretool_tools_observed"), list):
             pretool_tools.update(tool for tool in runtime["pretool_tools_observed"] if isinstance(tool, str))
+        if current and isinstance(runtime.get("tool_names_observed"), list):
+            host_tool_names.update(tool for tool in runtime["tool_names_observed"] if isinstance(tool, str))
+        if isinstance(runtime, dict) and isinstance(runtime.get("host_hook_shape"), list):
+            for gap in runtime["host_hook_shape"]:
+                if isinstance(gap, dict) and gap not in hook_shape_gaps and len(hook_shape_gaps) < 16:
+                    hook_shape_gaps.append(gap)
         if current and isinstance(runtime.get("subagent_start_agent_types"), list):
             compatible_profile_observed = compatible_profile_observed or any(
                 isinstance(value, str) and value in roles.native_profile_names()
@@ -2771,6 +2801,8 @@ def doctor(root: Path) -> dict[str, object]:
         "effective_wait_maximum": host_explicit_blocking_wait().get("effective_max_wait_timeout_ms", "UNAVAILABLE"),
     })
     result["host_capability"] = host
+    result["host_hook_shape"] = host_hook_shape(home, observed_tool_names=host_tool_names,
+                                                runtime_gaps=hook_shape_gaps)
     posttool_schema = "PASS" if any(item.get("native_response_contract") in {"CURRENT_V2", "LEGACY_V1"}
         for tool, item in tool_schemas.items() if tool in lifecycle._COLLABORATION_TOOL_NAMES) else "UNKNOWN"
     result["lifecycle_reconciliation"] = {

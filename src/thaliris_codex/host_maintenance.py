@@ -828,6 +828,8 @@ def _finish_install(home, transition):
         "controller_wait_guidance_compatibility": wait_guidance,
         "native_model_catalog_compatibility": catalog_result,
         "catalog_goal_met": catalog_result["status"] == "MANAGED",
+        # Install-time evidence only; an UNKNOWN shape never blocks installation.
+        "host_hook_shape": adapter.host_hook_shape(home),
         "host_integration_ready": "YES" if complete else "NO", "global_instruction_ready": "YES",
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,

@@ -1707,6 +1707,9 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
     try:
         if event not in HOOK_EVENTS or not isinstance(payload, dict):
             return ""
+        # Diagnostic only: every decision below keeps its own fail-closed
+        # handling of the same missing fields.
+        _best_effort_record(_record_hook_shape_gap, root, event, payload)
         if event == "PreToolUse":
             if payload.get("fenced") is True:
                 return _permission_deny("THALIRIS_FENCED_ACTOR")
@@ -2248,6 +2251,27 @@ def _runtime_metadata(state: dict[str, Any], payload: dict[str, Any]) -> None:
         state["session_id_hash"] = _identity_hash(session)
     state["observation_sequence"] = int(state.get("observation_sequence", 0)) + 1
     state["observed_at_ns"] = time.time_ns()
+
+
+def _record_hook_shape_gap(root: Path, event: str, payload: dict[str, Any]) -> None:
+    """Name a live payload's missing adapter inputs as ``host_hook_shape: UNKNOWN``.
+
+    Bounded and hash-free: only the event and the absent key names are kept.
+    """
+    from . import hook_shape
+    missing = hook_shape.missing_payload_keys(event, payload)
+    if not missing:
+        return
+    item = {"status": "UNKNOWN", "event": event, "missing_keys": missing}
+    with task_authority._lock(root):
+        path = _session_dir(root, payload) / "runtime.json"
+        state = _load_runtime(path)
+        gaps = state.get("host_hook_shape", [])
+        if not isinstance(gaps, list) or item in gaps or len(gaps) >= 16:
+            return
+        _runtime_metadata(state, payload)
+        state["host_hook_shape"] = [*gaps, item]
+        _write_capture(path, state)
 
 
 def _record_runtime_event(root: Path, payload: dict[str, Any], event: str, tool: str) -> None:

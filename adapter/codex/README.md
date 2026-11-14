@@ -562,19 +562,31 @@ and is not a pending decision.
 Catalog provenance, content admission, receipt/recovery details, and the distinction
 between disk writes, the running process, and sessions already in progress are recorded
 in the [model-catalog maintenance report](../../docs/model-catalog-maintenance-report.md).
-Catalog compatibility is based on the selected source's model roster and content, not a
-CLI-version allowlist. Online freshness checks also match the isolated cache's whole
-`major.minor.patch` client version to the CLI version (the cache omits prerelease labels)
-and verify model identities. The opt-in runtime capture on
+### Host compatibility is capability and hook-shape based
+
+No Codex version string decides support anywhere in the adapter. A version line is
+recorded as provenance only; a missing or unparseable one is provenance `UNKNOWN`,
+never a block. Support is shown by the resolved binary's behaviour and by the hook
+shape it declares, so a new upstream or locally updated build needs no allowlist
+entry. The binary is resolved as everywhere else in the adapter:
+`THALIRIS_CODEX_EXECUTABLE`, then `codex` on `PATH`.
+
+Catalog compatibility is based on the selected source's model roster and content. Online
+freshness takes the cache key from the isolated cache's own `client_version` after the
+fetch; a parsed CLI version only corroborates it, and a contradiction stays
+`ONLINE_FRESHNESS_UNVERIFIED`. Catalog reuse stays bound to the binary's SHA-256, and a
+`.cmd`/`.ps1`/`.js` or `#!` launcher, whose bytes do not identify the real binary,
+never qualifies for reuse. The opt-in runtime capture on
 `codex-cli 0.162.0-alpha.17.2` reached a local mock with the installed CLI and observed
 catalog/request behavior; it does not prove a fresh online fetch or activation in a
 user's live process, and it records two separate native fork/resume delivery limitations.
 
 The separate `multi_agent_mode_hint_text` and optional Controller wait-guidance
-compatibility paths use the exact source-verified builds `0.162.0-alpha.17.2`,
-`0.162.0-alpha.2`, `0.162.0`, `0.162.1` and `0.165.0` as a fast path (see the
-[0.165 compatibility record](../../docs/codex-host-compatibility-20261028.md)). Other CLI builds that
-report a version undergo an isolated prompt/type capability check in a disposable
+compatibility paths have no version fast path. Every build undergoes an isolated
+prompt/type capability check, and a definitive `SUPPORTED` or `INCOMPATIBLE` result is
+cached in `~/.thaliris/host-capability/`, keyed by the binary's SHA-256, the config leaf
+and the probe's own source. A replaced binary is probed again, `UNKNOWN` is never
+cached, and a launcher script is probed each time. The check runs in a disposable
 `CODEX_HOME` and workspace, using a loopback Responses sink. It does not copy the
 current user's configuration or authentication. On Windows it resolves the
 ProgramData known folder and checks `OpenAI/Codex/config.toml` and
@@ -585,12 +597,30 @@ errors or a platform whose managed configuration cannot be proven absent block
 UNKNOWN. When clear, it passes `--disable hooks --disable plugins`; those flags
 do not disable managed hooks on their own, which is why this preflight is
 required. The probe CLI gets a closed stdin, because `exec` otherwise waits on an
-inherited pipe. The check verifies string acceptance, actual
-prompt effect and wrong-type rejection (for the mode hint, Codex reports the
-rejection through the untagged `features.multi_agent_v2` feature enum rather than
-the leaf); complete consistent evidence is required
-before planning a write. Contradictory evidence reports `CAPABILITY_INCOMPATIBLE`,
-while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`.
+inherited pipe. The sentinel and empty-string prompt effects are the positive
+evidence that the leaf is recognised. Wrong-type rejection is shown by behaviour: the
+integer run differs from the accepted runs only in that leaf and must exit non-zero
+before any Responses request, and a final repeat of the accepted run must still
+succeed. Error text is corroboration only; a failure that Codex attributes to an
+unrelated config location is not credited to the leaf. Complete consistent evidence is
+required before planning a write. Contradictory evidence reports `CAPABILITY_INCOMPATIBLE`,
+while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`, a persisted
+status name kept for receipt compatibility that now means "capability not shown".
+Either way the user's config is preserved.
+
+`doctor` reports `host_hook_shape`, and `codex-install` returns it as install-time
+evidence. The check reads the generated hook input schemas that Codex embeds in its
+binary (`codex-rs/hooks/schema/generated`) without running the binary, and confirms
+that each of the seven registered events exists and declares every input key the
+adapter reads. Observed multi-agent tool names are checked against the PostToolUse
+matcher, and a custom `features.multi_agent_v2.tool_namespace` is flagged when the
+matcher cannot select its names. The result is `COMPATIBLE`, `INCOMPATIBLE` with the
+missing items, or `UNKNOWN` when no schema is observable. It is never a runtime
+refusal. When a live hook payload lacks a key the adapter needs, the existing
+fail-closed handling is unchanged and the session's audit records a bounded
+`host_hook_shape: UNKNOWN` entry that names the event and the keys.
+The [hook-shape compatibility record](../../docs/codex-host-compatibility-20261114.md)
+lists the builds observed so far. They are evidence, not requirements.
 Native wait capabilities are separate from these configuration probes. A selected
 session's actual tool schema can establish argument limits, including a 3,600,000 ms
 schema ceiling, without certifying effective duration. CLI versions do not establish

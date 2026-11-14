@@ -385,17 +385,16 @@ def test_field_management_with_real_trust_code_and_disk_rpc_fake(tmp_path, targe
     "codex-cli 0.165.0", "codex-cli 0.165.0-alpha.3", "codex-cli 0.166.0-alpha.5",
     "codex-cli 0.167.1", "codex-cli 0.167.1-alpha.1", "codex-cli 0.167.2",
 ])
-def test_version_support_boundary(monkeypatch, reported):
+def test_no_version_string_decides_support(monkeypatch, reported):
+    # Formerly allowlisted builds get no fast path: every build must show the
+    # leaf's behaviour, and UNKNOWN keeps the user's config untouched.
     import subprocess
     from thaliris_codex import config_capability
+    monkeypatch.delenv("THALIRIS_CODEX_EXECUTABLE", raising=False)
     monkeypatch.setattr(config_capability.shutil, "which", lambda name: "controlled-fake-codex")
     monkeypatch.setattr(config_capability.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, reported, ""))
     probed = []
     monkeypatch.setattr(config_capability, "probe", lambda *args: probed.append(args) or "UNKNOWN")
-    supported = reported in {
-        "codex-cli 0.162.0-alpha.17.2", "codex-cli 0.162.0-alpha.2",
-        "codex-cli 0.162.0", "codex-cli 0.162.1", "codex-cli 0.165.0",
-        "codex-cli 0.167.1",
-    }
-    assert hint.capability() == ("SUPPORTED" if supported else "UNKNOWN")
-    assert probed == ([] if supported else [("controlled-fake-codex", "multi_agent_mode_hint_text")])
+    assert hint.capability() == "UNKNOWN"
+    assert probed == [("controlled-fake-codex", "multi_agent_mode_hint_text")]
+    assert not hasattr(hint, "SUPPORTED_VERSIONS")

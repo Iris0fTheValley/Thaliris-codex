@@ -1,16 +1,22 @@
 """Isolated, no-model-service checks for the two optional prompt config leaves.
 
-Version evidence is a fast path only. Unknown builds must demonstrate the same
-string typing and prompt effect using a disposable CLI and loopback Responses
-sink. This proves CLI configuration behavior, never live Desktop activation.
+Support is never decided by a version string. The resolved Codex binary must
+demonstrate string typing and prompt effect using a disposable CLI and a
+loopback Responses sink. A definitive result is cached for exactly that binary
+(SHA-256), config leaf and probe contract; a changed binary is probed again and
+an UNKNOWN result is never cached. This proves CLI configuration behavior,
+never live Desktop activation.
 """
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -18,21 +24,156 @@ import tempfile
 import threading
 import uuid
 
+CACHE_FORMAT = "thaliris-config-capability-v1"
+FIELDS = frozenset({"multi_agent_mode_hint_text", "developer_instructions"})
+_KEY_PATHS = {
+    "multi_agent_mode_hint_text": "features.multi_agent_v2.multi_agent_mode_hint_text",
+    "developer_instructions": "developer_instructions",
+}
+# A launcher script's bytes do not identify the Host binary it starts.
+LAUNCHER_SUFFIXES = frozenset({".cmd", ".bat", ".ps1", ".sh", ".py", ".js"})
+_CACHEABLE = frozenset({"SUPPORTED", "INCOMPATIBLE"})
 
-def capability(field: str, verified_versions: frozenset[str]) -> str:
-    executable = shutil.which("codex")
-    if executable is None:
-        return "UNKNOWN"
+
+def resolve_executable() -> str | None:
+    """Select the Codex CLI exactly as the adapter's provenance path does."""
+    configured = os.environ.get("THALIRIS_CODEX_EXECUTABLE")
+    if configured:
+        return shutil.which(configured) or configured
+    return shutil.which("codex")
+
+
+def binary_sha256(executable: str) -> str | None:
+    """Hash a direct binary; launcher scripts and unreadable paths stay unknown."""
+    path = Path(executable)
+    if path.suffix.lower() in LAUNCHER_SUFFIXES:
+        return None
+    try:
+        if not path.is_file():
+            return None
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            head = stream.read(2)
+            if head == b"#!":
+                return None
+            digest.update(head)
+            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def cache_directory() -> Path:
+    """Host-scoped adapter state, never a user project or the Codex home."""
+    return Path.home() / ".thaliris" / "host-capability"
+
+
+def _probe_contract() -> str | None:
+    """Bind cached results to the evidence rules that produced them."""
+    try:
+        source = "".join(inspect.getsource(item) for item in (
+            probe, _run, _Sink, _developer_text, _misattributed))
+    except (OSError, TypeError):
+        return None
+    return hashlib.sha256((CACHE_FORMAT + "\n" + source).encode("utf-8")).hexdigest()
+
+
+def _cache_path(binary: str, field: str, contract: str) -> Path:
+    key = hashlib.sha256(json.dumps([CACHE_FORMAT, binary, field, contract]).encode()).hexdigest()
+    return cache_directory().absolute() / f"{key}.json"
+
+
+def _cached(binary: str, field: str, contract: str) -> str | None:
+    from .host_maintenance import safe
+    try:
+        path = _cache_path(binary, field, contract)
+        safe(path)
+        if not path.is_file():
+            return None
+        value = json.loads(path.read_bytes())
+    except (OSError, ValueError, TypeError):
+        return None
+    if (not isinstance(value, dict)
+            or set(value) != {"format", "cli_sha256", "field", "probe_contract", "result", "cli_version"}
+            or value["format"] != CACHE_FORMAT or value["cli_sha256"] != binary
+            or value["field"] != field or value["probe_contract"] != contract
+            or value["result"] not in _CACHEABLE or not isinstance(value["cli_version"], str)):
+        return None
+    return value["result"]
+
+
+def _store(binary: str, field: str, contract: str, result: str, version: str) -> None:
+    """Best effort: a cache failure only costs a later probe."""
+    from .host_maintenance import safe
+    try:
+        path = _cache_path(binary, field, contract)
+        safe(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        safe(path)
+        temporary = path.with_name(path.name + "." + secrets.token_hex(8))
+        body = {"format": CACHE_FORMAT, "cli_sha256": binary, "field": field,
+                "probe_contract": contract, "result": result, "cli_version": version}
+        with temporary.open("xb") as stream:
+            stream.write(json.dumps(body, sort_keys=True).encode("utf-8"))
+        os.replace(temporary, path)
+    except (OSError, ValueError, TypeError):
+        return
+
+
+def _version_line(executable: str) -> str:
+    """Provenance only. A missing or unparseable version never decides support."""
     try:
         result = subprocess.run([executable, "--version"], capture_output=True,
                                 text=True, timeout=10, check=False)
-        if result.returncode != 0:
-            return "UNKNOWN"
-        if result.stdout.strip() in verified_versions:
-            return "SUPPORTED"
-        return probe(executable, field)
     except (OSError, subprocess.SubprocessError, ValueError):
         return "UNKNOWN"
+    line = (result.stdout or "").strip()
+    if result.returncode != 0 or not line or len(line) > 200 or "\n" in line:
+        return "UNKNOWN"
+    return line
+
+
+def cached_capabilities() -> dict[str, dict]:
+    """Report cached evidence for the resolved binary without running a probe."""
+    executable = resolve_executable()
+    binary = binary_sha256(executable) if executable else None
+    contract = _probe_contract()
+    report = {}
+    for field in sorted(FIELDS):
+        cached = _cached(binary, field, contract) if binary and contract else None
+        report[field] = {"key_path": _KEY_PATHS[field], "status": cached or "UNKNOWN",
+                         "evidence": "BINARY_SHA256_PROBE_CACHE" if cached else "NOT_PROBED_FOR_THIS_BINARY",
+                         "cli_sha256": binary or "UNKNOWN"}
+    return report
+
+
+def cached_capability(field: str) -> dict:
+    if field not in FIELDS:
+        raise ValueError("unknown optional config capability")
+    return cached_capabilities()[field]
+
+
+def capability(field: str) -> str:
+    """Probe the resolved binary, reusing a result only for identical bytes."""
+    if field not in FIELDS:
+        raise ValueError("unknown optional config capability")
+    executable = resolve_executable()
+    if executable is None:
+        return "UNKNOWN"
+    binary = binary_sha256(executable)
+    contract = _probe_contract()
+    if binary is not None and contract is not None:
+        cached = _cached(binary, field, contract)
+        if cached is not None:
+            return cached
+    version = _version_line(executable)
+    result = probe(executable, field)
+    # Never attribute a result to bytes that changed while the probe ran.
+    if (binary is not None and contract is not None and result in _CACHEABLE
+            and binary_sha256(executable) == binary):
+        _store(binary, field, contract, result, version)
+    return result
 
 
 def _developer_text(body: dict) -> str:
@@ -239,13 +380,35 @@ def _run(executable: str, root: Path, sink: _Sink, field: str, value: object,
     return result, sink.requests[start:]
 
 
+def _misattributed(diagnostic: str, field: str) -> bool:
+    """True when the Host names a config location unrelated to this leaf.
+
+    Error wording is corroboration only. Serde reports the failing location as
+    ``in `path``` (for the mode hint, its untagged bool-or-table parent
+    ``features.multi_agent_v2``). A failure attributed only elsewhere cannot be
+    credited to the leaf under test; no location at all is merely uncorroborated.
+    """
+    locations = re.findall(r"\bin `([^`\s]+)`", diagnostic)
+    if not locations:
+        return False
+    path = _KEY_PATHS[field]
+    return not any(location == path or path.startswith(location + ".")
+                   or location.startswith(path + ".") for location in locations)
+
+
 def probe(executable: str, field: str) -> str:
     """Check accepted string, empty-string effect, and rejection of a wrong type.
 
+    The sentinel and empty-string prompt effects are the positive evidence that
+    the leaf is recognised. A wrong-typed integer must then be rejected by
+    behaviour: a non-zero exit before any Responses request. The integer run
+    differs from the accepted runs only in that leaf, and a final repeat of the
+    accepted sentinel run proves the environment still works, so the failure is
+    attributable to the leaf's string typing without matching error wording.
     Completed captured requests with a contradictory effect are INCOMPATIBLE.
     Missing transport/effect evidence or ambiguous failures remain UNKNOWN.
     """
-    if field not in {"multi_agent_mode_hint_text", "developer_instructions"}:
+    if field not in FIELDS:
         raise ValueError("unknown optional config capability")
     # A fresh CODEX_HOME does not override system requirements/config layers.
     # Refuse the probe when their absence cannot be proven; hooks from managed
@@ -259,28 +422,21 @@ def probe(executable: str, field: str) -> str:
     try:
         with tempfile.TemporaryDirectory(prefix="thaliris-config-capability-") as directory:
             root = Path(directory)
-            for value in (sentinel, "", 123):
+            rejected = False
+            # The trailing sentinel is the control run for the integer case.
+            for value in (sentinel, "", 123, sentinel):
                 result, requests = _run(executable, root, sink, field, value, task, developer)
                 if type(value) is int:
                     if requests:
                         return "INCOMPATIBLE"
-                    diagnostic = result.stderr + result.stdout
-                    type_error = re.search(
-                        r"invalid type:\s*integer\b.*?expected\s+(?:a\s+)?string\b",
-                        diagnostic, re.IGNORECASE | re.DOTALL,
-                    )
-                    if result.returncode != 0 and field in diagnostic and type_error is not None:
-                        return "SUPPORTED"
-                    # The mode hint sits inside the untagged bool-or-table
-                    # FeatureToml, so serde names the enclosing feature, not
-                    # the leaf. Only the leaf differs from the accepted runs.
-                    feature_error = re.search(
-                        r"did not match any variant of untagged enum FeatureToml\s+"
-                        r"in\s+`features\.multi_agent_v2`", diagnostic)
-                    if (result.returncode != 0 and field == "multi_agent_mode_hint_text"
-                            and feature_error is not None):
-                        return "SUPPORTED"
-                    return "UNKNOWN"
+                    # Exit 0 without a request shows neither acceptance nor
+                    # typed rejection; a failure the Host attributes to an
+                    # unrelated location cannot be credited to this leaf.
+                    if (result.returncode == 0
+                            or _misattributed(result.stderr + result.stdout, field)):
+                        return "UNKNOWN"
+                    rejected = True
+                    continue
                 if result.returncode != 0 or len(requests) != 1:
                     return "UNKNOWN"
                 body = requests[0]
@@ -299,7 +455,7 @@ def probe(executable: str, field: str) -> str:
                         return "INCOMPATIBLE"
                 elif (bool(value) and sentinel not in text) or (not value and sentinel in text):
                     return "INCOMPATIBLE"
-        return "UNKNOWN"
+        return "SUPPORTED" if rejected else "UNKNOWN"
     except (OSError, subprocess.SubprocessError, ValueError, TypeError):
         return "UNKNOWN"
     finally:
