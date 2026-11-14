@@ -70,7 +70,24 @@ of a stable candidate while implementation waits for CI. Avoid overlapping write
 shared worktree; actual file conflicts need coordination, while separate worktrees support
 independent changes. There is at most one pending unbound dispatch reservation per Task ID
 to avoid ambiguous association, but multiple successfully bound children may be running
-concurrently. A reservation belongs only to its Task ID. Native capacity does not expand
+concurrently. Parallel dispatch is user-directed: a `parallel_dispatch` authority contract
+lets the owning Controller's own top-level spawns hold several reservations at once.
+Non-writing roles (Investigator, Reasoning Specialist, Reviewer and any non-writing
+registered role) need no workstream and are never refused for count or overlap; a writing
+role names one declared write workstream in the handoff (`thaliris-workstream: <id>`). The
+adapter adds no count of its own: a missing `budget` is uncapped, and a stated one counts
+live top-level writing dispatches. Domain disjointness is the one mechanical boundary: a
+write workstream whose declared `scope` overlaps a live write workstream (whatever its
+domain label), or that has no usable scope while another write workstream is live, is
+refused with `THALIRIS_PARALLEL_DOMAIN_OVERLAP`; read work never conflicts. The Controller partitions the work into non-overlapping domains. A
+workstream may be reserved again once its previous dispatch is terminal or disposed. Every
+reader (close, mode switch, diagnostics, disposal, recovery, the wait guard and the degraded
+preflight) treats each reservation as pending, and SubagentStart binds only the reservation
+whose native identity matches exactly. `worktree` is not enforced. Nested spawns never use
+the contract or a workstream; the one-Scanner-per-parent and one-unbound-dispatch rules apply
+to them unchanged. Core 0.6.0 contract validation still requires a `budget` (1 to 256, at
+least the number of workstreams) and rejects overlapping scopes within one domain, read
+workstreams included. A reservation belongs only to its Task ID. Native capacity does not expand
 delegation authority. Maximum managed depth is two. Ordinary repository work may use an
 exact native Agent-to-Task mapping or an active handoff with a known role. Missing noncritical
 session, turn or profile fields remain `UNKNOWN`; by themselves they do not block ordinary

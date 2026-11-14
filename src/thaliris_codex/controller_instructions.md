@@ -585,7 +585,26 @@ in parallel. Coordinate known overlapping shared-file writes or use separate
 worktrees before dispatch; ACTIVE alone does not prove a write conflict. Existing
 file CAS catches lost updates, not semantic overlap. Each task permits one unbound
 native dispatch until precise identity association; bound siblings may remain live
-together. At most one active/pending Scanner belongs to its exact parent. After its
+together. Parallel dispatch is user-directed: when the user's `parallel_dispatch`
+contract asks for it, the owning Controller's own top-level dispatches run at the
+scale the user chose, with several reservations pending at once. Non-writing roles
+(Investigator, Reasoning Specialist, Reviewer and any non-writing registered role)
+need no workstream and are never refused for count or overlap. A writing role's
+handoff names one declared write workstream (a `thaliris-workstream: <id>` line).
+The adapter imposes no count of its own; a missing `budget` is uncapped, and a
+stated one counts live top-level writing dispatches. Its one mechanical boundary is
+domain disjointness: a write workstream whose declared `scope` overlaps a live write
+workstream (whatever its domain label), or a write workstream without a usable scope
+beside another live one, is refused with `THALIRIS_PARALLEL_DOMAIN_OVERLAP`. Read
+work never conflicts. You partition the work into non-overlapping domains
+(research areas, partitioned material, independent modules or any other disjoint
+split) and declare disjoint write scopes. A workstream may be dispatched again once
+its previous dispatch is terminal (completed, failed, interrupted, shut down or
+disposed). Every pending reservation blocks close and mode switch until it binds,
+ends or is disposed by its own handoff id. `worktree` is not enforced. Nested spawns
+never use the contract or a workstream; their limits below are unchanged, and a
+nested spawn waits while any reservation of the task is unbound.
+At most one active/pending Scanner belongs to its exact parent. After its
 completion or explicit dependency disposition, a fresh Scanner may cover another gap.
 Other children cannot delegate. Maximum managed depth is two.
 Native capacity does not expand managed authorization; UNKNOWN overlap evidence

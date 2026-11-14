@@ -2458,6 +2458,43 @@ def _lifecycle_path(root: Path, task_id: str) -> Path:
     return root / ".context" / "audit" / "lifecycle" / f"{_task_key(task_id)}.json"
 
 
+_RESERVATION_FIELDS = frozenset({
+    "role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id",
+    "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role",
+    "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"})
+_RESERVATION_OPTIONAL_FIELDS = frozenset({"spawn_turn_id_hash", "workstream_id"})
+_RESERVATION_IDENTITY_FIELDS = frozenset({"native_agent_id_hash", "native_identity_source"})
+
+
+def _valid_pending_reservation(pending: object) -> bool:
+    """Validate one authorized spawn reservation (singular slot or collection item)."""
+    if not isinstance(pending, dict):
+        return False
+    keys = set(pending) - _RESERVATION_IDENTITY_FIELDS
+    if not _RESERVATION_FIELDS <= keys or keys - _RESERVATION_FIELDS - _RESERVATION_OPTIONAL_FIELDS:
+        return False
+    return not (
+        pending.get("role") not in set(_native_agent_roles().values())
+        or pending.get("expected_agent_type") not in _native_agent_roles()
+        or not isinstance(pending.get("session_id_hash"), str)
+        or type(pending.get("authorized_sequence")) is not int
+        or not isinstance(pending.get("handoff_id"), str)
+        or type(pending.get("task_revision")) is not int
+        or pending.get("producer") != "controller"
+        or not isinstance(pending.get("payload_hash"), str)
+        or type(pending.get("created_at_ns")) is not int
+        or ("native_agent_id_hash" in pending and (not isinstance(pending["native_agent_id_hash"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", pending["native_agent_id_hash"]) is None))
+        or ("native_identity_source" in pending and pending["native_identity_source"] not in {
+            "legacy_spawn_response", "app_server_subagent_activity"})
+        or ("spawn_turn_id_hash" in pending and pending["spawn_turn_id_hash"] is not None
+            and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
+        or ("workstream_id" in pending and (not isinstance(pending["workstream_id"], str)
+            or not pending["workstream_id"].strip() or len(pending["workstream_id"]) > 256))
+        or not _valid_parent_metadata(pending)
+    )
+
+
 def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) -> dict[str, Any]:
     if verify_authority:
         with task_authority._lock(path.parents[3]):
@@ -2479,49 +2516,29 @@ def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) 
             or selection.get("owner_session_id_hash") != owner):
         raise ValueError("invalid lifecycle evidence selection")
     pending = value.get("pending_authorized_spawn")
-    if pending is not None and (
-        not isinstance(pending, dict)
-        or (set(pending) - {"native_agent_id_hash", "native_identity_source"}) not in (
-            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"},
-            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash"},
-            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "workstream_id"},
-            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id"},
-        )
-        or pending.get("role") not in set(_native_agent_roles().values())
-        or pending.get("expected_agent_type") not in _native_agent_roles()
-        or not isinstance(pending.get("session_id_hash"), str)
-        or not isinstance(pending.get("authorized_sequence"), int)
-        or not isinstance(pending.get("handoff_id"), str)
-        or type(pending.get("task_revision")) is not int
-        or pending.get("producer") != "controller"
-        or not isinstance(pending.get("payload_hash"), str)
-        or type(pending.get("created_at_ns")) is not int
-        or ("native_agent_id_hash" in pending and (not isinstance(pending["native_agent_id_hash"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", pending["native_agent_id_hash"]) is None))
-        or ("native_identity_source" in pending and pending["native_identity_source"] not in {
-            "legacy_spawn_response", "app_server_subagent_activity"})
-        or ("spawn_turn_id_hash" in pending and pending["spawn_turn_id_hash"] is not None
-            and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
-        or not _valid_parent_metadata(pending)
-    ):
+    if pending is not None and not _valid_pending_reservation(pending):
         raise ValueError("invalid lifecycle authorized spawns")
     pending_many = value.get("pending_authorized_spawns", [])
     if not isinstance(pending_many, list):
         raise ValueError("invalid lifecycle authorized spawn collection")
-    # Parallel reservations retain the exact same record shape as the legacy
-    # single reservation.  Reuse the validator above for every additional
-    # item, while preserving the legacy singular field for old Hosts.
+    # Parallel reservations retain the exact record shape of the legacy single
+    # reservation: every item passes the same validator, and no handoff id or
+    # authorization sequence may appear twice across the singular slot and the
+    # collection.
     for extra in pending_many:
-        if not isinstance(extra, dict):
+        if not _valid_pending_reservation(extra):
             raise ValueError("invalid lifecycle authorized spawn collection")
-        allowed = {"native_agent_id_hash", "native_identity_source", "workstream_id"}
-        unknown = set(extra) - allowed - {
-            "role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash",
-            "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash",
-            "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash"
-        }
-        if unknown or extra.get("role") not in set(_native_agent_roles().values()) or extra.get("expected_agent_type") not in _native_agent_roles():
-            raise ValueError("invalid lifecycle authorized spawn collection")
+    every = ([pending] if pending is not None else []) + pending_many
+    if (len({item["handoff_id"] for item in every}) != len(every)
+            or len({item["authorized_sequence"] for item in every}) != len(every)):
+        raise ValueError("duplicate lifecycle authorized spawn reservation")
+    if pending is None and pending_many:
+        # The singular slot is the first item of the collection, never an
+        # independent source of truth. Promote a stranded collection head
+        # (written by an earlier disposal that cleared only the slot) so
+        # every pending reservation stays visible to every reader.
+        value["pending_authorized_spawn"] = pending_many[0]
+        value["pending_authorized_spawns"] = pending_many[1:]
     return value
 
 
@@ -2549,10 +2566,14 @@ def active_controller_owner(root: Path, task_id: str) -> str | None:
     owner = ledger.get("owner_session_id_hash")
     if owner is not None:
         return owner
-    pending = ledger.get("pending_authorized_spawn")
-    if isinstance(pending, dict) and pending.get("depth") == 1 and pending.get("parent_role") == "controller":
-        return pending["session_id_hash"]
-    return None
+    return _pending_controller_owner(ledger)
+
+
+def _pending_controller_owner(ledger: dict[str, Any]) -> str | None:
+    """Legacy owner evidence: the one session of every depth-one pending reservation."""
+    sessions = {item.get("session_id_hash") for item in _pending_reservations(ledger)
+                if item.get("depth") == 1 and item.get("parent_role") == "controller"}
+    return next(iter(sessions)) if len(sessions) == 1 else None
 
 
 def _valid_parent_metadata(record: dict[str, Any]) -> bool:
@@ -3003,25 +3024,82 @@ def _pending_reservations(state: dict[str, Any]) -> list[dict[str, Any]]:
     return values
 
 
+def _set_pending_reservations(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    """Write the collection; the legacy singular slot is always its first item."""
+    state["pending_authorized_spawn"] = items[0] if items else None
+    state["pending_authorized_spawns"] = list(items[1:])
+
+
 def _remove_pending_reservation(state: dict[str, Any], handoff_id: str) -> dict[str, Any] | None:
     """Remove one reservation and promote the next into the legacy slot."""
-    found = None
-    singular = state.get("pending_authorized_spawn")
-    if isinstance(singular, dict) and singular.get("handoff_id") == handoff_id:
-        found = singular
-        state["pending_authorized_spawn"] = None
-    many = state.get("pending_authorized_spawns", [])
-    if isinstance(many, list):
-        kept = []
-        for item in many:
-            if isinstance(item, dict) and item.get("handoff_id") == handoff_id:
-                found = found or item
-            else:
-                kept.append(item)
-        state["pending_authorized_spawns"] = kept
-    if state.get("pending_authorized_spawn") is None and isinstance(state.get("pending_authorized_spawns"), list) and state["pending_authorized_spawns"]:
-        state["pending_authorized_spawn"] = state["pending_authorized_spawns"].pop(0)
+    items = _pending_reservations(state)
+    found = next((item for item in items if item.get("handoff_id") == handoff_id), None)
+    _set_pending_reservations(state, [item for item in items if item is not found])
     return found
+
+
+# Named non-writing roles plus any registered role whose binding forbids repo
+# writes: under a parallel policy they never need or contend for a workstream.
+_PARALLEL_NON_WRITING_ROLES = frozenset({"investigator", "reasoning-specialist", "reviewer"})
+
+
+def _parallel_writing_role(role: object) -> bool:
+    return isinstance(role, str) and role not in _PARALLEL_NON_WRITING_ROLES and roles.repo_write_allowed(role)
+
+
+def _live_parallel_writes(state: dict[str, Any]) -> list[object]:
+    """Workstream ids of live top-level writing dispatches: pending, or bound and unfinished."""
+    live: list[object] = [item.get("workstream_id") for item in _pending_reservations(state)
+                          if item.get("depth") == 1 and _parallel_writing_role(item.get("role"))]
+    live.extend(child.get("workstream_id") for child in state.get("children", [])
+                if isinstance(child, dict) and child.get("depth") == 1 and child.get("managed") is True
+                and _parallel_writing_role(child.get("role"))
+                and child.get("management_disposition") != _DISPOSED
+                and (not _native_execution_terminal(child) or child.get("native_status_conflict")))
+    return live
+
+
+def _workstream_scope(stream: dict[str, Any]) -> list[str] | None:
+    """Normalized declared write surface, or None when it is absent or unusable."""
+    scope = stream.get("scope")
+    items = [scope] if isinstance(scope, str) else scope if isinstance(scope, list) else None
+    if not items:
+        return None
+    paths = []
+    for item in items:
+        if not isinstance(item, str):
+            return None
+        path = item.strip().replace("\\", "/").strip("/")
+        if not path or any(part in {"", ".", ".."} for part in path.split("/")):
+            return None
+        paths.append(path)
+    return paths
+
+
+def _parallel_domain_overlap(declared: dict[object, dict[str, Any]], stream: dict[str, Any],
+                             live: list[object]) -> str | None:
+    """Explain why a new write workstream overlaps a live one, or None.
+
+    Declared scope paths are compared across every live write workstream (a
+    path equal to, inside or containing another). A write workstream without a
+    usable declared scope cannot run beside another live write workstream.
+    """
+    mine = _workstream_scope(stream)
+    for other_id in live:
+        other = declared.get(other_id) if isinstance(other_id, str) else None
+        if other is not None and other.get("mode") != "write":
+            continue
+        if other_id == stream.get("id"):
+            continue
+        theirs = _workstream_scope(other) if other is not None else None
+        label = json.dumps(other_id) if isinstance(other_id, str) else "<unrecorded>"
+        if mine is None or theirs is None:
+            return ("has no declared scope to compare with live write workstream " + label
+                    if mine is None else "cannot be compared with live write workstream " + label
+                    + ", whose scope is undeclared")
+        if any(a == b or a.startswith(b + "/") or b.startswith(a + "/") for a in mine for b in theirs):
+            return "overlaps the declared scope of live write workstream " + label
+    return None
 
 
 def _pending_for_payload(root: Path, state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -3071,7 +3149,12 @@ def _reserve_managed_spawn(
     session_id_hash = _session_id_hash(payload)
     if session_id_hash is None:
         return _permission_deny("THALIRIS_MANAGED_SESSION_REQUIRED: managed spawn authorization requires a current session identity.")
-    parallel_policy = _parallel_dispatch_policy(root, session_id_hash)
+    # The parallel contract widens only the owning Controller's own top-level
+    # dispatch. Child hook payloads may carry the Controller's session id, so
+    # nesting (an agent_id/agent_type actor), never session equality, decides:
+    # a nested spawn keeps the one-Scanner-per-parent and one-unbound-dispatch
+    # rules and never reserves or consumes a workstream.
+    parallel_policy = None if nested else _parallel_dispatch_policy(root, session_id_hash)
     try:
         with task_authority._lock(root):
             # Re-read while holding the same lock used by task mutations.
@@ -3105,23 +3188,42 @@ def _reserve_managed_spawn(
             # workstreams while keeping the parent/identity checks intact.
             workstream_id = _dispatch_workstream_id(payload)
             if parallel_policy is not None:
-                if not isinstance(workstream_id, str):
-                    return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_REQUIRED: each parallel handoff must name exactly one declared workstream.")
                 declared = {item.get("id"): item for item in parallel_policy.get("workstreams", []) if isinstance(item, dict)}
-                stream = declared.get(workstream_id)
-                if stream is None:
+                writing = _parallel_writing_role(role)
+                if writing and not isinstance(workstream_id, str):
+                    return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_REQUIRED: each parallel handoff of a writing role must"
+                                            " name exactly one declared write workstream (thaliris-workstream: <id>).")
+                stream = declared.get(workstream_id) if isinstance(workstream_id, str) else None
+                if isinstance(workstream_id, str) and stream is None:
                     return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_UNKNOWN: handoff workstream is not declared by the owning Controller.")
-                if any(isinstance(item, dict) and item.get("workstream_id") == workstream_id for item in _pending_reservations(state) + state.get("children", [])):
-                    return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_DUPLICATE: each declared workstream may be reserved once.")
-                active_count = len(_pending_reservations(state)) + sum(
-                    1 for item in state.get("children", []) if isinstance(item, dict)
-                    and item.get("managed") is True and item.get("management_disposition") != "ABANDONED_DEPENDENCY"
-                    and not _native_execution_terminal(item))
-                if active_count >= int(parallel_policy.get("budget", 0)):
-                    return _permission_deny("THALIRIS_PARALLEL_DISPATCH_BUDGET: parallel dispatch budget is exhausted; observe or dispose a reservation before another handoff.")
+                if writing and stream.get("mode") != "write":
+                    return _permission_deny("THALIRIS_PARALLEL_WRITE_WORKSTREAM_REQUIRED: a writing role needs a declared"
+                                            " write workstream; name one with mode \"write\" and its scope.")
+                # Non-writing roles (investigation, reasoning, review) are never
+                # refused for count, duplication or overlap.
+                if writing:
+                    live = _live_parallel_writes(state)
+                    if workstream_id in live:
+                        return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_DUPLICATE: this declared write workstream already has a"
+                                                " pending or unfinished dispatch; a new dispatch may reuse it only after the"
+                                                " previous one is terminal (completed, failed, interrupted, shut down or disposed).")
+                    # Overlap of live write domains is the only mechanical refusal.
+                    overlap = _parallel_domain_overlap(declared, stream, live)
+                    if overlap is not None:
+                        return _permission_deny(
+                            "THALIRIS_PARALLEL_DOMAIN_OVERLAP: write workstream " + json.dumps(workstream_id)
+                            + " " + overlap + ". Declare disjoint write scopes in the authority contract, or wait"
+                            " until the overlapping write workstream is terminal; read work never conflicts.")
+                    # No adapter cap of its own: a missing budget is uncapped; a
+                    # stated one counts live top-level writing dispatches only.
+                    budget = parallel_policy.get("budget")
+                    if type(budget) is int and len(live) >= budget:
+                        return _permission_deny(
+                            f"THALIRIS_PARALLEL_DISPATCH_BUDGET: the authority contract sets {budget} concurrent top-level"
+                            " writing dispatches and all are live; observe or dispose one before another handoff.")
             elif nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
                 return _permission_deny("THALIRIS_SCANNER_SLOT_ACTIVE: this exact parent already has a live Scanner; coordinate its result before another same-parent Scanner")
-            if state["pending_authorized_spawn"] is not None and parallel_policy is None:
+            if _pending_reservations(state) and parallel_policy is None:
                 return _permission_deny("THALIRIS_UNBOUND_DISPATCH_PENDING: associate or cancel this one unbound native dispatch before another same-task dispatch; missing Host identity fields cannot choose between reservations.")
             selection = state.get("next_evidence_dispatch") if not nested else None
             if selection is not None and (
@@ -3147,11 +3249,8 @@ def _reserve_managed_spawn(
             evidence_registered = _register_spawn_evidence(task_state, handoff_id, role, handoff_text, parent,
                 {key: selection[key] for key in ("candidate", "requirement_refs", "durable_paths") if key in selection}
                 if selection is not None else None)
-            if evidence_registered and parallel_policy is not None:
-                for evidence in task_state.get("evidence_continuity", {}).get("handoffs", []):
-                    if isinstance(evidence, dict) and evidence.get("id") == handoff_id:
-                        evidence["workstream_id"] = workstream_id
-                        break
+            # The workstream binding stays in the adapter's own reservation and
+            # child records; Core's continuity handoff schema has no such field.
             if evidence_registered:
                 task_state["revision"] += 1
             if selection is not None:
@@ -3176,18 +3275,11 @@ def _reserve_managed_spawn(
                 "spawn_tool_use_id_hash": _identity_hash(payload.get("tool_use_id")) if isinstance(payload.get("tool_use_id"), str) else None,
                 "spawn_turn_id_hash": _turn_id_hash(payload),
             }
-            if parallel_policy is not None:
+            if parallel_policy is not None and isinstance(workstream_id, str):
                 new_pending["workstream_id"] = workstream_id
-                # Keep the first reservation in the legacy field and retain
-                # additional exact reservations in a bounded collection.
-                if prior_pending:
-                    state["pending_authorized_spawn"] = prior_pending[0]
-                    state["pending_authorized_spawns"] = prior_pending[1:] + [new_pending]
-                else:
-                    state["pending_authorized_spawn"] = new_pending
-                    state.setdefault("pending_authorized_spawns", [])
-            else:
-                state["pending_authorized_spawn"] = new_pending
+            # Without a parallel contract ``prior_pending`` is empty (refused
+            # above); with one, the first reservation stays in the legacy slot.
+            _set_pending_reservations(state, prior_pending + [new_pending])
             effort = next((overrides[key] for key in ("reasoning_effort", "model_reasoning_effort")
                            if isinstance(overrides.get(key), str) and overrides[key].strip()), None)
             if effort is not None and len(effort) <= 128:
@@ -3354,20 +3446,21 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
         if task_authority.digest(path) != expected_lifecycle:
             raise ValueError("TASK_LIFECYCLE_CHANGED")
         ledger = _load_lifecycle(path, task_id)
-        pending = ledger.get("pending_authorized_spawn")
         collisions = ledger.get("identity_collisions") or []
         if not isinstance(collisions, list):
             raise ValueError("TASK_DEPENDENCY_CONFLICT_MALFORMED: preserve identity collision evidence for a separate repair decision")
         if handoff_id is not None:
             selected = [child for child in ledger["children"] if isinstance(child, dict)
                 and (child.get("handoff_id") == handoff_id or child.get("root_handoff_id") == handoff_id)]
-            pending_selected = isinstance(pending, dict) and (pending.get("handoff_id") == handoff_id or pending.get("root_handoff_id") == handoff_id)
+            # Any pending reservation of the collection, not only the first.
+            pending_selected = [item for item in _pending_reservations(ledger)
+                                if item.get("handoff_id") == handoff_id or item.get("root_handoff_id") == handoff_id]
             if not selected and not pending_selected:
                 raise ValueError("TASK_DEPENDENCY_HANDOFF_NOT_FOUND")
             # Collisions observed for this dispatch, or naming one of its actors.
             actors = {child.get("agent_id_hash") for child in selected if isinstance(child.get("agent_id_hash"), str)}
-            if pending_selected and isinstance(pending.get("native_agent_id_hash"), str):
-                actors.add(pending["native_agent_id_hash"])
+            actors.update(item["native_agent_id_hash"] for item in pending_selected
+                          if isinstance(item.get("native_agent_id_hash"), str))
             selected_collisions = [(index, item) for index, item in enumerate(collisions) if isinstance(item, dict)
                 and item.get("management_disposition") != _DISPOSED
                 and (item.get("pending_handoff_id") == handoff_id or item.get("agent_id_hash") in actors)]
@@ -3379,7 +3472,7 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
             selected_collisions = [(index, item) for index, item in enumerate(collisions) if isinstance(item, dict)
                 and item.get("management_disposition") != _DISPOSED
                 and _conflict_id("collision", index, item) == conflict_id]
-            pending_selected = False
+            pending_selected = []
             if len(selected) + len(selected_collisions) != 1:
                 raise ValueError("TASK_DEPENDENCY_CONFLICT_NOT_FOUND")
         records = ledger.setdefault("dependency_dispositions", [])
@@ -3427,7 +3520,7 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
                 "agent_fence_reason": fence_reason})
             item["management_disposition"] = _DISPOSED
             item["disposition_reason"] = reason
-        if pending_selected:
+        for pending in pending_selected:
             records.append({"kind": "pending", "record": dict(pending), "reason": reason,
                 "management_disposition": "ABANDONED_DEPENDENCY", "native_execution": "UNKNOWN"})
             pending_fenced = isinstance(pending.get("native_agent_id_hash"), str)
@@ -3435,14 +3528,16 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
                 agents.add(pending["native_agent_id_hash"])
             fencing.append({"kind": "pending", "agent_fenced": pending_fenced,
                 "agent_fence_reason": None if pending_fenced else "no native actor identity recorded"})
-            ledger["pending_authorized_spawn"] = None
+            # Remove exactly this reservation; the next one is promoted into
+            # the legacy slot, so the rest of the collection stays pending.
+            _remove_pending_reservation(ledger, pending["handoff_id"])
         prior_fence = _abandoned_child_fence_path(root)
         value = json.loads(prior_fence.read_text(encoding="utf-8")) if prior_fence.is_file() else {"version": 1}
         _write_capture(prior_fence, {**value, "version": 1, "children": fence, "agent_id_hashes": sorted(agents)})
         _write_capture(path, ledger)
         revision = state["revision"]
         _record_disposed_usage(state, [child.get("handoff_id") for child in selected]
-                               + ([pending.get("handoff_id")] if pending_selected else []))
+                               + [pending.get("handoff_id") for pending in pending_selected])
         state["revision"] = revision + 1
         core._write_state(root, state)
         task_authority.checkpoint(root)
@@ -3487,6 +3582,27 @@ def task_state_recovery_blocker(root: Path, task_id: str) -> str | None:
     return None
 
 
+def _start_reservation(state: dict[str, Any], child_hash: str, role: str, native_agent_type: str,
+                       session_id_hash: str) -> dict[str, Any] | None:
+    """Select the one reservation a SubagentStart may concern, never a guess.
+
+    An exact native-id match wins. Otherwise only a single unidentified
+    reservation of the same role, profile and session is a candidate; it still
+    cannot authorize binding without its exact native id. Any ambiguity
+    selects nothing, so the child stays unbound (fail closed).
+    """
+    reservations = _pending_reservations(state)
+    exact = [item for item in reservations if item.get("native_agent_id_hash") == child_hash]
+    if exact:
+        return exact[0] if len(exact) == 1 else None
+    unidentified = [item for item in reservations
+                    if item.get("native_agent_id_hash") is None
+                    and item.get("role") == role
+                    and item.get("expected_agent_type") == native_agent_type
+                    and item.get("session_id_hash") == session_id_hash]
+    return unidentified[0] if len(unidentified) == 1 else None
+
+
 def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
     """Bind an authorized native child to its explicit Controller handoff."""
     task_id = _active_task_id(root)
@@ -3509,12 +3625,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
         state["sequence"] = int(state.get("sequence", 0)) + 1
         child_hash = _identity_hash(agent_id)
         children = state["children"]
-        pending_candidates = [item for item in _pending_reservations(state)
-                             if item.get("role") == role
-                             and item.get("expected_agent_type") == native_agent_type
-                             and item.get("session_id_hash") == session_id_hash
-                             and item.get("native_agent_id_hash", child_hash) == child_hash]
-        pending = min(pending_candidates, key=lambda item: item.get("authorized_sequence", 0), default=None)
+        pending = _start_reservation(state, child_hash, role, native_agent_type, session_id_hash)
         constrained_model_status = None
         observed_model = payload.get("model")
         if authority is not None and authority["contract"].get("execution_constraint") == "luna-only":
@@ -3904,10 +4015,11 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
 
 def _record_pending_terminal(state: dict[str, Any], name: str, status: str, source: str) -> bool:
     """Retire an exact native dispatch without granting missing Start authority."""
-    pending = next((item for item in _pending_reservations(state)
-                    if item.get("task_name_hash") == _identity_hash(name)
-                    or item.get("native_agent_id_hash") == _identity_hash(name)), None)
     identity_hash = _identity_hash(name)
+    named = [item for item in _pending_reservations(state)
+             if identity_hash in (item.get("task_name_hash"), item.get("native_agent_id_hash"))]
+    # A name shared by several reservations selects none of them.
+    pending = named[0] if len(named) == 1 else None
     matches_task_name = isinstance(pending, dict) and pending.get("task_name_hash") == identity_hash
     matches_native_id = isinstance(pending, dict) and pending.get("native_agent_id_hash") == identity_hash
     if (status not in {"completed", "interrupted", "errored", "shutdown"}
@@ -4272,8 +4384,15 @@ def native_execution_diagnostic(root: Path) -> dict[str, Any]:
             or not isinstance(value.get("children"), list)):
         add("lifecycle-schema-or-task-conflict")
         return report()
-    pending = value.get("pending_authorized_spawn")
-    if pending is not None:
+    # Every reservation blocks, wherever it is stored; a malformed entry or
+    # collection blocks too instead of being skipped.
+    many = value.get("pending_authorized_spawns", [])
+    if not isinstance(many, list):
+        add("malformed-authorized-reservations")
+        many = []
+    for pending in [value.get("pending_authorized_spawn"), *many]:
+        if pending is None:
+            continue
         add("authorized-reservation", handoff_id=pending.get("handoff_id") if isinstance(pending, dict) else None,
             expected_agent_type=pending.get("expected_agent_type") if isinstance(pending, dict) else None,
             next_step="observe exact native dispatch result or explicitly dispose this handoff")
@@ -4373,7 +4492,7 @@ def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None
         and value.get("managed_hook_spec_hash") == managed_hook_spec_hash()
         and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
         and (
-            selected(value.get("pending_authorized_spawn"))
+            any(selected(item) for item in _pending_reservations(value))
             or any(
                 selected(child)
                 and child.get("managed") is True
@@ -4513,7 +4632,7 @@ def _managed_wait_guard(root: Path, payload: dict[str, Any]) -> str:
             return ""  # Unrelated ordinary native actor, not a managed grant.
         if any(not isinstance(row, dict) for row in state["children"]):
             raise _ManagedWaitUnknown("unattributed", "native dependency record is malformed")
-        if ((state["children"] or state.get("pending_authorized_spawn")) and (
+        if ((state["children"] or _pending_reservations(state)) and (
                 state.get("managed_hook_spec_hash") != managed_hook_spec_hash()
                 or state.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION
                 )):
@@ -4551,30 +4670,11 @@ def _managed_wait_guard(root: Path, payload: dict[str, Any]) -> str:
             hashes = {_identity_hash(item) for item in targets}
             matches = [row for row in rows if row.get("agent_id_hash", row.get("native_agent_id_hash")) in hashes]
             if len(matches) != len(hashes):
-                # A fresh managed reservation with no native identity cannot
-                # establish that an arbitrary V1 target belongs to it.  Keep
-                # ordinary native coordination available in that case; an
-                # exact managed target (or any concrete managed dependency)
-                # still fails closed below.
-                concrete_rows = [row for row in rows if row not in pending and isinstance(row, dict)]
-                if any(row in rows and not row.get("task_name_hash") and not row.get("native_agent_id_hash") for row in pending) and not concrete_rows:
-                    return ""
                 raise _ManagedWaitUnknown("target-selection", "wait target is not an exact direct dependency")
             rows = matches
-        else:
-            # V2 collaboration calls carry a scalar target/id rather than a
-            # V1 ``targets`` list.  Treat an explicitly named ordinary actor
-            # as unmanaged when the only managed state is an unidentifiable
-            # pending reservation.  A bare Controller wait remains guarded.
-            scalar_target = next((value for key, value in (("target", _delegation_input(payload).get("target")),
-                                                            ("id", _delegation_input(payload).get("id")))
-                                  if isinstance(value, str) and value), None)
-            # ``pending`` is the reservation collection; compare by identity.
-            reserved_rows = [row for row in rows if any(row is item for item in pending)]
-            concrete_rows = [row for row in rows if isinstance(row, dict) and not any(row is item for item in reserved_rows)]
-            if (scalar_target is not None and reserved_rows and not concrete_rows and
-                    not any(row.get("task_name_hash") or row.get("native_agent_id_hash") for row in reserved_rows)):
-                return ""
+        # No target shape exempts a wait from the identity checks: an
+        # unidentified reservation can never show that a named actor is
+        # unrelated to it, so ``_wait_identity_conflicts`` always runs.
         records = [*state["children"], *pending]
         _wait_identity_conflicts(state, records, scoped + [(row, "direct-dependency") for row in rows],
                                  named_dependencies=targets is None)
@@ -6775,11 +6875,11 @@ def task_abandon(
         if lifecycle_raw is not None and hashlib.sha256(lifecycle_raw).hexdigest() != lifecycle_sha256:
             raise ValueError("task-abandon lifecycle bytes changed")
         lifecycle_state = _load_lifecycle(lifecycle_path, task_id) if lifecycle_present else {}
-        pending = lifecycle_state.get("pending_authorized_spawn")
+        reservations = _pending_reservations(lifecycle_state)
         owner_hash = lifecycle_state.get("owner_session_id_hash")
         owner_provenance = "TASK_START" if owner_hash is not None else "UNKNOWN"
-        if owner_hash is None and isinstance(pending, dict) and pending.get("depth") == 1 and pending.get("parent_role") == "controller":
-            owner_hash = pending.get("session_id_hash")
+        if owner_hash is None and _pending_controller_owner(lifecycle_state) is not None:
+            owner_hash = _pending_controller_owner(lifecycle_state)
             owner_provenance = "DEPTH_ONE_PENDING_RESERVATION"
         if owner_hash is not None and (not isinstance(owner_hash, str) or re.fullmatch(r"[0-9a-f]{64}", owner_hash) is None):
             raise ValueError("invalid lifecycle Controller owner")
@@ -6794,8 +6894,9 @@ def task_abandon(
             if isinstance(candidate, str) and re.fullmatch(r"[0-9a-f]{64}", candidate):
                 fence_sources.setdefault(candidate, []).append(source)
         add_fence(owner_hash, "owner:" + owner_provenance)
-        if isinstance(pending, dict):
-            add_fence(pending.get("session_id_hash"), "pending_authorized_spawn")
+        for index, pending in enumerate(reservations):
+            add_fence(pending.get("session_id_hash"),
+                      "pending_authorized_spawn" if index == 0 else f"pending_authorized_spawns[{index - 1}]")
         for index, child in enumerate(lifecycle_state.get("children", [])):
             if isinstance(child, dict):
                 add_fence(child.get("session_id_hash"), f"children[{index}]")

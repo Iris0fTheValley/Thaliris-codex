@@ -2239,9 +2239,10 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
         owner = lifecycle.active_controller_owner(root, task_id)
         if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
             raise ValueError("dispatch selection requires an unfenced owning Controller")
-        if ledger.get("next_evidence_dispatch") is not None or ledger["pending_authorized_spawn"] is not None:
-            reserved = ledger["pending_authorized_spawn"] is not None
-            pending = ledger["pending_authorized_spawn"] if reserved else ledger["next_evidence_dispatch"]
+        reservations = lifecycle._pending_reservations(ledger)
+        if ledger.get("next_evidence_dispatch") is not None or reservations:
+            reserved = bool(reservations)
+            pending = reservations[0] if reserved else ledger["next_evidence_dispatch"]
             raise core.ThalirisError(
                 "EVIDENCE_DISPATCH_PENDING", "dispatch selection or reservation already pending",
                 recovery=("observe the exact authorized spawn result; retain the reservation, or explicitly dispose its dependency with its handoff and current CAS values"

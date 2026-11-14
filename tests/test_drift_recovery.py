@@ -382,7 +382,7 @@ def test_windows_degraded_policy_allows_repair_and_denies_control(tmp_path, pinn
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows platform preflight")
 @pytest.mark.parametrize("damage", ["runtime", "preflight", "trampoline"])
-@pytest.mark.parametrize("restriction", ["absent", "active", "invalid", "state_directory", "fence", "unrelated_fence", "scoped_fence", "broken_unrelated_fence", "readonly", "fenced", "child", "inherited", "reuse", "ordinary_reuse", "override", "foreign_cwd", "native"])
+@pytest.mark.parametrize("restriction", ["absent", "active", "invalid", "state_directory", "fence", "unrelated_fence", "scoped_fence", "broken_unrelated_fence", "readonly", "fenced", "child", "inherited", "reuse", "reuse_reservation_2", "ordinary_reuse", "override", "foreign_cwd", "native"])
 def test_windows_degraded_fresh_delegation_has_no_managed_grant(tmp_path, pinned_test_thaliris, damage, restriction):
     exe, _ = pinned_test_thaliris
     command, home = _windows_hook(tmp_path, exe)
@@ -415,15 +415,23 @@ def test_windows_degraded_fresh_delegation_has_no_managed_grant(tmp_path, pinned
         payload.update(agent_id="known-child", agent_type="thaliris-focused-implementer")
     elif restriction == "inherited":
         payload["tool_input"]["fork_turns"] = "all"
-    elif restriction == "reuse":
+    elif restriction in {"reuse", "reuse_reservation_2"}:
         payload["tool_name"] = "followup_task"
         payload["tool_input"] = {"target": "managed-child", "message": "another workstream"}
         task_id = "adf16584-f390-4bfe-9c1f-af7eec63a006"
         task_key = hashlib.sha256(task_id.encode()).hexdigest()[:24]
         ledger = tmp_path / f".context/audit/lifecycle/{task_key}.json"
         ledger.parent.mkdir(parents=True)
-        ledger.write_text(json.dumps({"task_id": task_id, "children": [{"managed": True,
-            "agent_id_hash": hashlib.sha256(b"managed-child").hexdigest(), "task_name_hash": None}]}))
+        if restriction == "reuse":
+            ledger.write_text(json.dumps({"task_id": task_id, "children": [{"managed": True,
+                "agent_id_hash": hashlib.sha256(b"managed-child").hexdigest(), "task_name_hash": None}]}))
+        else:
+            # The target is the second of two parallel reservations, not the
+            # legacy first slot: degraded mode still classifies it as managed.
+            ledger.write_text(json.dumps({"task_id": task_id, "children": [],
+                "pending_authorized_spawn": {"task_name_hash": hashlib.sha256(b"first-dispatch").hexdigest()},
+                "pending_authorized_spawns": [{"task_name_hash": None,
+                    "native_agent_id_hash": hashlib.sha256(b"managed-child").hexdigest()}]}))
         association = tmp_path / f".context/audit/session-tasks/{hashlib.sha256(b'ordinary-session').hexdigest()}.json"
         association.parent.mkdir()
         association.write_text(json.dumps({"version": 1, "task_id": task_id}))
@@ -445,9 +453,9 @@ def test_windows_degraded_fresh_delegation_has_no_managed_grant(tmp_path, pinned
     assert result.returncode == 0, result.stderr
     assert b"SHOULD_NOT_EXECUTE" not in result.stdout
     output = json.loads(result.stdout)["hookSpecificOutput"]
-    assert (output.get("permissionDecision") == "deny") == (restriction in {"fence", "scoped_fence", "readonly", "fenced", "child", "inherited", "reuse"})
+    assert (output.get("permissionDecision") == "deny") == (restriction in {"fence", "scoped_fence", "readonly", "fenced", "child", "inherited", "reuse", "reuse_reservation_2"})
     assert "THALIRIS_RUNTIME_DRIFT" in output["additionalContext"]
-    if restriction != "reuse":
+    if restriction not in {"reuse", "reuse_reservation_2"}:
         assert not (tmp_path / ".context/audit/lifecycle").exists()
     assert not (tmp_path / ".context/audit/task-start-attestations").exists()
     if restriction == "absent":

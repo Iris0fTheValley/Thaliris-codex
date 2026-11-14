@@ -587,7 +587,15 @@ def test_unknown_actor_active_native_spawn_is_ordinary_and_cannot_consume_manage
     for tool in ("send_message", "followup_task", "send_input", "interrupt_agent", "close_agent", "wait_agent", "list_agents"):
         coordination = {"session_id": "first", "tool_name": tool,
             "tool_input": {"target": "ordinary-child", "id": "ordinary-child", "message": "Selected supplement"}}
-        assert lifecycle.handle_hook(workspace, "PreToolUse", coordination) == ""
+        decision = lifecycle.handle_hook(workspace, "PreToolUse", coordination)
+        if tool == "wait_agent":
+            # O3 wait refusal: an unidentified managed reservation can never
+            # show that a named actor is unrelated to it, so the owning
+            # Controller's wait stays UNKNOWN instead of being exempted.
+            assert json.loads(decision)["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert "THALIRIS_WAIT_DEPENDENCY_UNKNOWN" in decision
+        else:
+            assert decision == ""
         lifecycle.handle_hook(workspace, "PostToolUse", {**coordination, "tool_response": {"previous_status": {"completed": "native result"}}})
         assert path.read_bytes() == before
     for command in ("Set-Content example.py changed", "git status"):
@@ -622,7 +630,12 @@ def test_native_ordinary_completion_shapes_do_not_release_managed_reservation(wo
     path = lifecycle._lifecycle_path(workspace, started["task_id"])
     before = path.read_bytes()
     call = {"session_id": "first", "tool_name": tool, "tool_input": {"targets": ["ordinary-child"]}}
-    assert lifecycle.handle_hook(workspace, "PreToolUse", call) == ""
+    decision = lifecycle.handle_hook(workspace, "PreToolUse", call)
+    if tool == "wait_agent":
+        # O3 wait refusal: the target is not an exact direct dependency.
+        assert "THALIRIS_WAIT_DEPENDENCY_UNKNOWN" in decision and "wait target is not an exact direct dependency" in decision
+    else:
+        assert decision == ""
     assert lifecycle.handle_hook(workspace, "PostToolUse", {**call, "tool_response": response}) == ""
     assert path.read_bytes() == before
     assert lifecycle._load_lifecycle(path, started["task_id"])["pending_authorized_spawn"] is not None
