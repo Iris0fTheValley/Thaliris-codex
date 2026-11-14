@@ -57,6 +57,16 @@ if not isinstance(value, str) and behavior != "wrong_type_accepted":
         sys.exit(2)
     if behavior == "unworded_type_failure":
         sys.exit(1)
+    if behavior == "unworded_then_silent":
+        sys.exit(1 if value == 123 else 0)
+    if behavior == "integer_contacts":
+        from urllib.error import URLError
+        try:
+            build_opener(ProxyHandler({})).open(config["model_providers"]["config_probe"]["base_url"] + "/models", timeout=3)
+        except (URLError, OSError):
+            pass
+        print(field + ": invalid type: integer, expected a string", file=sys.stderr)
+        sys.exit(2)
     if behavior == "integer_silent":
         sys.exit(0)
     if behavior == "misattributed_type_failure":
@@ -116,7 +126,11 @@ def simulated_cli(tmp_path, monkeypatch, behavior):
     ("unavailable", "UNKNOWN"),
     # Typed rejection is shown by behaviour, not by matching error wording.
     ("ambiguous_type_failure", "SUPPORTED"),
+    # Uncorroborated: a second independent integer rejection is required.
     ("unworded_type_failure", "SUPPORTED"),
+    ("unworded_then_silent", "UNKNOWN"),
+    # Any sink contact during an integer run is not a typed rejection.
+    ("integer_contacts", "UNKNOWN"),
     # Exit 0 without a request proves neither acceptance nor rejection.
     ("integer_silent", "UNKNOWN"),
     # The Host attributes its failure to an unrelated location.
@@ -249,12 +263,21 @@ def test_existing_user_value_never_invokes_unknown_probe(tmp_path, monkeypatch, 
     assert (home / "config.toml").read_bytes() == original
 
 
-def cached_cli(tmp_path, monkeypatch, behavior, *, name="codex.exe"):
+# The Host's generated hook schemas, embedded in the simulated binary's bytes.
+SCHEMA = (b'{"$schema": "http://json-schema.org/draft-07/schema#", "title": "stop.command.input",'
+          b' "type": "object", "properties": {}}')
+
+
+def host_bytes(label: bytes) -> bytes:
+    return b"MZ simulated Codex binary " + label + b"\x00" + SCHEMA + b"\x00"
+
+
+def cached_cli(tmp_path, monkeypatch, behavior, *, name="codex.exe", content=None):
     """A real file stands in for the resolved binary so its bytes can be hashed."""
     calls = simulated_cli(tmp_path, monkeypatch, behavior)
     binary = tmp_path / "bin" / name
     binary.parent.mkdir(exist_ok=True)
-    binary.write_bytes(b"MZ simulated Codex binary one")
+    binary.write_bytes(host_bytes(b"one") if content is None else content)
     run = probe.subprocess.run
 
     def execute(args, **kwargs):
@@ -267,25 +290,98 @@ def cached_cli(tmp_path, monkeypatch, behavior, *, name="codex.exe"):
 
 @pytest.mark.parametrize("module,field", [(hint, "multi_agent_mode_hint_text"),
                                           (guidance, "developer_instructions")])
-def test_definitive_probe_result_is_reused_only_for_identical_binary_bytes(
+def test_definitive_probe_result_is_recorded_for_reporting_and_the_install_path_reprobes(
         tmp_path, monkeypatch, module, field):
     calls, binary = cached_cli(tmp_path, monkeypatch, "compatible")
     assert module.capability() == "SUPPORTED"
     probed = len(calls)
-    assert probed >= 5  # --version plus the four isolated exec runs
+    assert probed == 5  # --version plus the four isolated exec runs (corroborated: no extra run)
+    # c-F2: the live-write path never takes a recorded result in place of a probe.
     assert module.capability() == "SUPPORTED"
-    assert len(calls) == probed  # cache hit: no process at all
+    assert len(calls) == 2 * probed
     cached = probe.cached_capability(field)
     assert cached["status"] == "SUPPORTED" and cached["evidence"] == "BINARY_SHA256_PROBE_CACHE"
     assert cached["cli_sha256"] == probe.binary_sha256(str(binary))
     entries = list(probe.cache_directory().glob("*.json"))
     assert len(entries) == 1
     assert json.loads(entries[0].read_bytes())["cli_version"] == "codex-cli 0.162.2"
+    # c-F5: the install report names the probed binary and leaves other Host binaries UNKNOWN.
+    report = probe.install_probe_report()
+    assert report["probed_binary"] == str(binary)
+    assert report["probed_binary_sha256"] == probe.binary_sha256(str(binary))
+    assert report["other_host_binaries"] == "UNKNOWN" and "Desktop" in report["note"]
     # Replaced bytes are a different Host: the old result does not apply.
-    binary.write_bytes(b"MZ simulated Codex binary two")
+    binary.write_bytes(host_bytes(b"two"))
     assert probe.cached_capability(field)["status"] == "UNKNOWN"
-    assert module.capability() == "SUPPORTED"
-    assert len(calls) > probed
+
+
+def test_a_forged_supported_entry_never_skips_the_probe(tmp_path, monkeypatch):
+    calls, binary = cached_cli(tmp_path, monkeypatch, "unavailable")
+    digest = probe.cache_identity(str(binary))
+    contract = probe._probe_contract()
+    assert digest == probe.binary_sha256(str(binary)) and contract
+    path = probe._cache_path(digest, "multi_agent_mode_hint_text", contract)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(json.dumps({"format": probe.CACHE_FORMAT, "cli_sha256": digest, "field": "multi_agent_mode_hint_text",
+                                 "probe_contract": contract, "result": "SUPPORTED", "cli_version": "forged"}).encode())
+    # Reporting shows what is recorded; the install path still probes and finds UNKNOWN.
+    assert probe.cached_capability("multi_agent_mode_hint_text")["status"] == "SUPPORTED"
+    assert hint.capability() == "UNKNOWN"
+    assert len(calls) > 1
+    home = tmp_path / "user-home"
+    home.mkdir()
+    original = b'model = "user-selected"\n'
+    (home / "config.toml").write_bytes(original)
+    assert hint.plan_install(home, {})[1]["status"] == "VERSION_SUPPORT_UNKNOWN"
+    assert (home / "config.toml").read_bytes() == original
+
+
+@pytest.mark.parametrize("variant", ["shim_sibling", "named_shim_sibling", "no_schemas"])
+def test_launcher_shims_and_unidentified_binaries_are_probed_but_never_recorded(tmp_path, monkeypatch, variant):
+    calls, binary = cached_cli(tmp_path, monkeypatch, "compatible",
+                               content=b"MZ launcher shim without schemas" if variant == "no_schemas" else None)
+    if variant == "shim_sibling":
+        binary.with_suffix(".shim").write_text('path = "C:\\real\\codex.exe"\n', encoding="utf-8")
+    elif variant == "named_shim_sibling":
+        binary.with_name(binary.name + ".shim").write_text("path = real\n", encoding="utf-8")
+    assert probe.cache_identity(str(binary)) is None
+    assert hint.capability() == "SUPPORTED"
+    assert not list(probe.cache_directory().glob("*.json"))
+    assert probe.cached_capability("multi_agent_mode_hint_text")["status"] == "UNKNOWN"
+
+
+def test_uncorroborated_rejection_needs_a_second_run_and_is_returned_unrecorded(tmp_path, monkeypatch):
+    calls, binary = cached_cli(tmp_path, monkeypatch, "unworded_type_failure")
+    assert hint.capability() == "SUPPORTED"
+    runs = [args for args, _ in calls if args[1] == "exec"]
+    assert len(runs) == 5  # sentinel, empty, integer, second integer, control sentinel
+    assert not list(probe.cache_directory().glob("*.json"))
+    assert probe.cached_capability("multi_agent_mode_hint_text")["status"] == "UNKNOWN"
+
+
+def test_corroboration_names_the_leaf_or_its_location():
+    assert probe._corroborated("multi_agent_mode_hint_text: invalid type", "multi_agent_mode_hint_text")
+    assert probe._corroborated("invalid type\nin `features.multi_agent_v2`", "multi_agent_mode_hint_text")
+    assert probe._corroborated("in `developer_instructions`", "developer_instructions")
+    assert not probe._corroborated("", "developer_instructions")
+    assert not probe._corroborated("invalid type: integer", "developer_instructions")
+    assert not probe._corroborated("in `features.multi_agent_v2`", "developer_instructions")
+
+
+def test_probe_contract_covers_the_system_layer_gate_key_paths_and_store_gate(monkeypatch):
+    before = probe._probe_contract()
+    monkeypatch.setitem(probe._KEY_PATHS, "developer_instructions", "elsewhere")
+    assert probe._probe_contract() != before
+    monkeypatch.undo()
+    assert probe._probe_contract() == before
+    import inspect
+    for item in (probe._system_config_is_absent, probe._system_config_paths, probe._recordable):
+        source = inspect.getsource(item)
+        monkeypatch.setattr(inspect, "getsource", lambda obj, _real=inspect.getsource, _item=item:
+                            _real(obj) + ("#changed" if obj is _item else ""))
+        assert probe._probe_contract() != before, item.__name__
+        monkeypatch.undo()
+        assert source
 
 
 def test_unknown_results_are_never_cached(tmp_path, monkeypatch):
@@ -297,24 +393,25 @@ def test_unknown_results_are_never_cached(tmp_path, monkeypatch):
     assert not list(probe.cache_directory().glob("*.json"))
 
 
-def test_incompatible_result_is_cached_and_still_preserves_user_bytes(tmp_path, monkeypatch):
+def test_incompatible_result_is_recorded_and_still_preserves_user_bytes(tmp_path, monkeypatch):
     calls, _ = cached_cli(tmp_path, monkeypatch, "ignored")
     assert hint.capability() == "INCOMPATIBLE"
     first = len(calls)
+    assert probe.cached_capability("multi_agent_mode_hint_text")["status"] == "INCOMPATIBLE"
     home = tmp_path / "user-home"
     home.mkdir()
     original = b'model = "user-selected"\n'
     (home / "config.toml").write_bytes(original)
     record, status = hint.plan_install(home, {})
     assert record is None and status["status"] == "CAPABILITY_INCOMPATIBLE"
-    assert len(calls) == first
+    assert len(calls) > first  # planning probed again
     assert (home / "config.toml").read_bytes() == original
 
 
 @pytest.mark.parametrize("tamper", ["result", "binary", "contract", "format", "garbage"])
 def test_tampered_or_foreign_cache_entries_grant_nothing(tmp_path, monkeypatch, tamper):
     calls, binary = cached_cli(tmp_path, monkeypatch, "unavailable")
-    digest = probe.binary_sha256(str(binary))
+    digest = probe.cache_identity(str(binary))
     contract = probe._probe_contract()
     path = probe._cache_path(digest, "multi_agent_mode_hint_text", contract)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,6 +426,7 @@ def test_tampered_or_foreign_cache_entries_grant_nothing(tmp_path, monkeypatch, 
     elif tamper == "format":
         entry["format"] = "thaliris-config-capability-v0"
     path.write_bytes(b"not json" if tamper == "garbage" else json.dumps(entry).encode())
+    assert probe.cached_capability("multi_agent_mode_hint_text")["status"] == "UNKNOWN"
     assert hint.capability() == "UNKNOWN"
     assert len(calls) > 0  # the forged entry did not stand in for a probe
 
@@ -370,3 +468,16 @@ def test_behavioural_rejection_never_follows_from_wording_alone():
     assert not probe._misattributed("no location", "developer_instructions")
     assert not probe._misattributed("in `features.multi_agent_v2`", "multi_agent_mode_hint_text")
     assert probe._misattributed("in `features.multi_agent_v2`", "developer_instructions")
+
+
+@pytest.mark.parametrize("spelling", ["posix", "windows", "relative", "home"])
+def test_probe_result_directory_is_guarded_control_state(spelling):
+    from thaliris_codex import lifecycle
+    directory = probe.cache_directory()
+    target = {"posix": directory.as_posix() + "/forged.json",
+              "windows": str(directory).replace("/", "\\") + "\\forged.json",
+              "relative": ".thaliris\\host-capability\\forged.json",
+              "home": "~/.thaliris/host-capability/forged.json"}[spelling]
+    payload = {"tool_name": "Bash", "tool_input": {"command": f"Set-Content '{target}' '{{}}'"}}
+    assert lifecycle._control_state_target(payload) is not None
+    assert lifecycle._obvious_write_attempt(payload)

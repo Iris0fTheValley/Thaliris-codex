@@ -2,10 +2,16 @@
 
 Support is never decided by a version string. The resolved Codex binary must
 demonstrate string typing and prompt effect using a disposable CLI and a
-loopback Responses sink. A definitive result is cached for exactly that binary
-(SHA-256), config leaf and probe contract; a changed binary is probed again and
-an UNKNOWN result is never cached. This proves CLI configuration behavior,
-never live Desktop activation.
+loopback Responses sink. The install and live-write path always probes again
+(``capability``); a recorded result only feeds reporting and doctor
+(``cached_capabilities``), so a forged cache entry cannot skip a probe before
+a live config write. A definitive result is recorded for exactly that binary
+(SHA-256), config leaf and probe contract, and only when the hashed bytes
+themselves embed the Host's generated hook schemas (never a launcher shim). An
+UNKNOWN result, and a SUPPORTED result whose typed rejection the Host did not
+corroborate, is never recorded. This proves CLI configuration behavior of one
+binary, never live Desktop activation or other Host binaries reading the same
+config.
 """
 from __future__ import annotations
 
@@ -43,6 +49,32 @@ def resolve_executable() -> str | None:
     return shutil.which("codex")
 
 
+def _shim_sibling(path: Path) -> bool:
+    """Scoop-style ``<name>.shim`` beside the executable: its bytes only start the Host."""
+    try:
+        return any(candidate.exists() for candidate in (path.with_suffix(".shim"),
+                                                       path.with_name(path.name + ".shim")))
+    except (OSError, ValueError):
+        return True
+
+
+def cache_identity(executable: str | None) -> str | None:
+    """SHA-256 under which a result may be recorded or reported, or None.
+
+    The digest and the embedded hook schemas come from one mapping of the
+    same bytes (``hook_shape.embedded_identity``); a launcher shim or packed
+    binary without observable schemas, or any executable with a ``.shim``
+    sibling, is not an identity of the Host.
+    """
+    from . import hook_shape
+    if not executable:
+        return None
+    path = Path(executable)
+    if path.suffix.lower() in LAUNCHER_SUFFIXES or _shim_sibling(path):
+        return None
+    return hook_shape.embedded_identity(executable)[1]
+
+
 def binary_sha256(executable: str) -> str | None:
     """Hash a direct binary; launcher scripts and unreadable paths stay unknown."""
     path = Path(executable)
@@ -71,12 +103,16 @@ def cache_directory() -> Path:
 
 def _probe_contract() -> str | None:
     """Bind cached results to the evidence rules that produced them."""
+    from . import hook_shape
     try:
         source = "".join(inspect.getsource(item) for item in (
-            probe, _run, _Sink, _developer_text, _misattributed))
+            probe, _probe, _run, _Sink, _developer_text, _misattributed, _corroborated,
+            _system_config_is_absent, _system_config_paths, _recordable, cache_identity, _shim_sibling,
+            hook_shape.embedded_identity, hook_shape._scan))
     except (OSError, TypeError):
         return None
-    return hashlib.sha256((CACHE_FORMAT + "\n" + source).encode("utf-8")).hexdigest()
+    keys = json.dumps(_KEY_PATHS, sort_keys=True)
+    return hashlib.sha256((CACHE_FORMAT + "\n" + keys + "\n" + source).encode("utf-8")).hexdigest()
 
 
 def _cache_path(binary: str, field: str, contract: str) -> Path:
@@ -135,9 +171,12 @@ def _version_line(executable: str) -> str:
 
 
 def cached_capabilities() -> dict[str, dict]:
-    """Report cached evidence for the resolved binary without running a probe."""
+    """Report recorded evidence for the resolved binary without running a probe.
+
+    Reporting and doctor only: no install or live config write consults this.
+    """
     executable = resolve_executable()
-    binary = binary_sha256(executable) if executable else None
+    binary = cache_identity(executable) if executable else None
     contract = _probe_contract()
     report = {}
     for field in sorted(FIELDS):
@@ -154,26 +193,53 @@ def cached_capability(field: str) -> dict:
     return cached_capabilities()[field]
 
 
+# The binary the last install-path probe in this process ran against, for the
+# install report only; it never stands in for a probe.
+_LAST_PROBED: dict[str, str] = {}
+
+
+def _recordable(identity: str | None, contract: str | None, result: str, corroborated: bool,
+                after: str | None) -> bool:
+    """Store gate: definitive, Host-identified, unchanged bytes, and corroborated if SUPPORTED."""
+    return (identity is not None and contract is not None and result in _CACHEABLE
+            and (result != "SUPPORTED" or corroborated) and after == identity)
+
+
 def capability(field: str) -> str:
-    """Probe the resolved binary, reusing a result only for identical bytes."""
+    """Probe the resolved binary now; a recorded result never replaces this probe.
+
+    This is the install and live-write path: the result decides whether a live
+    config leaf may be written, so it is always a fresh probe of the current
+    bytes. A definitive result is then recorded for reporting.
+    """
     if field not in FIELDS:
         raise ValueError("unknown optional config capability")
     executable = resolve_executable()
     if executable is None:
         return "UNKNOWN"
-    binary = binary_sha256(executable)
+    identity = cache_identity(executable)
     contract = _probe_contract()
-    if binary is not None and contract is not None:
-        cached = _cached(binary, field, contract)
-        if cached is not None:
-            return cached
     version = _version_line(executable)
-    result = probe(executable, field)
+    result, corroborated = _probe(executable, field)
+    _LAST_PROBED.update({"path": executable, "sha256": binary_sha256(executable) or "UNKNOWN",
+                         "host_identity_sha256": identity or "UNKNOWN"})
     # Never attribute a result to bytes that changed while the probe ran.
-    if (binary is not None and contract is not None and result in _CACHEABLE
-            and binary_sha256(executable) == binary):
-        _store(binary, field, contract, result, version)
+    if _recordable(identity, contract, result, corroborated, cache_identity(executable)):
+        _store(identity, field, contract, result, version)
     return result
+
+
+def install_probe_report() -> dict[str, object]:
+    """Name the one binary whose probe authorized config writes, and what stays unknown."""
+    probed = dict(_LAST_PROBED)
+    return {
+        "probed_binary": probed.get("path", "NOT_PROBED"),
+        "probed_binary_sha256": probed.get("sha256", "UNKNOWN"),
+        "host_identity_sha256": probed.get("host_identity_sha256", "UNKNOWN"),
+        "other_host_binaries": "UNKNOWN",
+        "note": ("Only the probed binary demonstrated config support. Other Host binaries that read the same"
+                 " config.toml (for example Desktop app bundles) were not probed; their support is UNKNOWN."),
+    }
 
 
 def _developer_text(body: dict) -> str:
@@ -260,13 +326,31 @@ def _system_config_is_absent() -> bool:
 
 
 class _Sink:
-    """Serve synthetic completion only; deny every other HTTP/proxy request."""
+    """Serve synthetic completion only; deny every other HTTP/proxy request.
+
+    ``contacts`` counts every accepted connection and every request line of any
+    method, parsed or not; ``requests`` keeps only parsed Responses bodies.
+    """
 
     def __init__(self):
         self.requests: list[dict] = []
+        self.contacts = 0
+        lock = threading.Lock()
         owner = self
 
+        def contact():
+            with lock:
+                owner.contacts += 1
+
         class Handler(BaseHTTPRequestHandler):
+            def setup(self):
+                contact()
+                super().setup()
+
+            def parse_request(self):
+                contact()
+                return super().parse_request()
+
             def do_POST(self):
                 if self.path != "/v1/responses":
                     self.send_error(403)
@@ -331,7 +415,7 @@ class _Sink:
 
 
 def _run(executable: str, root: Path, sink: _Sink, field: str, value: object,
-         task: str, developer: str) -> tuple[subprocess.CompletedProcess, list[dict]]:
+         task: str, developer: str) -> tuple[subprocess.CompletedProcess, list[dict], int]:
     home = root / uuid.uuid4().hex
     home.mkdir()
     cwd = home / "workspace"
@@ -369,6 +453,7 @@ def _run(executable: str, root: Path, sink: _Sink, field: str, value: object,
         env[name] = env[name.lower()] = sink.url
     env["NO_PROXY"] = env["no_proxy"] = "localhost,127.0.0.1"
     start = len(sink.requests)
+    contacts = sink.contacts
     # exec appends piped stdin to the prompt and waits for EOF; an inherited
     # open pipe would otherwise hold the probe until its timeout.
     result = subprocess.run(
@@ -377,7 +462,7 @@ def _run(executable: str, root: Path, sink: _Sink, field: str, value: object,
         cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
         timeout=15, check=False,
     )
-    return result, sink.requests[start:]
+    return result, sink.requests[start:], sink.contacts - contacts
 
 
 def _misattributed(diagnostic: str, field: str) -> bool:
@@ -396,17 +481,35 @@ def _misattributed(diagnostic: str, field: str) -> bool:
                    or location.startswith(path + ".") for location in locations)
 
 
+def _corroborated(diagnostic: str, field: str) -> bool:
+    """True when the Host's own diagnostic names the leaf or its config location."""
+    path = _KEY_PATHS[field]
+    if path in diagnostic or path.rsplit(".", 1)[-1] in diagnostic:
+        return True
+    locations = re.findall(r"\bin `([^`\s]+)`", diagnostic)
+    return any(location == path or path.startswith(location + ".") for location in locations)
+
+
 def probe(executable: str, field: str) -> str:
+    """Probe result only; see ``_probe``."""
+    return _probe(executable, field)[0]
+
+
+def _probe(executable: str, field: str) -> tuple[str, bool]:
     """Check accepted string, empty-string effect, and rejection of a wrong type.
 
-    The sentinel and empty-string prompt effects are the positive evidence that
-    the leaf is recognised. A wrong-typed integer must then be rejected by
-    behaviour: a non-zero exit before any Responses request. The integer run
-    differs from the accepted runs only in that leaf, and a final repeat of the
-    accepted sentinel run proves the environment still works, so the failure is
-    attributable to the leaf's string typing without matching error wording.
-    Completed captured requests with a contradictory effect are INCOMPATIBLE.
-    Missing transport/effect evidence or ambiguous failures remain UNKNOWN.
+    Returns the result and whether a SUPPORTED result is corroborated (and so
+    may be recorded). The sentinel and empty-string prompt effects are the
+    positive evidence that the leaf is recognised. A wrong-typed integer must
+    then be rejected by behaviour: a non-zero exit with no sink contact at all
+    (no connection, no request of any kind). The integer run differs from the
+    accepted runs only in that leaf, and a final repeat of the accepted
+    sentinel run proves the environment still works. When the Host's
+    diagnostic does not name the leaf or its location, a second, independent
+    integer rejection run is required, and the SUPPORTED result is returned
+    uncorroborated (never recorded). Completed captured requests with a
+    contradictory effect are INCOMPATIBLE. Missing transport/effect evidence
+    or ambiguous failures remain UNKNOWN.
     """
     if field not in FIELDS:
         raise ValueError("unknown optional config capability")
@@ -414,7 +517,7 @@ def probe(executable: str, field: str) -> str:
     # Refuse the probe when their absence cannot be proven; hooks from managed
     # policy remain effective even when ordinary hooks are disabled below.
     if not _system_config_is_absent():
-        return "UNKNOWN"
+        return "UNKNOWN", False
     sink = _Sink()
     sentinel = "CONFIG_CAPABILITY_" + uuid.uuid4().hex
     developer = "CONFIG_DEVELOPER_" + uuid.uuid4().hex
@@ -423,40 +526,51 @@ def probe(executable: str, field: str) -> str:
         with tempfile.TemporaryDirectory(prefix="thaliris-config-capability-") as directory:
             root = Path(directory)
             rejected = False
+            corroborated = False
             # The trailing sentinel is the control run for the integer case.
-            for value in (sentinel, "", 123, sentinel):
-                result, requests = _run(executable, root, sink, field, value, task, developer)
+            values: list[object] = [sentinel, "", 123, sentinel]
+            index = 0
+            while index < len(values):
+                value = values[index]
+                index += 1
+                result, requests, contacts = _run(executable, root, sink, field, value, task, developer)
                 if type(value) is int:
                     if requests:
-                        return "INCOMPATIBLE"
-                    # Exit 0 without a request shows neither acceptance nor
-                    # typed rejection; a failure the Host attributes to an
+                        return "INCOMPATIBLE", False
+                    # Any other contact, or exit 0, shows neither acceptance
+                    # nor typed rejection; a failure the Host attributes to an
                     # unrelated location cannot be credited to this leaf.
-                    if (result.returncode == 0
-                            or _misattributed(result.stderr + result.stdout, field)):
-                        return "UNKNOWN"
+                    diagnostic = result.stderr + result.stdout
+                    if contacts or result.returncode == 0 or _misattributed(diagnostic, field):
+                        return "UNKNOWN", False
+                    if _corroborated(diagnostic, field):
+                        corroborated = True
+                    elif not rejected:
+                        # Uncorroborated: one more independent rejection run
+                        # (fresh home, another integer) before the control run.
+                        values.insert(index, 456)
                     rejected = True
                     continue
                 if result.returncode != 0 or len(requests) != 1:
-                    return "UNKNOWN"
+                    return "UNKNOWN", False
                 body = requests[0]
                 # A tool/model response or another request cannot stand in for
                 # the one finite task we asked this disposable CLI to execute.
                 if task not in json.dumps(body.get("input", [])):
-                    return "UNKNOWN"
+                    return "UNKNOWN", False
                 text = _developer_text(body)
                 if field == "multi_agent_mode_hint_text":
                     expected = rf"<multi_agent_mode>\s*{sentinel}\s*</multi_agent_mode>"
                     if developer not in text:
-                        return "UNKNOWN"
+                        return "UNKNOWN", False
                     if value and re.search(expected, text) is None:
-                        return "INCOMPATIBLE"
+                        return "INCOMPATIBLE", True
                     if not value and ("<multi_agent_mode>" in text or sentinel in text):
-                        return "INCOMPATIBLE"
+                        return "INCOMPATIBLE", True
                 elif (bool(value) and sentinel not in text) or (not value and sentinel in text):
-                    return "INCOMPATIBLE"
-        return "SUPPORTED" if rejected else "UNKNOWN"
+                    return "INCOMPATIBLE", True
+        return ("SUPPORTED", corroborated) if rejected else ("UNKNOWN", False)
     except (OSError, subprocess.SubprocessError, ValueError, TypeError):
-        return "UNKNOWN"
+        return "UNKNOWN", False
     finally:
         sink.close()

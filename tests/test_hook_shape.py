@@ -6,6 +6,7 @@ They are evidence for the checker, not a version requirement.
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -30,6 +31,7 @@ def test_upstream_0169_schemas_cover_every_registered_event_and_relied_on_key():
     assert {name.removesuffix(".command.input") for name in schemas} == set(hook_shape.EVENT_SCHEMAS.values())
     result = hook_shape.check(schemas, tool_names=UPSTREAM_V2_HOOK_NAMES)
     assert result["status"] == "COMPATIBLE"
+    assert result["schema_status"] == "COMPATIBLE" and result["matcher_status"] == "COMPATIBLE"
     assert result["missing_events"] == [] and result["missing_keys"] == {}
     assert result["event_name_contradictions"] == []
     assert result["matchers"]["status"] == "COMPATIBLE"
@@ -80,23 +82,62 @@ def test_unobservable_schemas_are_unknown_never_compatible(schemas):
     assert result["status"] == "UNKNOWN"
 
 
-def test_matchers_without_observed_names_stay_unknown():
+def test_matchers_without_observed_names_keep_the_top_level_unknown():
+    # c-F1: an observed schema alone is not compatibility; the matcher is unobserved.
     result = hook_shape.check(upstream())
-    assert result["status"] == "COMPATIBLE"  # input shape was observed
-    assert result["matchers"]["status"] == "UNKNOWN"
+    assert result["schema_status"] == "COMPATIBLE"
+    assert result["matcher_status"] == "UNKNOWN" and result["matchers"]["status"] == "UNKNOWN"
+    assert result["status"] == "UNKNOWN"
 
 
 def test_unmatched_observed_tool_name_is_incompatible():
     result = hook_shape.check(upstream(), tool_names=["collaborationspawn_agent", "multi_agent_v1send_input"])
     assert result["status"] == "INCOMPATIBLE"
+    assert result["schema_status"] == "COMPATIBLE" and result["matcher_status"] == "INCOMPATIBLE"
     assert result["matchers"]["post_tool_unmatched"] == ["multi_agent_v1send_input"]
+    # Without schemas a matcher mismatch is still reported.
+    assert hook_shape.check(None, tool_names=["teamspawn_agent"])["status"] == "INCOMPATIBLE"
 
 
-@pytest.mark.parametrize("namespace,status", [
-    ("collaboration", "UNKNOWN"), ("team", "INCOMPATIBLE"), ("my-team", "INCOMPATIBLE"), (None, "UNKNOWN"),
+def test_observed_v1_and_mcp_names():
+    result = hook_shape.check(upstream(), tool_names=["spawn_agent", "resume_agent", "mcp__srv__send_message"])
+    assert result["matchers"]["observed_tool_names"] == ["resume_agent", "spawn_agent"]
+    assert result["matchers"]["post_tool_unmatched"] == ["resume_agent"]
+    assert result["status"] == "INCOMPATIBLE"
+
+
+@pytest.mark.parametrize("namespace,v2,observed,status", [
+    ("collaboration", True, (), "UNKNOWN"),
+    ("team", True, (), "INCOMPATIBLE"),
+    ("my-team", True, (), "INCOMPATIBLE"),
+    (None, True, (), "UNKNOWN"),
+    # V2 disabled, or not configured (default off on rust-v0.169.0): V1 names are unmatched.
+    ("collaboration", False, (), "INCOMPATIBLE"),
+    ("collaboration", False, ("collaborationspawn_agent",), "INCOMPATIBLE"),
+    ("collaboration", None, (), "INCOMPATIBLE"),
+    # Not configured, but namespaced V2 names were actually observed.
+    ("collaboration", None, ("collaborationspawn_agent",), "UNKNOWN"),
+    ("collaboration", None, ("spawn_agent",), "INCOMPATIBLE"),
 ])
-def test_configured_tool_namespace_predicts_only_incompatibility(namespace, status):
-    assert hook_shape.namespace_check(namespace)["status"] == status
+def test_configured_tool_namespace_predicts_only_incompatibility(namespace, v2, observed, status):
+    result = hook_shape.namespace_check(namespace, v2_enabled=v2, observed_tool_names=observed)
+    assert result["status"] == status
+    if status == "INCOMPATIBLE" and v2 is not True:
+        assert result["post_tool_unmatched"] == ["resume_agent"]
+
+
+@pytest.mark.parametrize("config,expected", [
+    (None, ("collaboration", None)),
+    (b"[features]\nmulti_agent_v2 = true\n", ("collaboration", True)),
+    (b"[features]\nmulti_agent_v2 = false\n", ("collaboration", False)),
+    (b'[features.multi_agent_v2]\nenabled = true\ntool_namespace = "team"\n', ("team", True)),
+    (b"[features.multi_agent_v2]\nmulti_agent_mode_hint_text = \"\"\n", ("collaboration", None)),
+    (b"not toml = = \n", (None, None)),
+])
+def test_configured_multi_agent_reads_v1_and_v2_settings(tmp_path, config, expected):
+    if config is not None:
+        (tmp_path / "config.toml").write_bytes(config)
+    assert hook_shape._configured_multi_agent(tmp_path) == expected
 
 
 def _embedded_binary(tmp_path: Path, schemas: dict, *, newline: str = "\r\n", name: str = "codex.exe") -> Path:
@@ -118,6 +159,24 @@ def test_embedded_generated_schemas_are_read_from_the_binary(tmp_path, newline):
                                     observed_tool_names=UPSTREAM_V2_HOOK_NAMES)
     assert report["status"] == "COMPATIBLE" and report["evidence"] == "EMBEDDED_GENERATED_HOOK_SCHEMAS"
     assert report["runtime_refusal"] == "NEVER"
+    assert report["executable_sha256"] == hashlib.sha256(binary.read_bytes()).hexdigest()
+    # c-F1: the install path passes no observed names, so the matcher stays UNKNOWN.
+    install = hook_shape.host_report(executable=str(binary), codex_home=tmp_path / "absent-home")
+    assert install["schema_status"] == "COMPATIBLE" and install["matcher_status"] == "UNKNOWN"
+    assert install["status"] == "INCOMPATIBLE"  # V2 not configured: V1 resume_agent is unmatched
+    enabled = tmp_path / "v2-home"
+    enabled.mkdir()
+    (enabled / "config.toml").write_bytes(b"[features.multi_agent_v2]\nenabled = true\n")
+    assert hook_shape.host_report(executable=str(binary), codex_home=enabled)["status"] == "UNKNOWN"
+
+
+def test_identity_is_bound_to_the_same_bytes_as_the_schemas(tmp_path):
+    binary = _embedded_binary(tmp_path, upstream())
+    schemas, digest = hook_shape.embedded_identity(str(binary))
+    assert schemas == upstream() and digest == hashlib.sha256(binary.read_bytes()).hexdigest()
+    shim = tmp_path / "shim.exe"
+    shim.write_bytes(b"MZ launcher shim without schemas")
+    assert hook_shape.embedded_identity(str(shim)) == (None, None)
 
 
 def test_binary_scan_fails_safe(tmp_path):
@@ -157,6 +216,11 @@ def test_missing_payload_keys_names_only_required_inputs():
         "tool_use_id": "u"}) == []  # a root actor has no agent_id
     assert hook_shape.missing_payload_keys("SubagentStop", {"session_id": "s"}) == [
         "cwd", "turn_id", "agent_id", "agent_type", "last_assistant_message"]
+    # c-F6: the Host declares last_assistant_message nullable; a present null is not a gap.
+    stop = {"session_id": "s", "cwd": "c", "turn_id": "t", "agent_id": "a", "agent_type": "x",
+            "last_assistant_message": None}
+    assert hook_shape.missing_payload_keys("SubagentStop", stop) == []
+    assert hook_shape.missing_payload_keys("SubagentStop", {**stop, "agent_id": None}) == ["agent_id"]
     assert hook_shape.missing_payload_keys("PreToolUse", {"tool": "Bash"})[:3] == ["session_id", "cwd", "turn_id"]
     assert hook_shape.missing_payload_keys("Unregistered", {}) == []
 
@@ -181,13 +245,24 @@ def _runtime_gaps(root: Path) -> list:
     return gaps
 
 
-def test_live_payload_gap_is_a_bounded_diagnostic_not_a_new_decision(tmp_path, managed_role_profile_home):
+@pytest.fixture
+def fixture_host(tmp_path, monkeypatch) -> Path:
+    """A fixture Host binary; tests never hash the real PATH binary."""
+    directory = tmp_path / "host-bin"
+    directory.mkdir()
+    binary = _embedded_binary(directory, upstream())
+    monkeypatch.setenv("THALIRIS_CODEX_EXECUTABLE", str(binary))
+    return binary
+
+
+def test_live_payload_gap_is_a_bounded_diagnostic_not_a_new_decision(tmp_path, managed_role_profile_home, fixture_host):
     root = _project(tmp_path / "repo")
     payload = {"session_id": "session-a", "cwd": str(root)}
     decision = lifecycle.handle_hook(root, "SubagentStop", payload)
     assert decision == ""
     gaps = _runtime_gaps(root)
-    assert gaps == [{"status": "UNKNOWN", "event": "SubagentStop",
+    stamp = hashlib.sha256(fixture_host.read_bytes()).hexdigest()
+    assert gaps == [{"status": "UNKNOWN", "event": "SubagentStop", "host_binary_sha256": stamp,
                      "missing_keys": ["turn_id", "agent_id", "agent_type", "last_assistant_message"]}]
     # Repeats do not grow the record.
     lifecycle.handle_hook(root, "SubagentStop", payload)
@@ -197,17 +272,63 @@ def test_live_payload_gap_is_a_bounded_diagnostic_not_a_new_decision(tmp_path, m
     assert len(_runtime_gaps(root)) == 1
     report = codex_adapter.doctor(root)["host_hook_shape"]
     assert report["runtime_payload_gaps"] == gaps
+    assert report["runtime_payload_gaps_not_current"] == 0
+    assert report["executable"] == str(fixture_host)
     assert report["runtime_refusal"] == "NEVER"
     assert set(report["config_capability"]) == {"developer_instructions", "multi_agent_mode_hint_text"}
+    # A replaced Host binary makes the old gap not current: doctor no longer shows it.
+    fixture_host.write_bytes(fixture_host.read_bytes() + b"\x00replaced")
+    report = codex_adapter.doctor(root)["host_hook_shape"]
+    assert report["runtime_payload_gaps"] == [] and report["runtime_payload_gaps_not_current"] == 1
 
 
-def test_pretool_gap_keeps_the_existing_decision(tmp_path, managed_role_profile_home, monkeypatch):
+def test_gap_is_deduplicated_before_the_lock_and_skipped_for_fenced_actors(
+        tmp_path, managed_role_profile_home, fixture_host, monkeypatch):
+    root = _project(tmp_path / "repo")
+    payload = {"session_id": "session-d", "cwd": str(root)}
+    lifecycle.handle_hook(root, "SubagentStop", payload)
+    assert len(_runtime_gaps(root)) == 1
+    real_lock = lifecycle.task_authority._lock
+    taken = []
+
+    def counting(root_):
+        taken.append(root_)
+        return real_lock(root_)
+    with monkeypatch.context() as patched:
+        patched.setattr(lifecycle.task_authority, "_lock", counting)
+        patched.setattr(lifecycle, "_host_binary_stamp", lambda: pytest.fail("a duplicate must not hash the binary"))
+        lifecycle._record_hook_shape_gap(root, "SubagentStop", payload)
+    assert taken == []
+    # A fenced actor's payload is refused before any diagnostic is recorded.
+    lifecycle.handle_hook(root, "PreToolUse", {"session_id": "session-e", "cwd": str(root), "fenced": True,
+                                               "tool_name": "Bash", "tool_input": {"command": "git status"}})
+    assert all(gap["event"] != "PreToolUse" for gap in _runtime_gaps(root))
+
+
+def test_pretool_records_raw_collaboration_names_the_matcher_would_miss(
+        tmp_path, managed_role_profile_home, fixture_host):
+    root = _project(tmp_path / "repo")
+    base = {"session_id": "session-f", "cwd": str(root), "turn_id": "t", "tool_use_id": "u", "tool_input": {}}
+    for name in ("teamspawn_agent", "resume_agent", "mcp__srv__send_message", "Bash", "teamspawn_agent"):
+        lifecycle.handle_hook(root, "PreToolUse", {**base, "tool_name": name})
+    names = []
+    for path in (root / ".context" / "audit").glob("*/runtime.json"):
+        names += json.loads(path.read_text(encoding="utf-8")).get("collaboration_tool_names_observed", [])
+    assert names == ["teamspawn_agent", "resume_agent"]
+    report = codex_adapter.doctor(root)["host_hook_shape"]
+    assert report["matcher_status"] == "INCOMPATIBLE"
+    assert sorted(report["matchers"]["post_tool_unmatched"]) == ["resume_agent", "teamspawn_agent"]
+    assert report["status"] == "INCOMPATIBLE"
+
+
+def test_pretool_gap_keeps_the_existing_decision(tmp_path, managed_role_profile_home, monkeypatch, fixture_host):
     root = _project(tmp_path / "repo")
     payload = {"session_id": "session-c", "cwd": str(root), "tool_name": "Bash",
                "tool_input": {"command": "git status"}}
-    monkeypatch.setattr(lifecycle, "_record_hook_shape_gap", lambda *_args: None)
-    without = lifecycle.handle_hook(root, "PreToolUse", dict(payload))
-    monkeypatch.undo()
+    with monkeypatch.context() as patched:  # keep the fixture Host selected afterwards
+        patched.setattr(lifecycle, "_record_hook_shape_gap", lambda *_args: None)
+        without = lifecycle.handle_hook(root, "PreToolUse", dict(payload))
     with_diagnostic = lifecycle.handle_hook(root, "PreToolUse", dict(payload))
     assert with_diagnostic == without
-    assert {"status": "UNKNOWN", "event": "PreToolUse", "missing_keys": ["turn_id", "tool_use_id|call_id|tool_call_id"]} in _runtime_gaps(root)
+    assert {"status": "UNKNOWN", "event": "PreToolUse", "missing_keys": ["turn_id", "tool_use_id|call_id|tool_call_id"],
+            "host_binary_sha256": hashlib.sha256(fixture_host.read_bytes()).hexdigest()} in _runtime_gaps(root)

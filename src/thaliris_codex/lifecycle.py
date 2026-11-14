@@ -152,7 +152,7 @@ _CHILD_CONTEXT_MUTATIONS = frozenset({
 # them: an observation, and the result of a Controller-declared check.
 _CHILD_LEDGER_APPENDS = frozenset({"task-observe", "task-verify"})
 _RAW_CORE_IDENTITY_STATE = re.compile(r"(?i)thaliris[-_]?(?:core)?[^|;&]*identity-(?:offer|note|suggest)(?![-\w])")
-_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
+_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]+(?:task-authority|host-capability)|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
 _START_ATTESTATION_TTL_NS = 120 * 1_000_000_000
 
@@ -1710,9 +1710,6 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
     try:
         if event not in HOOK_EVENTS or not isinstance(payload, dict):
             return ""
-        # Diagnostic only: every decision below keeps its own fail-closed
-        # handling of the same missing fields.
-        _best_effort_record(_record_hook_shape_gap, root, event, payload)
         if event == "PreToolUse":
             if payload.get("fenced") is True:
                 return _permission_deny("THALIRIS_FENCED_ACTOR")
@@ -1761,6 +1758,13 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                     return _permission_deny("THALIRIS_ABANDONED_SESSION: this native session belongs to an abandoned managed task.")
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 return _permission_deny("THALIRIS_ABANDONED_SESSION_FENCE_UNAVAILABLE")
+        if payload.get("fenced") is not True:
+            # Diagnostic only, after the fence and abandoned-actor checks so a
+            # fenced actor records nothing: every decision below keeps its own
+            # fail-closed handling of the same missing fields.
+            _best_effort_record(_record_hook_shape_gap, root, event, payload)
+            if event == "PreToolUse":
+                _best_effort_record(_record_collaboration_tool_name, root, payload)
         if event == "SubagentStart":
             return _subagent_start_output(root, payload)
         if event == "SubagentStop":
@@ -2256,24 +2260,82 @@ def _runtime_metadata(state: dict[str, Any], payload: dict[str, Any]) -> None:
     state["observed_at_ns"] = time.time_ns()
 
 
+MAX_HOOK_SHAPE_GAPS = 16
+MAX_COLLABORATION_TOOL_NAMES = 16
+
+
+def _hook_shape_gap_known(gaps: object, event: str, missing: list[str]) -> bool:
+    """True when the gap is already recorded or the bounded record is full (or unusable)."""
+    if not isinstance(gaps, list):
+        return True
+    return len(gaps) >= MAX_HOOK_SHAPE_GAPS or any(
+        isinstance(gap, dict) and gap.get("event") == event and gap.get("missing_keys") == missing for gap in gaps)
+
+
+def _host_binary_stamp() -> str:
+    """SHA-256 of the resolved Host binary a gap is attributed to, or UNKNOWN."""
+    from . import config_capability
+    executable = config_capability.resolve_executable()
+    digest = config_capability.binary_sha256(executable) if executable else None
+    return digest or "UNKNOWN"
+
+
 def _record_hook_shape_gap(root: Path, event: str, payload: dict[str, Any]) -> None:
     """Name a live payload's missing adapter inputs as ``host_hook_shape: UNKNOWN``.
 
-    Bounded and hash-free: only the event and the absent key names are kept.
+    Bounded: only the event, the absent key names and the resolved Host
+    binary's digest are kept. A duplicate is dropped before the lock is taken;
+    the binary is hashed only for a new gap.
     """
     from . import hook_shape
     missing = hook_shape.missing_payload_keys(event, payload)
     if not missing:
         return
-    item = {"status": "UNKNOWN", "event": event, "missing_keys": missing}
+    path = _session_dir(root, payload) / "runtime.json"
+    try:
+        known = _hook_shape_gap_known(_load_runtime(path).get("host_hook_shape", []), event, missing)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        known = False  # Decide under the lock.
+    if known:
+        return
+    item = {"status": "UNKNOWN", "event": event, "missing_keys": missing,
+            "host_binary_sha256": _host_binary_stamp()}
     with task_authority._lock(root):
-        path = _session_dir(root, payload) / "runtime.json"
         state = _load_runtime(path)
         gaps = state.get("host_hook_shape", [])
-        if not isinstance(gaps, list) or item in gaps or len(gaps) >= 16:
+        if _hook_shape_gap_known(gaps, event, missing):
             return
         _runtime_metadata(state, payload)
         state["host_hook_shape"] = [*gaps, item]
+        _write_capture(path, state)
+
+
+def _record_collaboration_tool_name(root: Path, payload: dict[str, Any]) -> None:
+    """Keep a raw Host multi-agent tool name even when the PostToolUse matcher misses it.
+
+    PreToolUse uses the match-all matcher, so every Host tool name reaches it;
+    a name whose suffix is a collaboration base name is recorded verbatim
+    (bounded) so the doctor's matcher check can observe a mismatch that
+    PostToolUse alone could never report.
+    """
+    from . import hook_shape
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not hook_shape.multi_agent_name(tool):
+        return
+    path = _session_dir(root, payload) / "runtime.json"
+    try:
+        names = _load_runtime(path).get("collaboration_tool_names_observed", [])
+        if isinstance(names, list) and (tool in names or len(names) >= MAX_COLLABORATION_TOOL_NAMES):
+            return
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    with task_authority._lock(root):
+        state = _load_runtime(path)
+        names = state.get("collaboration_tool_names_observed", [])
+        if not isinstance(names, list) or tool in names or len(names) >= MAX_COLLABORATION_TOOL_NAMES:
+            return
+        _runtime_metadata(state, payload)
+        state["collaboration_tool_names_observed"] = [*names, tool]
         _write_capture(path, state)
 
 
@@ -5691,6 +5753,12 @@ def _control_state_target(payload: dict[str, Any]) -> str | None:
     capability_directory = maintenance_capability.directory().as_posix().casefold()
     if capability_directory in normalized or ".thaliris/host-maintenance" in normalized:
         return capability_directory
+    # Recorded config-capability probe results: reporting evidence a forged
+    # entry must not be able to plant.
+    from . import config_capability
+    probe_cache = config_capability.cache_directory().as_posix().casefold()
+    if probe_cache in normalized or ".thaliris/host-capability" in normalized:
+        return probe_cache
     home = _host_home_path()
     paths = [home / name for name in (runtime_identity.MANIFEST_NAME,
         host_maintenance.RECEIPT_NAME, "thaliris-host-transition.json", "thaliris-host-maintenance.lock", "AGENTS.md", "hooks.json", "config.toml",

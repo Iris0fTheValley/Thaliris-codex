@@ -969,7 +969,8 @@ def host_hook_shape(codex_home: Path | None = None, *, observed_tool_names: obje
         report: dict[str, object] = hook_shape.host_report(
             codex_home=codex_home, observed_tool_names=observed_tool_names or ())
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
-        report = {"status": "UNKNOWN", "reason": "hook shape check failed: " + type(exc).__name__,
+        report = {"status": "UNKNOWN", "schema_status": "UNKNOWN", "matcher_status": "UNKNOWN",
+                  "reason": "hook shape check failed: " + type(exc).__name__,
                   "runtime_refusal": "NEVER"}
     report["runtime_payload_gaps"] = list(runtime_gaps or ())[:16]
     try:
@@ -2658,6 +2659,9 @@ def doctor(root: Path) -> dict[str, object]:
     pretool_tools: set[str] = set()
     host_tool_names: set[str] = set()
     hook_shape_gaps: list[dict[str, object]] = []
+    stale_gaps = 0
+    gap_binary = lifecycle._host_binary_stamp()
+    gap_binary = None if gap_binary == "UNKNOWN" else gap_binary
     compatible_profile_observed = False
     orchestration = {
         "wait_calls": 0,
@@ -2683,10 +2687,19 @@ def doctor(root: Path) -> dict[str, object]:
             pretool_tools.update(tool for tool in runtime["pretool_tools_observed"] if isinstance(tool, str))
         if current and isinstance(runtime.get("tool_names_observed"), list):
             host_tool_names.update(tool for tool in runtime["tool_names_observed"] if isinstance(tool, str))
+        if current and isinstance(runtime.get("collaboration_tool_names_observed"), list):
+            host_tool_names.update(tool for tool in runtime["collaboration_tool_names_observed"] if isinstance(tool, str))
         if isinstance(runtime, dict) and isinstance(runtime.get("host_hook_shape"), list):
             for gap in runtime["host_hook_shape"]:
-                if isinstance(gap, dict) and gap not in hook_shape_gaps and len(hook_shape_gaps) < 16:
-                    hook_shape_gaps.append(gap)
+                if not isinstance(gap, dict) or gap in hook_shape_gaps:
+                    continue
+                # Only gaps stamped with the currently resolved Host binary are
+                # current; others came from another (or an unidentified) binary.
+                if gap_binary is not None and gap.get("host_binary_sha256") == gap_binary:
+                    if len(hook_shape_gaps) < 16:
+                        hook_shape_gaps.append(gap)
+                else:
+                    stale_gaps += 1
         if current and isinstance(runtime.get("subagent_start_agent_types"), list):
             compatible_profile_observed = compatible_profile_observed or any(
                 isinstance(value, str) and value in roles.native_profile_names()
@@ -2803,6 +2816,7 @@ def doctor(root: Path) -> dict[str, object]:
     result["host_capability"] = host
     result["host_hook_shape"] = host_hook_shape(home, observed_tool_names=host_tool_names,
                                                 runtime_gaps=hook_shape_gaps)
+    result["host_hook_shape"]["runtime_payload_gaps_not_current"] = stale_gaps
     posttool_schema = "PASS" if any(item.get("native_response_contract") in {"CURRENT_V2", "LEGACY_V1"}
         for tool, item in tool_schemas.items() if tool in lifecycle._COLLABORATION_TOOL_NAMES) else "UNKNOWN"
     result["lifecycle_reconciliation"] = {

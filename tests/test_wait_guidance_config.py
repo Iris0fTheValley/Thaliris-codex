@@ -477,7 +477,7 @@ def test_no_version_string_decides_support(monkeypatch, reported, supported):
     monkeypatch.setattr(config_capability.subprocess, "run", lambda *args, **kwargs:
                         subprocess.CompletedProcess(args, 0, reported, ""))
     probed = []
-    monkeypatch.setattr(config_capability, "probe", lambda *args: probed.append(args) or "UNKNOWN")
+    monkeypatch.setattr(config_capability, "_probe", lambda *args: probed.append(args) or ("UNKNOWN", False))
     assert guidance.capability() == "UNKNOWN"
     assert probed == [("controlled-fake-codex", "developer_instructions")]
     assert not hasattr(guidance, "_SUPPORTED_VERSIONS")

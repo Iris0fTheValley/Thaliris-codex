@@ -929,9 +929,12 @@ def test_committed_reuse_rechecks_cli_identity_on_replay(tmp_path, monkeypatch, 
     complete_supply(monkeypatch)
     installed = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
     assert installed["ok"]
-    # Hook-shape evidence is reported at install time; UNKNOWN never blocks.
+    # Hook-shape evidence is reported at install time; UNKNOWN never blocks
+    # (conftest models no Host binary for this report).
     assert installed["host_hook_shape"]["status"] == "UNKNOWN"
     assert installed["host_hook_shape"]["runtime_refusal"] == "NEVER"
+    # c-F5: the report names the probed binary and leaves other Host binaries UNKNOWN.
+    assert installed["config_capability_probe"]["other_host_binaries"] == "UNKNOWN"
     before = (home / catalog.NAME).read_bytes()
     trust = adapter._install_host_hook_trust
     monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *_args: (_ for _ in ()).throw(ValueError("temporary trust failure")))
