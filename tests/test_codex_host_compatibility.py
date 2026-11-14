@@ -118,8 +118,8 @@ def test_source_verified_prerelease_still_needs_current_session_evidence(monkeyp
         codex_adapter._host_wait_mode_cached.cache_clear()
 
 
-@pytest.mark.parametrize("version", ["0.162.0", "0.162.1"])
-def test_stable_0162_hosts_keep_provenance_without_inventing_runtime_contract(
+@pytest.mark.parametrize("version", ["0.162.0", "0.162.1", "0.167.1"])
+def test_verified_stable_hosts_keep_provenance_without_inventing_runtime_contract(
     monkeypatch, version: str,
 ) -> None:
     _observe(monkeypatch, version)

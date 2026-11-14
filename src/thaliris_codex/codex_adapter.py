@@ -2208,7 +2208,17 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
         if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
             raise ValueError("dispatch selection requires an unfenced owning Controller")
         if ledger.get("next_evidence_dispatch") is not None or ledger["pending_authorized_spawn"] is not None:
-            raise ValueError("dispatch selection or reservation already pending; the owning Controller may replace an unconsumed selection with cancel_next_dispatch")
+            reserved = ledger["pending_authorized_spawn"] is not None
+            pending = ledger["pending_authorized_spawn"] if reserved else ledger["next_evidence_dispatch"]
+            raise core.ThalirisError(
+                "EVIDENCE_DISPATCH_PENDING", "dispatch selection or reservation already pending",
+                recovery=("observe the exact authorized spawn result; retain the reservation, or explicitly dispose its dependency with its handoff and current CAS values"
+                          if reserved else "consume the selected profile in a fresh spawn, or explicitly replace this unconsumed selection with cancel_next_dispatch"),
+                details={"kind": "authorized-reservation" if reserved else "unconsumed-selection",
+                         "selection": {key: pending.get(key) for key in ("handoff_id", "role", "expected_agent_type", "candidate", "requirement_refs")},
+                         "task_id": task_id, "base_revision": state["revision"],
+                         "expected_lifecycle_sha256": task_authority.digest(path),
+                         "reservation_cancelled": False})
         data = core._continuity(state)
         for field in ("requirements", "handoffs"):
             if field in payload:
@@ -2296,16 +2306,19 @@ def _check_namespaced_ids(handoff_id: str, body: dict) -> None:
 
 
 def task_observe(root: Path, role: str, handoff_id: str | None, agent_id_hash: str | None,
-                 input_file: str | None = None, observation_json: str | None = None) -> dict:
+                 input_file: str | None = None, observation_json: str | None = None,
+                 *, controller_session_id_hash: str | None = None) -> dict:
     """Persist one selected observation without rewriting caller-owned input."""
     from . import task_authority
     with task_authority._lock(root):
         task_authority.check(root)
-        return _task_observe_locked(root, role, handoff_id, agent_id_hash, input_file, observation_json)
+        return _task_observe_locked(root, role, handoff_id, agent_id_hash, input_file, observation_json,
+                                    controller_session_id_hash=controller_session_id_hash)
 
 
 def _task_observe_locked(root: Path, role: str, handoff_id: str | None, agent_id_hash: str | None,
-                          input_file: str | None, observation_json: str | None) -> dict:
+                          input_file: str | None, observation_json: str | None,
+                          *, controller_session_id_hash: str | None = None) -> dict:
     actor = semantic_role(role)
     if (input_file is None) == (observation_json is None):
         raise ValueError("task-observe requires exactly one of --input or --observation-json")
@@ -2322,6 +2335,27 @@ def _task_observe_locked(root: Path, role: str, handoff_id: str | None, agent_id
     if {"native_status", "native_status_conflict"} & set(body):
         raise ValueError("observation native execution status is assigned by the adapter")
     task = core._load_state(root, active=True)
+    if actor == "controller" and handoff_id is None:
+        anchor = task_authority.check(root)
+        owner = lifecycle.active_controller_owner(root, task["task_id"])
+        if (anchor is None or anchor["task_id"] != task["task_id"] or owner is None
+                or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner)
+                or agent_id_hash is not None):
+            raise ValueError("Controller local observation requires the unfenced owning Controller and current task authority")
+        if {"provenance", "handoff_id", "native_actor", "submitted_by", "producer", "task_id"} & body.keys():
+            raise ValueError("Controller local observation provenance is assigned by the adapter; omit handoff and native identity fields")
+        revision = body.pop("base_revision", None)
+        if type(revision) is not int:
+            raise core.ThalirisError("CONTROLLER_OBSERVATION_REVISION_REQUIRED", "Controller local observation requires base_revision",
+                                    recovery="read task-status, then include its current revision as base_revision in the local fact payload")
+        core.check_revision(task, revision)
+        body.update(provenance="controller-local", handoff_id=None)
+        appended = core._append_continuity_state(task, "controller", body, "observations")
+        lifecycle._write_evidence_reservation(root, task,
+            lifecycle._lifecycle_path(root, task["task_id"]), None)
+        return core.task_write_response(task, ["evidence_continuity"], appended=appended)
+    if "provenance" in body:
+        raise ValueError("native handoff observations cannot claim Controller local provenance")
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, task["task_id"]), task["task_id"])
     matches = [child for child in ledger["children"] if isinstance(child, dict)
                and child.get("handoff_id") == handoff_id and child.get("managed") is True
@@ -2409,8 +2443,13 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
     task_authority.check(core._repo_root(root))
     state = core.task_show(root)["state"]
     task_id = str(state["task_id"])
-    if not lifecycle.native_execution_closed(core._repo_root(root)):
-        raise ValueError("task-close requires resolved native execution risk: no pending, active, unknown or conflicting child identities/statuses; observe exact native terminal status with list_agents (V2) or wait_agent status map (V1). Historical handoff/Start/Stop completeness does not decide closure; the Controller decides product acceptance from the original objective, criteria and available evidence")
+    diagnostic = lifecycle.native_execution_diagnostic(core._repo_root(root))
+    if not diagnostic["closed"]:
+        raise core.ThalirisError(
+            "TASK_NATIVE_EXECUTION_RISK", "task-close requires resolved native execution risk",
+            recovery="inspect the listed exact blockers; observe supported native terminal evidence, or explicitly decide a dependency disposition using its selector and current CAS values; disposal leaves native execution UNKNOWN",
+            details={**diagnostic, "base_revision": state["revision"],
+                     "product_acceptance": "CONTROLLER_DECISION"})
     result = core.task_close(root, base_revision, expected_task_id=task_id)
     task_authority.checkpoint(core._repo_root(root))
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(core._repo_root(root), task_id), task_id)

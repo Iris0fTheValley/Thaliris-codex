@@ -1,8 +1,9 @@
 """Isolated native spawn acceptance for the installed candidate and Host Hooks.
 
 The test task, CODEX_HOME, runtime, authority store, user profile, and Responses
-endpoint all live below one disposable directory. The CLI is the observed
-installed Codex binary; model responses are synthetic and stay on loopback.
+endpoint all live below one disposable directory. The CLI is explicitly selected
+through THALIRIS_CODEX_EXECUTABLE or resolved from PATH; model responses are
+synthetic and stay on loopback.
 This does not exercise or certify the signed-in Desktop Host.
 """
 from __future__ import annotations
@@ -70,8 +71,13 @@ def _source_candidate(scratch: Path) -> dict:
     """Build and install the same source wheels used by runtime setup tests."""
     from tests.test_runtime_setup import source_wheel
 
-    core_wheel = source_wheel(scratch, "thaliris", CORE_PACKAGE_SOURCE)
-    adapter_wheel = source_wheel(scratch, "thaliris_codex", REPO_ROOT / "src" / "thaliris_codex", entry=True)
+    core_version = tomllib.loads((CORE_PACKAGE_SOURCE.parent.parent / "pyproject.toml").read_text(
+        encoding="utf-8"))["project"]["version"]
+    adapter_version = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(
+        encoding="utf-8"))["project"]["version"]
+    core_wheel = source_wheel(scratch, "thaliris", CORE_PACKAGE_SOURCE, version=core_version)
+    adapter_wheel = source_wheel(scratch, "thaliris_codex", REPO_ROOT / "src" / "thaliris_codex",
+        entry=True, version=adapter_version)
     candidate = runtime_setup.create(scratch / "candidate-runtime", core_wheel, adapter_wheel)
     candidate["executable_sha256"] = hashlib.sha256(Path(candidate["executable"]).read_bytes()).hexdigest()
     return candidate
@@ -266,9 +272,11 @@ def verify() -> dict:
     if not config_capability._system_config_is_absent():
         return {"status": "UNKNOWN", "reason": "system configuration isolation unavailable"}
     executable, version = native._find_codex()
-    with tempfile.TemporaryDirectory(prefix="thaliris-native-c1-") as directory:
+    # Keep the two full identity hashes in navigation paths below the Windows
+    # legacy path limit without changing their identity/authority semantics.
+    with tempfile.TemporaryDirectory(prefix="tn-") as directory:
         scratch = Path(directory).resolve()
-        home, project, user_profile_root = scratch / "codex-home", scratch / "workspace", scratch / "user-profile"
+        home, project, user_profile_root = scratch / "codex-home", scratch / "workspace", scratch / "u"
         project.mkdir()
         user_profile_root.mkdir()
         env = native._isolated_env(home, scratch)

@@ -22,6 +22,18 @@ and reports the current digest and byte count. This is not proof inferred from s
 persisted session state, transcript state, or authority. Never pass it to a new session
 or fresh child. Omit it when the END marker is missing or guidance changed; bootstrap
 returns the full current copy. Missing context can also retrieve an exact section.
+Normal bootstrap continues to deliver the full resident guidance. If opt-in chunked
+retrieval is used, acknowledge completeness only after contiguous slices from one render
+reconstruct the legacy complete payload, including its BEGIN and exact END marker; one
+slice alone is not proof of completeness.
+Use `<installed pinned runner> controller-instructions --resident --offset 0 --limit 6000`, then
+continue at `next_offset` with the same limit and
+`--expected-sha256 <controller_guidance_sha256>`. Offsets count Unicode code points
+in the exact framed delivery, including BEGIN/END. Concatenate `content` without
+extra separators; check contiguous offsets, identical canonical-body digest/byte count,
+and the reassembled `delivery_sha256`/`delivery_utf8_bytes`. A changed render refuses
+continuation. `complete_acknowledgement:false` applies to every slice, including the
+last; it does not replace seeing the complete consistent guidance and exact END marker.
 Repository docs are rendered from this resource. Assigned children follow their selected handoff and role; they
 may retrieve other rules on demand within their authority. Retrieval grants no authority.
 
@@ -264,6 +276,19 @@ covering Implementer and Focused Implementer; profiles select execution facts fo
 those same semantic roles. Stable direction and deterministic convergence use
 ordinary Implementer; coupled invariants requiring sustained reasoning use Focused
 Implementer. Choose one profile per Workstream, not a ladder or size threshold.
+Substantive frontend work uses a stronger minimum: select a fresh, isolated Focused
+Implementer with at least `gpt-6.1-sol` at `high`. This includes new UI or layout,
+component architecture, responsive behavior, interaction, animation, creative SVG
+work and nontrivial visual design, even when only a few files or little code change.
+Only genuinely trivial, fully specified text/color edits or equivalent mechanical
+edits, all of which require no design or behavior decisions, may use a light profile.
+Route by the described work and decisions, not keyword, file-count or code-length
+heuristics. Any higher model selection still requires the existing current-task Astra authorization;
+fresh isolation and selected execution constraints remain in force. If a frozen
+constraint prevents the stated minimum, report the conflict for a Controller/human
+decision instead of silently downgrading. Generated role profiles remain model-free.
+Capacity pressure may defer or resequence work; it never lowers this minimum, bypasses
+Astra opt-in or changes frozen constraints.
 Any Astra selection requires current-task user authorization before spawn. Static
 Astra medium/xhigh compatibility profiles retain their fixed bindings; do not use
 them to bypass that authorization. Ordinary profiles allow native model/effort
@@ -277,6 +302,18 @@ to Luna/xhigh, and forbids Astra. Children cannot alter the frozen constraint.
 Controller owns the full user requirements and global acceptance; children receive only
 selected local goals, acceptance, facts and source pointers. Carry opaque related requirement
 refs and handoff/workchain provenance without projecting global task history into children.
+Attribute facts by source: Controller-local observations, imported child history and
+independent review remain distinct; provenance does not change execution mode or permissions.
+Use only the exact Controller-local fact surface provided by the current runner; do not
+infer its flags or payload from the historical child-import flow. Its first successful
+authorized write atomically upgrades only the selected ledger from schema 7 to 8 under
+normal CAS/checkpoint. New Core reads both; an older Core that reads schema 7 refuses
+schema 8 as newer with `STATE_SCHEMA_INCOMPATIBLE`. This is one-way compatibility, not
+live-task migration or Host installation.
+At decision boundaries, reuse existing Active Work, Pending Results and selected refs for
+decisions, hard constraints, current evidence, UNKNOWNs and the precise next event. Recheck
+Git HEAD or environment only when a relevant change or decision-changing uncertainty could
+affect the choice; do not create a parallel persistent-memory workflow or time/call quota.
 When an already discovered fact changes a child's local conclusion, local acceptance or a
 critical UNKNOWN, the child records it with source refs and selected handoff/requirement provenance.
 This creates no additional search duty or global-importance judgment, model call or acceptance gate.
@@ -412,6 +449,21 @@ For selected historical child results, Controller uses `task-observe --role cont
 and marks Controller as submitter; importing history neither reactivates a child nor establishes
 current truth or native execution completion. Register an exact missing association first.
 
+For its own verification or control facts, the unfenced owning Controller instead uses
+`<installed pinned runner> --root <repo> --task-id <task> task-observe --role controller --input fact.json`
+with no handoff or native actor. Example `fact.json` after reading current task-status:
+```json
+{"id":"O-local","base_revision":12,"candidate":"O2","requirement_refs":["R1"],"source_refs":["S-local"],"sources":[{"id":"S-local","kind":"test","locator":"tests/result.txt","summary":"Controller-owned verification"}],"text":"The selected check passed; product acceptance remains a separate judgment."}
+```
+Replace the revision, candidate, registered requirement and source with exact current
+facts. The Hook supplies the Controller session association; a manually copied
+`--controller-session-id-hash` does not authenticate an actor or bypass known child,
+readonly or fence rules. Adapter output assigns `producer:controller`,
+`provenance:controller-local`, `handoff_id:null` and no native execution fields. This
+records facts in all execution modes without granting execution rights, delegated
+working-set ownership or independent-review status. First local write requires the
+schema-8-capable Core; old handoff observations keep their original provenance.
+
 
 ## Handoff and operational acceptance
 
@@ -447,6 +499,11 @@ still govern. Compression and handoff retain this precision-bearing representati
 For operational artifact or installation acceptance, select the authoritative
 artifact, source, revision and provenance before delegation, or explicitly assign
 that selection to a later Workstream before its operational acceptance.
+After interruption, verify a known artifact path, provenance and current bytes, then finish
+the remaining requested delivery instead of restarting all work. Honor the requested local
+artifact, skill and destination; local work does not imply hosting. If a `file://` preview is
+unsupported, use a supported preview or report visual acceptance as UNKNOWN. Follow network
+permissions.
 
 Project/package install-smoke closure here covers builds, installs, fixtures,
 isolated smoke, packed artifacts and project-local verification. Effective live
@@ -642,6 +699,29 @@ and does not trigger another wait or repeated recovery of the old task. Mechanic
 terminal status is not a result-delivery gate.
 
 First continue independent work that should take priority before waiting. After dispatch, finish genuinely independent work that can change the next decision; monitoring, rereading, repeated searching or patrolling the same delegated Workstream is not independent work. When none remains and a necessary direct child is unfinished, wait for a decision-changing native event instead of continuing that patrol. Only call wait_agent for an unfinished direct child whose result is necessary, with no other higher-priority work. This policy applies at every authorized delegation layer, including Implementer or Reviewer waiting for an Investigator Scanner; observe only your direct dependencies. First confirm the current Host's meaningful-event early return, user interruption, child notifications and actual tool maximum; unconfirmed capabilities remain UNKNOWN. With confirmed meaningful-event early return and user interruption and no interim decision, default to the supported 60-minute window (timeout_ms=3600000); completion can wake the parent early. Windows are not execution deadlines. If stage checks are necessary or early return is unreliable, recommend 60 seconds for very short tasks, 10–60 minutes for ordinary tasks, and about 30 minutes for longer-task stage checks. Actual tool limits, explicit applicable higher-level limits and exceptions take precedence; neither fixed 60 seconds nor fixed 60 minutes fits every task. Historical averages must not force early wakes. Wait for decision-changing native events across parallel direct dependencies, without per-child polling loops. Distinguish native completion, ordinary messages, timeout, exceptions and UNKNOWN: messages and timeouts do not prove completion; exceptions do not fabricate terminal evidence. A wake-only result needs one available exact native status check; use valid completion once without repeated confirmation. After timeout, reassess the necessary direct dependency and available independent work before any further wait; do not repeat useless waits indefinitely. Do not substitute sleep, high-frequency queries, heartbeat services or status-only model wakeups. Do not poll a finished child or create repeated status-only reasoning turns solely to observe unchanged state when native waiting is available. Tests, builds, CI and external processes belong to their direct executor: use the corresponding tool's actual waiting capability, not wait_agent parameters. For your own expected-long, finite, noninteractive command or CI observation, invoke `<installed pinned runner> execution-wait --tool-source`. This command supplies the packaged tool helper and exact usage; keep observation in one functions.exec call. Short, interactive, unsupported or unowned operations use their native tool; missing capability must not block authorized work. A running outer cell is a Host boundary: continue only its exact cell with functions.wait, requesting a supported long yield when no decision is pending. Do not relaunch its command or equate progress, timeout or tool termination with completion. Runtime interruption and automatic recovery remain UNKNOWN without direct evidence.
+
+After user/model steering or turn interruption, an earlier dependency view may be stale.
+Use one exact current status snapshot when needed before waiting again. Wait only when the
+necessary direct dependency is still unfinished; do not wait on one already interrupted,
+completed or otherwise ended. The managed PreToolUse guard returns
+`THALIRIS_WAIT_NO_UNFINISHED_DEPENDENCY` for an empty or ended direct dependency set,
+and `THALIRIS_WAIT_DEPENDENCY_UNKNOWN` for unresolved identity/status evidence.
+Conflict checks cover the exact caller, its ancestor association, and the direct
+dependencies selected by this wait. A conflict proven to belong to an unrelated
+branch does not veto an already authorized healthy wait. Unattributable identity
+collisions remain UNKNOWN. Bounded diagnostics identify the affected scope as
+`caller`, `ancestor`, `direct-dependency`, `unattributed`, `target-selection`, or
+`lifecycle`; the global conflict guards for new authorization and task close remain.
+An unconsumed dispatch selection is not an execution; a reservation without an observed
+native identity remains UNKNOWN. A live exact child or identified pending dispatch can
+be waited on. If one supported status check cannot resolve the blocker, return it for
+an explicit dependency decision; do not repeat an unobservable long wait. This guard
+does not establish native wake delivery or termination of a child's external processes.
+A dependency that is no longer needed does not justify waiting. After a meaningful wake, use one exact status observation when
+needed and route or continue without repeated confirmation. Capture exact terminal
+status/result once before a capacity-limited native view can evict it. `FINAL`, prose or
+`not_found` alone does not prove termination. A missed wake's cause stays UNKNOWN without Host evidence;
+prompt wording alone cannot establish or fix native wake behavior.
 
 Give each necessary dependency one observation owner. Controller waits for the
 necessary child result without rechecking the executor's tests, processes or CI.

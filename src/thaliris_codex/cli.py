@@ -169,6 +169,9 @@ def _parser() -> argparse.ArgumentParser:
     controller_selection = controller_help.add_mutually_exclusive_group()
     controller_selection.add_argument("--section", choices=controller_instructions.SECTIONS)
     controller_selection.add_argument("--resident", action="store_true", help="retrieve complete normal Controller guidance")
+    controller_help.add_argument("--offset", type=int, help="opt-in resident recovery offset in Unicode code points")
+    controller_help.add_argument("--limit", type=int, help="resident recovery size in Unicode code points (1-16384)")
+    controller_help.add_argument("--expected-sha256", help="pin resident recovery to the canonical body digest")
     q = sub.add_parser("init")
     q.add_argument(
         "--accept-managed-instruction-sha256",
@@ -280,11 +283,12 @@ def _parser() -> argparse.ArgumentParser:
         if name == "document-maintain":
             q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
             q.add_argument("--handoff-id")
-    q = sub.add_parser("task-observe", help="append own selected local observation without task revision CAS")
+    q = sub.add_parser("task-observe", help="append selected handoff evidence, or Controller local facts with payload base_revision CAS")
     q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
     q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
     q.add_argument("--handoff-id")
     q.add_argument("--agent-id-hash")
+    q.add_argument("--controller-session-id-hash", help=argparse.SUPPRESS)
     observation = q.add_mutually_exclusive_group(required=True)
     observation.add_argument("--input")
     observation.add_argument("--observation-json", help="one inline JSON observation; useful to readonly native roles")
@@ -423,6 +427,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "controller-instructions":
             from . import controller_instructions
             runner = controller_instructions.runner_command(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME)
+            chunked = args.offset is not None or args.limit is not None or args.expected_sha256 is not None
+            if chunked:
+                if not args.resident or args.offset is None or args.limit is None:
+                    raise ValueError("resident recovery requires --resident --offset N --limit N")
+                _write_utf8_line(json.dumps(controller_instructions.resident_chunk(
+                    runner, offset=args.offset, limit=args.limit, expected_sha256=args.expected_sha256), ensure_ascii=False))
+                return 0
             if args.resident:
                 delivery = controller_instructions.guidance_delivery_fields(runner)
                 _write_utf8_line(json.dumps({
@@ -565,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "task-judge":
             with _inline_input(args.json, args.input) as source:
                 out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, source, compact_evidence=True)
-        elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
+        elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json, controller_session_id_hash=args.controller_session_id_hash)
         elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
         elif args.command == "identity-status": out = identity.identity_status(root, session_key=_identity_session_key(root, args))
         elif args.command == "identity-note":

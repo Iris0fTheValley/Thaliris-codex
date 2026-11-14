@@ -51,6 +51,24 @@ def test_parent_spawn_arguments_do_not_establish_child_request_capture(runtime_m
         mock.close()
 
 
+@pytest.mark.parametrize("wrapper,form", [
+    ("", "base_instructions"),
+    ("model_switch", "model_switch"),
+    ("model_instructions", "model_instructions"),
+])
+def test_catalog_probe_accepts_real_developer_template_delivery(runtime_module, wrapper, form):
+    template = "\n".join(f"Distinct selected catalog instruction {index}: preserve its exact bytes." for index in range(4))
+    delivered = f"<{wrapper}>\n{template}\n</{wrapper}>" if wrapper else template
+    assert runtime_module._catalog_instruction_text(["Unrelated role instructions", delivered], template) == (delivered, 4, form)
+
+
+def test_catalog_probe_refuses_missing_or_incomplete_developer_template(runtime_module):
+    template = "\n".join(f"Distinct selected catalog instruction {index}: preserve its exact bytes." for index in range(4))
+    for developers in ([], ["Unrelated role instructions"], [template.splitlines()[0]]):
+        with pytest.raises(runtime_module.VerificationError, match="did not carry"):
+            runtime_module._catalog_instruction_text(developers, template)
+
+
 def test_installed_codex_emits_patched_catalog_and_role_instructions_to_mock_responses(runtime_module):
     if os.environ.get("THALIRIS_RUN_CODEX_RUNTIME_TESTS") != "1":
         pytest.skip("installed runtime acceptance is opt-in; set THALIRIS_RUN_CODEX_RUNTIME_TESTS=1; unexecuted runtime remains UNKNOWN")

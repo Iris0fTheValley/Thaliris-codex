@@ -15,10 +15,10 @@ import pytest
 from thaliris_codex import runtime_setup, runtime_identity, host_maintenance, host_preflight, codex_adapter
 
 
-def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False):
+def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False, version="0.5.2"):
     """Pack current test source as a disposable fixture, not a release artifact."""
-    path = tmp_path / f"{name}-0.5.2-py3-none-any.whl"
-    info = f"{name}-0.5.2.dist-info"
+    path = tmp_path / f"{name}-{version}-py3-none-any.whl"
+    info = f"{name}-{version}.dist-info"
     with zipfile.ZipFile(path, "w") as wheel:
         for source in sorted(package.rglob("*")):
             if source.suffix not in {".py", ".md"} or not source.is_file():
@@ -30,7 +30,7 @@ def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False):
                     "    return 0 if sys.argv[1:] == ['version'] else 3\n")
             else:
                 wheel.write(source, relative)
-        wheel.writestr(info + "/METADATA", f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\nVersion: 0.5.2\n")
+        wheel.writestr(info + "/METADATA", f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\nVersion: {version}\n")
         wheel.writestr(info + "/WHEEL", "Wheel-Version: 1.0\nGenerator: source-fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
         wheel.writestr(info + "/RECORD", "")
         if entry:

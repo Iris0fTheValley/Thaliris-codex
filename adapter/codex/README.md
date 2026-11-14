@@ -151,6 +151,36 @@ global relevance. Unmarked handoffs remain compatible, but observation persisten
 missing provenance; return the fact and sources for exact association instead of storing
 unlinked evidence. See the [Native ownership and evidence acceptance plan](../../docs/delegated-ownership-native-acceptance.md).
 
+### Common command errors
+
+- **`TASK_OBJECT_NOT_FOUND` from `task-get`.** `task-get` takes the exact ID of one
+  current-task object. The selected Task ID chooses the ledger; it is not an object ID.
+  When the requested ID is the selected Task ID, Core keeps the stable error code and
+  `details.id`/`details.matches` and adds a recovery hint. Use `task-status` to review the
+  selected task, `task-show` for explicit diagnostics, then retry `task-get` with the
+  current object's exact ID. A different missing ID keeps the bounded not-found response;
+  no broad object search is performed.
+- **`dispatch selection or reservation already pending`.** Read the selected task's
+  existing state before retrying registration. The owning Controller may withdraw an
+  unconsumed selection with
+  `task-evidence-register --role controller --base-revision N --json
+  '{"cancel_next_dispatch":{"reason":"..."}}'`. That operation cancels only the
+  unconsumed `next_dispatch` selection. Resolve an existing pending spawn reservation
+  through its recorded native lifecycle; do not treat it as an unconsumed selection.
+- **Missing handoff association on `task-observe`.** Supply the exact selected handoff
+  with `task-observe --role ROLE --handoff-id ID --observation-json '<JSON>'`. If that
+  handoff has no evidence association, return the observation and sources to Controller;
+  Controller registers the exact native-bound handoff association with
+  `task-evidence-register`. Do not substitute the Task ID or infer a handoff ID.
+- **Invalid `task-close --role` or guidance section `task-close`.** The supported command
+  is `task-close --base-revision N`; the Hook supplies the selected role and task binding.
+  For Controller procedure retrieval, use the exact section name
+  `controller-instructions --section completion` (or `--section task-recovery` for that
+  procedure). The available section names are listed by `controller-instructions`.
+
+For the historical cases and their evidence limits, see
+[`codex-history-errors-20261111.md`](../../docs/codex-history-errors-20261111.md).
+
 When an already discovered fact changes local conclusion, local acceptance or critical UNKNOWN,
 record it with source refs and selected provenance. This adds no search duty, global-importance
 judgment, model call or acceptance gate. `task-observe --role ROLE --observation-json '<JSON>'`

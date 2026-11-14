@@ -1298,7 +1298,7 @@ def test_wait_capacity_does_not_promote_caller_duration(tmp_path: Path, monkeypa
     original_input = {"timeout_ms": timeout, "reason": "wait for child", "future": {"keep": True}}
     wait = hook_payload(tool_name="wait_agent", tool_input=original_input)
 
-    assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
+    assert "THALIRIS_WAIT_NO_UNFINISHED_DEPENDENCY" in codex_adapter.audit_hook(root, "PreToolUse", wait)
     assert wait["tool_input"] == original_input
 
     spawn = hook_payload(
@@ -1306,6 +1306,10 @@ def test_wait_capacity_does_not_promote_caller_duration(tmp_path: Path, monkeypa
         tool_input={"fork_turns": "none", "agent_type": "worker", "message": "explicit task"},
     )
     assert handle_hook(root, "PreToolUse", spawn) == ""
+    assert "THALIRIS_WAIT_DEPENDENCY_UNKNOWN" in codex_adapter.audit_hook(root, "PreToolUse", wait)
+    assert wait["tool_input"] == original_input
+    assert handle_hook(root, "PostToolUse", {**spawn, "tool_response": {
+        "agent_id": "pending-wait-child", "nickname": None}}) == ""
     assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
     assert wait["tool_input"] == original_input
     assert handle_hook(root, "PostToolUse", hook_payload(
@@ -1333,7 +1337,7 @@ def test_completed_child_does_not_trigger_another_managed_wait(tmp_path: Path, m
         ]}),
     )) == ""
     wait = hook_payload(tool_name="wait_agent", tool_input={"timeout_ms": 30_000})
-    assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
+    assert "THALIRIS_WAIT_NO_UNFINISHED_DEPENDENCY" in codex_adapter.audit_hook(root, "PreToolUse", wait)
 
 
 def test_unavailable_effective_wait_maximum_preserves_legal_timeout(tmp_path: Path, monkeypatch) -> None:
@@ -1346,8 +1350,11 @@ def test_unavailable_effective_wait_maximum_preserves_legal_timeout(tmp_path: Pa
     })
     spawn = hook_payload(tool_name="spawn_agent", tool_input={"fork_turns": "none", "agent_type": "worker", "message": "explicit task"})
     assert handle_hook(root, "PreToolUse", spawn) == ""
+    assert handle_hook(root, "PostToolUse", {**spawn, "tool_response": {
+        "agent_id": "pending-wait-child", "nickname": None}}) == ""
     wait = hook_payload(tool_name="wait_agent", tool_input={"timeout_ms": 30_000})
     assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
+    assert wait["tool_input"] == {"timeout_ms": 30_000}
 
 
 @pytest.mark.parametrize("host_status", ["UNKNOWN", "UNSUPPORTED"])
@@ -1362,8 +1369,11 @@ def test_unknown_or_unsupported_host_does_not_normalize_pending_wait(tmp_path: P
         "fork_turns": "none", "agent_type": "worker", "message": "explicit task",
     })
     assert handle_hook(root, "PreToolUse", spawn) == ""
+    assert handle_hook(root, "PostToolUse", {**spawn, "tool_response": {
+        "agent_id": "pending-wait-child", "nickname": None}}) == ""
     wait = hook_payload(tool_name="wait_agent", tool_input={"timeout_ms": 30_000})
     assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
+    assert wait["tool_input"] == {"timeout_ms": 30_000}
 
 
 def test_no_task_does_not_normalize_wait_even_with_known_host(tmp_path: Path, monkeypatch) -> None:
@@ -2839,8 +2849,10 @@ def test_desktop_wait_wake_needs_name_bound_list_status_before_close(tmp_path: P
         tool_response=json.dumps({"message": "Wait completed.", "timed_out": False}),
     )) == ""
     assert lifecycle(root)["children"][-1]["native_terminal_status"] is None
-    with pytest.raises(ValueError, match="exact native terminal status"):
+    with pytest.raises(core.ThalirisError) as caught:
         codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])
+    assert caught.value.code == "TASK_NATIVE_EXECUTION_RISK"
+    assert any(row["kind"] == "child-native-execution-unresolved" for row in caught.value.details["blockers"])
 
     # A real Desktop list response contains a root entry and a named child
     # whose completed variant carries the child's final text.
