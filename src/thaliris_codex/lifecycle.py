@@ -1597,6 +1597,9 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
                     binding = roles.get_codex_binding(known[0]["role"])
                     if mutating and binding is not None and not binding.repo_write_allowed:
                         return _permission_deny("THALIRIS_READONLY_ACTOR: the known handoff role remains readonly despite missing fields or damaged authority")
+                    if mutating and known[0].get("parallel_readonly") is True:
+                        return _permission_deny("THALIRIS_READONLY_ACTOR: this parallel dispatch declared no write workstream and was"
+                                                " admitted read-only; repository writes need a declared write workstream")
                     expected = known[0]
                     if mutating and _native_execution_terminal(expected):
                         return _permission_deny("THALIRIS_TERMINAL_ROLE_SESSION: native terminal evidence closes this handoff's execution; later work needs its own authorization")
@@ -2486,7 +2489,7 @@ _RESERVATION_FIELDS = frozenset({
     "role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id",
     "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role",
     "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"})
-_RESERVATION_OPTIONAL_FIELDS = frozenset({"spawn_turn_id_hash", "workstream_id"})
+_RESERVATION_OPTIONAL_FIELDS = frozenset({"spawn_turn_id_hash", "workstream_id", "parallel_readonly"})
 _RESERVATION_IDENTITY_FIELDS = frozenset({"native_agent_id_hash", "native_identity_source"})
 
 
@@ -2515,6 +2518,7 @@ def _valid_pending_reservation(pending: object) -> bool:
             and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
         or ("workstream_id" in pending and (not isinstance(pending["workstream_id"], str)
             or not pending["workstream_id"].strip() or len(pending["workstream_id"]) > 256))
+        or ("parallel_readonly" in pending and pending["parallel_readonly"] is not True)
         or not _valid_parent_metadata(pending)
     )
 
@@ -3034,6 +3038,34 @@ def _parallel_dispatch_policy(root: Path, session_hash: str | None = None) -> di
         return None
 
 
+def _parallel_contract_invalid(root: Path, session_hash: str | None) -> bool:
+    """Deny-only: the owning Controller's contract names ``parallel_dispatch`` but Core refuses it.
+
+    A contract stored before the current Core validator (for example one with
+    cross-domain overlapping write scopes, admitted before ``ca46611``) must
+    not silently fall back to the legacy rules, under which workstream-less
+    writers could run side by side. Unreadable authority is not evidence here;
+    the ordinary authorization checks refuse it on their own.
+    """
+    if session_hash is None:
+        return False
+    try:
+        authority = task_authority.read(root)
+        contract = authority.get("contract") if isinstance(authority, dict) else None
+        if not isinstance(contract, dict) or "parallel_dispatch" not in contract:
+            return False
+        if active_controller_owner(root, authority["task_id"]) != session_hash:
+            return False
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+    from thaliris import authority as core_authority
+    try:
+        core_authority.validate_contract(contract)
+    except (core.ThalirisError, ValueError, TypeError, KeyError):
+        return True
+    return False
+
+
 def _pending_reservations(state: dict[str, Any]) -> list[dict[str, Any]]:
     """Read legacy and parallel pending reservation fields as one collection."""
     values: list[dict[str, Any]] = []
@@ -3062,29 +3094,51 @@ def _remove_pending_reservation(state: dict[str, Any], handoff_id: str) -> dict[
     return found
 
 
-# Named non-writing roles plus any registered role whose binding forbids repo
-# writes: under a parallel policy they never need or contend for a workstream.
-_PARALLEL_NON_WRITING_ROLES = frozenset({"investigator", "reasoning-specialist", "reviewer"})
+# Under a parallel policy write classification follows the handoff, not the
+# role name: a repo-writing role that declares a write workstream is writing;
+# without one it is admitted only as an enforced read-only dispatch
+# (``parallel_readonly``), so read fan-out never needs or contends for a
+# workstream. These roles gather facts or reason by function, so a missing
+# workstream admits them read-only; every other repo-writing role is an
+# executor whose job is writing and still needs a declared write workstream.
+_PARALLEL_READ_TYPE_ROLES = frozenset({"investigator", "reasoning-specialist"})
 
 
-def _parallel_writing_role(role: object) -> bool:
-    return isinstance(role, str) and role not in _PARALLEL_NON_WRITING_ROLES and roles.repo_write_allowed(role)
+def _parallel_executor_role(role: object) -> bool:
+    """Implementer, focused-implementer, curator or any other registered writing role."""
+    return isinstance(role, str) and role not in _PARALLEL_READ_TYPE_ROLES and roles.repo_write_allowed(role)
+
+
+def _parallel_record_writes(record: dict[str, Any]) -> bool:
+    """A reservation or child counts as a live writer unless it was admitted read-only.
+
+    Records written before ``parallel_readonly`` existed carry no flag; a
+    repo-writing role among them is counted as a writer (fail closed).
+    """
+    role = record.get("role")
+    return isinstance(role, str) and roles.repo_write_allowed(role) and record.get("parallel_readonly") is not True
 
 
 def _live_parallel_writes(state: dict[str, Any]) -> list[object]:
     """Workstream ids of live top-level writing dispatches: pending, or bound and unfinished."""
     live: list[object] = [item.get("workstream_id") for item in _pending_reservations(state)
-                          if item.get("depth") == 1 and _parallel_writing_role(item.get("role"))]
+                          if item.get("depth") == 1 and _parallel_record_writes(item)]
     live.extend(child.get("workstream_id") for child in state.get("children", [])
                 if isinstance(child, dict) and child.get("depth") == 1 and child.get("managed") is True
-                and _parallel_writing_role(child.get("role"))
+                and _parallel_record_writes(child)
                 and child.get("management_disposition") != _DISPOSED
                 and (not _native_execution_terminal(child) or child.get("native_status_conflict")))
     return live
 
 
 def _workstream_scope(stream: dict[str, Any]) -> list[str] | None:
-    """Normalized declared write surface, or None when it is absent or unusable."""
+    """Core-canonical declared write surface, or None when it is absent or unusable.
+
+    Core's ``canonical_scope`` is the one normalisation (NFC, casefold,
+    backslash to ``/``, collapsed and stripped separators); a spelling Core
+    rejects is unusable, which the overlap check treats as undeclared (fail closed).
+    """
+    from thaliris import authority as core_authority
     scope = stream.get("scope")
     items = [scope] if isinstance(scope, str) else scope if isinstance(scope, list) else None
     if not items:
@@ -3093,10 +3147,10 @@ def _workstream_scope(stream: dict[str, Any]) -> list[str] | None:
     for item in items:
         if not isinstance(item, str):
             return None
-        path = item.strip().replace("\\", "/").strip("/")
-        if not path or any(part in {"", ".", ".."} for part in path.split("/")):
+        try:
+            paths.append(core_authority.canonical_scope(item))
+        except ValueError:
             return None
-        paths.append(path)
     return paths
 
 
@@ -3121,7 +3175,8 @@ def _parallel_domain_overlap(declared: dict[object, dict[str, Any]], stream: dic
             return ("has no declared scope to compare with live write workstream " + label
                     if mine is None else "cannot be compared with live write workstream " + label
                     + ", whose scope is undeclared")
-        if any(a == b or a.startswith(b + "/") or b.startswith(a + "/") for a in mine for b in theirs):
+        from thaliris import authority as core_authority
+        if any(core_authority.scopes_overlap(a, b) for a in mine for b in theirs):
             return "overlaps the declared scope of live write workstream " + label
     return None
 
@@ -3179,6 +3234,7 @@ def _reserve_managed_spawn(
     # a nested spawn keeps the one-Scanner-per-parent and one-unbound-dispatch
     # rules and never reserves or consumes a workstream.
     parallel_policy = None if nested else _parallel_dispatch_policy(root, session_id_hash)
+    parallel_invalid = parallel_policy is None and not nested and _parallel_contract_invalid(root, session_id_hash)
     try:
         with task_authority._lock(root):
             # Re-read while holding the same lock used by task mutations.
@@ -3211,20 +3267,35 @@ def _reserve_managed_spawn(
             # Controller-selected parallel contract permits distinct
             # workstreams while keeping the parent/identity checks intact.
             workstream_id = _dispatch_workstream_id(payload)
-            if parallel_policy is not None:
+            parallel_readonly = False
+            if parallel_invalid:
+                # The stored contract names parallel_dispatch but Core refuses
+                # it: no writer may fall back to the legacy rules. Read-type
+                # dispatch proceeds, enforced read-only.
+                if _parallel_executor_role(role):
+                    return _permission_deny(
+                        "THALIRIS_PARALLEL_CONTRACT_INVALID: the authority contract declares parallel_dispatch but it"
+                        " fails the current Core validation (for example overlapping write scopes admitted by an older"
+                        " Core), so no writing dispatch is authorized under it. Re-admit the task with a valid"
+                        " parallel_dispatch contract (or none); read-type roles may still be dispatched read-only.")
+                parallel_readonly = roles.repo_write_allowed(role)
+            elif parallel_policy is not None:
                 declared = {item.get("id"): item for item in parallel_policy.get("workstreams", []) if isinstance(item, dict)}
-                writing = _parallel_writing_role(role)
-                if writing and not isinstance(workstream_id, str):
+                executor = _parallel_executor_role(role)
+                if executor and not isinstance(workstream_id, str):
                     return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_REQUIRED: each parallel handoff of a writing role must"
                                             " name exactly one declared write workstream (thaliris-workstream: <id>).")
                 stream = declared.get(workstream_id) if isinstance(workstream_id, str) else None
                 if isinstance(workstream_id, str) and stream is None:
                     return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_UNKNOWN: handoff workstream is not declared by the owning Controller.")
-                if writing and stream.get("mode") != "write":
+                if executor and stream.get("mode") != "write":
                     return _permission_deny("THALIRIS_PARALLEL_WRITE_WORKSTREAM_REQUIRED: a writing role needs a declared"
                                             " write workstream; name one with mode \"write\" and its scope.")
-                # Non-writing roles (investigation, reasoning, review) are never
-                # refused for count, duplication or overlap.
+                # A repo-writing role is writing only with a declared write
+                # workstream; otherwise it is admitted read-only and, like
+                # non-writing roles, never refused for count, duplication or overlap.
+                writing = roles.repo_write_allowed(role) and stream is not None and stream.get("mode") == "write"
+                parallel_readonly = roles.repo_write_allowed(role) and not writing
                 if writing:
                     live = _live_parallel_writes(state)
                     if workstream_id in live:
@@ -3301,6 +3372,9 @@ def _reserve_managed_spawn(
             }
             if parallel_policy is not None and isinstance(workstream_id, str):
                 new_pending["workstream_id"] = workstream_id
+            if parallel_readonly:
+                # Enforced by the readonly guards exactly like a non-writing role.
+                new_pending["parallel_readonly"] = True
             # Without a parallel contract ``prior_pending`` is empty (refused
             # above); with one, the first reservation stays in the legacy slot.
             _set_pending_reservations(state, prior_pending + [new_pending])
@@ -3694,7 +3768,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "native_terminal_status": None,
                 "task_name_hash": pending.get("task_name_hash") if bound else None,
                 "native_identity_source": pending.get("native_identity_source") if bound else None,
-                **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id")},
+                **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id", "parallel_readonly")},
             }
             if constrained_model_status is not None:
                 # SubagentStart is a Host observation. A failed check leaves
@@ -3712,7 +3786,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "producer": pending["producer"], "payload_hash": pending["payload_hash"],
                 "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
                 "native_identity_source": pending.get("native_identity_source"),
-                **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id")}})
+                **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id", "parallel_readonly")}})
             _remove_pending_reservation(state, pending.get("handoff_id"))
         elif (prior.get("managed") is True and prior.get("handoff_bound") is True
                 and prior.get("management_disposition") != "ABANDONED_DEPENDENCY"
@@ -4132,7 +4206,7 @@ def _corroborate_dispatch_identity(root: Path, task_id: str, state: dict[str, An
             "producer": pending["producer"], "payload_hash": pending["payload_hash"],
             "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
             "native_identity_source": source,
-            **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id")}})
+            **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id", "parallel_readonly")}})
         _remove_pending_reservation(state, pending.get("handoff_id"))
 
 
@@ -5729,6 +5803,21 @@ def _recovery_command_admitted(root: Path, payload: dict[str, Any], diagnostic: 
     return diagnostic.get("abandon_active_confirmation_required") is not True or abandon_active
 
 
+def _parallel_readonly_actor(root: Path, payload: dict[str, Any]) -> bool:
+    """Deny-only: this native actor was admitted as a read-only parallel dispatch."""
+    agent_hash = _identity_hash(payload.get("agent_id"))
+    task_id = _active_task_id(root)
+    if agent_hash is None or task_id is None:
+        return False
+    try:
+        ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id, verify_authority=False)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    return any(isinstance(child, dict) and child.get("agent_id_hash") == agent_hash
+               and child.get("managed") is True and child.get("parallel_readonly") is True
+               for child in ledger["children"])
+
+
 def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     """Allow reads with telemetry; block only mechanical protocol mutations."""
     _best_effort_record(_record_child_runtime_event, root, payload, "PreToolUse")
@@ -5869,6 +5958,17 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             blocked=False,
             notify_controller=role in roles.notice_roles(),
         )
+    if _obvious_write_attempt(payload) and _parallel_readonly_actor(root, payload):
+        _best_effort_record(
+            _record_protocol_deviation,
+            root,
+            payload,
+            operation="parallel-readonly-write-attempt",
+            target=normalized,
+            blocked=True,
+        )
+        return _permission_deny("THALIRIS_READONLY_ACTOR: this parallel dispatch declared no write workstream and was"
+                                " admitted read-only; repository writes need a declared write workstream")
     if binding is not None and not binding.repo_write_allowed and _obvious_write_attempt(payload):
         _best_effort_record(
             _record_protocol_deviation,

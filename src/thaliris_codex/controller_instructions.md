@@ -587,16 +587,27 @@ file CAS catches lost updates, not semantic overlap. Each task permits one unbou
 native dispatch until precise identity association; bound siblings may remain live
 together. Parallel dispatch is user-directed: when the user's `parallel_dispatch`
 contract asks for it, the owning Controller's own top-level dispatches run at the
-scale the user chose, with several reservations pending at once. Non-writing roles
-(Investigator, Reasoning Specialist, Reviewer and any non-writing registered role)
-need no workstream and are never refused for count or overlap. A writing role's
-handoff names one declared write workstream (a `thaliris-workstream: <id>` line).
-The adapter imposes no count of its own; a missing `budget` is uncapped, and a
-stated one counts live top-level writing dispatches. Its one mechanical boundary is
-domain disjointness: a write workstream whose declared `scope` overlaps a live write
-workstream (whatever its domain label), or a write workstream without a usable scope
-beside another live one, is refused with `THALIRIS_PARALLEL_DOMAIN_OVERLAP`. Read
-work never conflicts. You partition the work into non-overlapping domains
+scale the user chose, with several reservations pending at once. A dispatch writes
+only when its handoff names one declared write workstream (a `thaliris-workstream:
+<id>` line). Read-type roles (Investigator, Reasoning Specialist, Reviewer and any
+non-writing registered role) need no workstream; without a write workstream they are
+admitted enforced read-only, whatever their role's usual write permission, and are
+never refused for count or overlap. An executor (Implementer, Focused Implementer,
+Curator or another registered writing role) without a write workstream is refused
+with `THALIRIS_PARALLEL_WORKSTREAM_REQUIRED`. The adapter imposes no count of its own;
+a missing `budget` is uncapped, and a stated one counts live top-level writing
+dispatches. Its one mechanical boundary is domain disjointness: a write workstream
+whose declared `scope` overlaps a live write workstream (whatever its domain label;
+compared with Core's canonical case-, Unicode- and separator-insensitive spelling),
+or a write workstream without a usable scope beside another live one, is refused
+with `THALIRIS_PARALLEL_DOMAIN_OVERLAP`. Read work never conflicts. A stored
+`parallel_dispatch` contract that the current Core no longer validates (for example
+overlapping write scopes admitted by an older Core) authorizes no writing dispatch:
+writers are refused with `THALIRIS_PARALLEL_CONTRACT_INVALID` until the task is
+re-admitted with a valid contract, while read-type roles stay available read-only.
+Generic native agents (for example `worker`, or a plain alias such as
+`terra-implementer`) are outside managed workstream and overlap enforcement; use
+Thaliris role profiles for any parallel write the contract must enforce. You partition the work into non-overlapping domains
 (research areas, partitioned material, independent modules or any other disjoint
 split) and declare disjoint write scopes. A workstream may be dispatched again once
 its previous dispatch is terminal (completed, failed, interrupted, shut down or

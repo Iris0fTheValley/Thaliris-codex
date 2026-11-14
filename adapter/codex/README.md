@@ -72,22 +72,35 @@ independent changes. There is at most one pending unbound dispatch reservation p
 to avoid ambiguous association, but multiple successfully bound children may be running
 concurrently. Parallel dispatch is user-directed: a `parallel_dispatch` authority contract
 lets the owning Controller's own top-level spawns hold several reservations at once.
-Non-writing roles (Investigator, Reasoning Specialist, Reviewer and any non-writing
-registered role) need no workstream and are never refused for count or overlap; a writing
-role names one declared write workstream in the handoff (`thaliris-workstream: <id>`). The
-adapter adds no count of its own: a missing `budget` is uncapped, and a stated one counts
-live top-level writing dispatches. Domain disjointness is the one mechanical boundary: a
-write workstream whose declared `scope` overlaps a live write workstream (whatever its
-domain label), or that has no usable scope while another write workstream is live, is
-refused with `THALIRIS_PARALLEL_DOMAIN_OVERLAP`; read work never conflicts. The Controller partitions the work into non-overlapping domains. A
+Write classification follows the handoff: a dispatch writes only when it names one declared
+write workstream (`thaliris-workstream: <id>`). Read-type roles (Investigator, Reasoning
+Specialist, Reviewer and any non-writing registered role) need no workstream; without a write
+workstream the reservation and the bound child carry `parallel_readonly`, and the readonly
+guard denies their repository writes, `apply_patch` and shell writes exactly as for a
+non-writing role. They are never refused for count or overlap. An executor (Implementer,
+Focused Implementer, Curator or another registered writing role) without a write workstream
+is refused with `THALIRIS_PARALLEL_WORKSTREAM_REQUIRED`. The adapter adds no count of its
+own: a missing `budget` is uncapped, and a stated one counts live top-level writing
+dispatches. Domain disjointness is the one mechanical boundary: a write workstream whose
+declared `scope` overlaps a live write workstream (whatever its domain label), or that has no
+usable scope while another write workstream is live, is refused with
+`THALIRIS_PARALLEL_DOMAIN_OVERLAP`; scopes are compared with Core's `canonical_scope` /
+`scopes_overlap` (NFC, casefolded, `\` to `/`, separators collapsed and stripped), so
+`src/Mod` and `src/mod` overlap. Read work never conflicts. A stored contract that names
+`parallel_dispatch` but fails the current Core validation (for example cross-domain
+overlapping write scopes admitted before Core `ca46611`) refuses the owning Controller's
+top-level writing spawns with `THALIRIS_PARALLEL_CONTRACT_INVALID` (re-admit the task with
+a valid contract); read-type spawns still proceed, enforced read-only. Generic native agents
+(`worker`, or plain aliases such as `terra-implementer`) are outside managed domain
+enforcement: the Controller uses Thaliris role profiles for any parallel write it needs
+enforced. The Controller partitions the work into non-overlapping domains. A
 workstream may be reserved again once its previous dispatch is terminal or disposed. Every
 reader (close, mode switch, diagnostics, disposal, recovery, the wait guard and the degraded
 preflight) treats each reservation as pending, and SubagentStart binds only the reservation
 whose native identity matches exactly. `worktree` is not enforced. Nested spawns never use
 the contract or a workstream; the one-Scanner-per-parent and one-unbound-dispatch rules apply
-to them unchanged. Core 0.6.0 contract validation still requires a `budget` (1 to 256, at
-least the number of workstreams) and rejects overlapping scopes within one domain, read
-workstreams included. A reservation belongs only to its Task ID. Native capacity does not expand
+to them unchanged. Core contract validation makes `budget` and `workstreams` optional and
+refuses only overlapping write scopes, across all domains, compared canonically. A reservation belongs only to its Task ID. Native capacity does not expand
 delegation authority. Maximum managed depth is two. Ordinary repository work may use an
 exact native Agent-to-Task mapping or an active handoff with a known role. Missing noncritical
 session, turn or profile fields remain `UNKNOWN`; by themselves they do not block ordinary

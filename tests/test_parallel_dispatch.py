@@ -554,8 +554,8 @@ def test_non_writing_roles_need_no_workstream_and_are_never_counted(tmp_path, mo
     assert denied(pre(root, request("focused-implementer", message="Unnamed write")), "THALIRIS_PARALLEL_WORKSTREAM_REQUIRED")
     assert denied(pre(root, request(workstream="r-a", message="Write on a read stream")),
                   "THALIRIS_PARALLEL_WRITE_WORKSTREAM_REQUIRED")
-    assert not lifecycle._parallel_writing_role("verifier") and not lifecycle._parallel_writing_role("reviewer")
-    assert lifecycle._parallel_writing_role("curator") and lifecycle._parallel_writing_role("implementer")
+    assert not lifecycle._parallel_executor_role("verifier") and not lifecycle._parallel_executor_role("reviewer")
+    assert lifecycle._parallel_executor_role("curator") and lifecycle._parallel_executor_role("implementer")
 
 
 def test_uncapped_overlapping_read_contract_admitted_by_core(tmp_path, monkeypatch):
@@ -578,3 +578,144 @@ def test_uncapped_overlapping_read_contract_admitted_by_core(tmp_path, monkeypat
             {"id": "w-a", "domain": "one", "scope": "src/a", "worktree": None, "mode": "write"},
             {"id": "w-c", "domain": "three", "scope": "src/a/inner", "worktree": None, "mode": "write"}]})
     assert refused.value.code == "TASK_AUTHORITY_CONTRACT_REQUIRED"
+
+
+# pd-F1: workstream-less parallel dispatches are enforced read-only, whatever the role.
+
+def _write_attempts(child: dict, scope: str) -> list[dict]:
+    return [
+        {**child, "tool_name": "apply_patch", "tool_input": {"input": f"*** Begin Patch\n*** Add File: {scope}/x.py\n+x\n*** End Patch"}},
+        {**child, "tool_name": "Bash", "tool_input": {"command": f"Set-Content {scope}/x.py value"}},
+        {**child, "tool_name": "Bash", "tool_input": {"command": f"echo x > {scope}/y.py"}},
+    ]
+
+
+def test_workstream_less_parallel_read_roles_are_refused_writes_into_a_live_writer_scope(parallel):
+    root = parallel
+    writer_request = request("focused-implementer", workstream="ws-a")
+    assert pre(root, writer_request) == ""
+    writer = bind(root, writer_request, "focused-implementer", "writer-a")
+    readers = {}
+    for role in ("investigator", "reasoning-specialist"):
+        value = request(role, message=f"Read slice A as {role}")
+        assert pre(root, value) == ""
+        assert next(item for item in reservations(root) if item["role"] == role)["parallel_readonly"] is True
+        readers[role] = bind(root, value, role, f"reader-{role}")
+        assert child_record(root, f"reader-{role}")["parallel_readonly"] is True
+    assert child_record(root, "writer-a").get("parallel_readonly") is None
+    for role, child in readers.items():
+        for attempt in _write_attempts(child, "src/ws-a"):
+            output = lifecycle.handle_hook(root, "PreToolUse", attempt, lifecycle.MANAGED_HOOK_ABI)
+            assert denied(output, "THALIRIS_READONLY_ACTOR"), (role, attempt["tool_input"], output)
+        # Reads stay available.
+        read = {**child, "tool_name": "Bash", "tool_input": {"command": "git status"}}
+        assert not denied(lifecycle.handle_hook(root, "PreToolUse", read, lifecycle.MANAGED_HOOK_ABI), "THALIRIS_")
+    # The declared writer keeps its write grant in its own scope.
+    for attempt in _write_attempts(writer, "src/ws-a"):
+        output = lifecycle.handle_hook(root, "PreToolUse", attempt, lifecycle.MANAGED_HOOK_ABI)
+        assert not denied(output, "THALIRIS_READONLY_ACTOR"), output
+    # Read-only dispatches are never counted as live writers.
+    assert lifecycle._live_parallel_writes(ledger(root)) == ["ws-a"]
+
+
+def test_parallel_write_classification_follows_the_handoff(tmp_path, monkeypatch):
+    root = _task(tmp_path, monkeypatch, {"enabled": True, "budget": 1, "workstreams": [
+        _write("w-a", "src/a"), _write("w-b", "src/b"), {**_stream("r-a", "read"), "scope": "src/a"}]})
+    # An investigator with a declared write workstream is a writer: it counts and contends.
+    assert pre(root, request("investigator", workstream="w-a", message="Write as investigator")) == ""
+    assert "parallel_readonly" not in reservations(root)[0]
+    assert denied(pre(root, request(workstream="w-b")), "THALIRIS_PARALLEL_DISPATCH_BUDGET")
+    # With a read workstream it is admitted read-only and is never counted.
+    assert pre(root, request("reasoning-specialist", workstream="r-a", message="Reason over A")) == ""
+    assert reservations(root)[-1]["parallel_readonly"] is True
+    # Executors still need a declared write workstream.
+    for executor in ("implementer", "focused-implementer", "curator"):
+        assert denied(pre(root, request(executor, message=f"Unnamed {executor}")), "THALIRIS_PARALLEL_WORKSTREAM_REQUIRED")
+        assert denied(pre(root, request(executor, workstream="r-a", message=f"Read stream {executor}")),
+                      "THALIRIS_PARALLEL_WRITE_WORKSTREAM_REQUIRED")
+    # Non-writing roles get no flag: their binding is already readonly.
+    assert pre(root, request("reviewer", message="Review")) == ""
+    assert "parallel_readonly" not in reservations(root)[-1]
+    assert not lifecycle._parallel_executor_role("investigator") and not lifecycle._parallel_executor_role("reviewer")
+    assert lifecycle._parallel_executor_role("curator") and lifecycle._parallel_executor_role("implementer")
+
+
+def test_a_legacy_unflagged_investigator_record_still_counts_as_a_writer(parallel):
+    root = parallel
+    assert pre(root, request("investigator", message="Legacy read")) == ""
+    value = ledger(root)
+    del value["pending_authorized_spawn"]["parallel_readonly"]
+    lifecycle._write_capture(lifecycle._lifecycle_path(root, task_id(root)), value)
+    # Written before the flag existed: it could write, so it blocks comparison (fail closed).
+    output = pre(root, request(workstream="ws-a"))
+    assert denied(output, "THALIRIS_PARALLEL_DOMAIN_OVERLAP") and "undeclared" in output
+
+
+# pd-F2: overlap uses Core's canonical scopes.
+
+@pytest.mark.parametrize(("first", "second"), [
+    ("src/Mod", "src/mod"),
+    ("src/MOD/inner", "src/mod"),
+    ("src/caf\u00e9", "src/cafe\u0301"),
+    ("/src/mod/", "src/mod"),
+    ("./src//mod", "src\\mod\\sub"),
+    ("SRC/Stra\u00dfe", "src/strasse"),
+])
+def test_overlap_is_case_unicode_and_separator_insensitive(parallel, monkeypatch, first, second):
+    root = parallel
+    _policy(monkeypatch, _write("w-1", first), _write("w-2", second), _write("w-3", "src/other"))
+    assert pre(root, request(workstream="w-1")) == ""
+    output = pre(root, request(workstream="w-2"))
+    assert denied(output, "THALIRIS_PARALLEL_DOMAIN_OVERLAP"), output
+    assert pre(root, request(workstream="w-3")) == ""
+
+
+def test_scope_core_rejects_is_unusable_and_cannot_run_beside_a_writer(parallel, monkeypatch):
+    root = parallel
+    _policy(monkeypatch, _write("w-1", "src/mod"), _write("w-drive", "C:/repo/src/mod"), _write("w-glob", "src/*"))
+    assert pre(root, request(workstream="w-1")) == ""
+    for other in ("w-drive", "w-glob"):
+        output = pre(root, request(workstream=other))
+        assert denied(output, "THALIRIS_PARALLEL_DOMAIN_OVERLAP") and "no declared scope" in output
+
+
+# pd-F3: a stored parallel contract Core now refuses fails closed for writers.
+
+def test_pre_ca46611_overlapping_contract_refuses_writers_and_admits_reads_readonly(tmp_path, monkeypatch):
+    root = _task(tmp_path, monkeypatch, None)
+    # Cross-domain overlapping write scopes: admitted before ca46611, refused now.
+    legacy = {"enabled": True, "budget": 2, "workstreams": [
+        {"id": "w-a", "domain": "one", "scope": "src/a", "worktree": None, "mode": "write"},
+        {"id": "w-c", "domain": "three", "scope": "src/a/inner", "worktree": None, "mode": "write"}]}
+    from thaliris import authority as core_authority
+    with pytest.raises(ValueError):
+        core_authority._validate_parallel_dispatch(legacy)
+    real_check, real_read = task_authority.check, task_authority.read
+
+    def stale(function):
+        def read(root_):
+            record = function(root_)
+            if record is not None:
+                record = {**record, "contract": {**record["contract"], "parallel_dispatch": legacy}}
+            return record
+        return read
+    monkeypatch.setattr(task_authority, "check", stale(real_check))
+    monkeypatch.setattr(task_authority, "read", stale(real_read))
+    assert lifecycle._parallel_dispatch_policy(root, OWNER) is None
+    assert lifecycle._parallel_contract_invalid(root, OWNER)
+    for executor in ("implementer", "focused-implementer", "curator"):
+        for stream in (None, "w-a"):
+            output = pre(root, request(executor, workstream=stream, message=f"{executor} {stream}"))
+            assert denied(output, "THALIRIS_PARALLEL_CONTRACT_INVALID") and "Re-admit" in output, output
+    # Read-type spawns proceed, enforced read-only; the legacy single-reservation rule still holds.
+    value = request("investigator", workstream="w-a", message="Read under a stale contract")
+    assert pre(root, value) == ""
+    pending = reservations(root)
+    assert len(pending) == 1 and pending[0]["parallel_readonly"] is True and "workstream_id" not in pending[0]
+    assert denied(pre(root, request("reasoning-specialist", message="Second")), "THALIRIS_UNBOUND_DISPATCH_PENDING")
+    child = bind(root, value, "investigator", "stale-reader")
+    for attempt in _write_attempts(child, "src/a"):
+        assert denied(lifecycle.handle_hook(root, "PreToolUse", attempt, lifecycle.MANAGED_HOOK_ABI), "THALIRIS_READONLY_ACTOR")
+    assert pre(root, request("reviewer", message="Review under a stale contract")) == ""
+    # Another session is not the owner: the stale contract is not its evidence.
+    assert not lifecycle._parallel_contract_invalid(root, hashlib.sha256(b"other").hexdigest())
