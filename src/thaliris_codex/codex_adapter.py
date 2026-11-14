@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import hashlib
 import base64
+import copy
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -656,6 +657,37 @@ for _profile_set in _EXECUTION_OBSERVATION_PREDECESSOR_PROFILE_HASHES.values():
         _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = (
             _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash}))
 _KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'8c317baf8cbd65c747223f8a1fa84084f7ad95b451dcb0625ad2dc4e2a6206e7'})
+
+# Exact predecessor af80cf94a35a2a151160590d8d08648e6f68fa0f (the same roles.py blob as release
+# v0.5.3): the profiles and role pack emitted before the verification-first child guidance.
+# Immutable source and renderer witnesses are in tests/fixtures/verification-first-predecessor.
+_VERIFICATION_FIRST_PREDECESSOR_PROFILE_HASHES = {'default': {'thaliris-investigator.toml': '5fec89ead5a732e88eb2a140272edaa714ddfb27a701009f919971f03f05f785',
+             'thaliris-curator.toml': '472df203fa1f8d14dd70766c8623b3cb259c092b769bba8e377d38777f741d50',
+             'thaliris-reasoning-specialist.toml': 'c54aaf61c512d1a49f93035990793b711569ed4427b2ec9f1e064aa9df9d5d54',
+             'thaliris-implementer.toml': '2dbde19c59cc66315f13d8cb1a20d48dd2caac75f0b473461a85be4e51b1e556',
+             'thaliris-focused-implementer.toml': '671f8fd000f04cf85f2dc8c9b147855782fb0376e5b41581223c86292e39d128',
+             'thaliris-verifier.toml': '36b107dc808b3244bc751bd5947fc9a46b4978ba063c3490517e855e2d2b62f1',
+             'thaliris-reviewer.toml': '93b0ba1e8947fc45a22b875529195063c075b7284eb3c9366c25859a910f0b07',
+             'thaliris-reasoning-specialist-astra-medium.toml': 'dcf93dba803148deec2f4c3260bfacb9d650f852c05413d252b1379d78e9f493',
+             'thaliris-reasoning-specialist-xhigh.toml': '5146b282c7b546abd7f2ad37f817b40370e22818f42e603a5b144b393c019769',
+             'thaliris-focused-implementer-astra-medium.toml': '58e2348d6b348bcfb5d00620a97399348651b0f206cbc50d0351c8f7870024d9',
+             'thaliris-focused-implementer-xhigh.toml': '795b30dbaacd88d8bcb9973375baa68d827f67dbbcaacd079a7069858c2b28d4'},
+ 'luna-only': {'thaliris-investigator.toml': 'c39cf3dd279c2da3a48cd23bea13d4101abf137fbcc611b52460133fbd3c35de',
+               'thaliris-curator.toml': '8063ee8c65462a2371bc00691ddee6a34f05a0aadf71982944f2e55213733252',
+               'thaliris-reasoning-specialist.toml': '829e321c88d212ea67c6500a70489e7c40b44532302df6e4d4772651a9a13b92',
+               'thaliris-implementer.toml': '84eca8b400d763365df542ecdf709b2f99c1130d462a75127b0826203c40ddf5',
+               'thaliris-focused-implementer.toml': '45b1baf6485ad9a1ee3d63d4c0a6cb21038a7f6b0487b8446af81411fba2c02b',
+               'thaliris-verifier.toml': '7ab1a8c08131a91b323e830028f7ad3550b6b4be08ec583f68583ccb1b47b146',
+               'thaliris-reviewer.toml': '46c4c568fefe6ab091d693abff8e31929ce80d01a40aa0d423ab3548947ee74c',
+               'thaliris-reasoning-specialist-astra-medium.toml': 'dcf93dba803148deec2f4c3260bfacb9d650f852c05413d252b1379d78e9f493',
+               'thaliris-reasoning-specialist-xhigh.toml': '5146b282c7b546abd7f2ad37f817b40370e22818f42e603a5b144b393c019769',
+               'thaliris-focused-implementer-astra-medium.toml': '58e2348d6b348bcfb5d00620a97399348651b0f206cbc50d0351c8f7870024d9',
+               'thaliris-focused-implementer-xhigh.toml': '795b30dbaacd88d8bcb9973375baa68d827f67dbbcaacd079a7069858c2b28d4'}}
+for _profile_set in _VERIFICATION_FIRST_PREDECESSOR_PROFILE_HASHES.values():
+    for _profile_name, _profile_hash in _profile_set.items():
+        _KNOWN_GENERATED_AGENT_PROFILE_HASHES[_profile_name] = (
+            _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(_profile_name, frozenset()) | frozenset({_profile_hash}))
+_KNOWN_GENERATED_ROLE_PACK_HASHES |= frozenset({'384d0c4e1eea4c5a5e271e4e6b478960510a3ad7d982d92fba426295ad715cad'})
 
 
 def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
@@ -2226,6 +2258,9 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
                 if not isinstance(values, list) or not values:
                     raise ValueError("registration requires append-only additions")
                 data[field].extend(values)
+        # Requirement ``kind``/``surface`` need the verification-first schema; Core's append path
+        # promotes it, and this direct extension must do the same before validating.
+        state["schema_version"] = max(state["schema_version"], core._feature_schema(state))
         core._validate_continuity(state)
         # Validate using the same Core handoff contract without persisting a
         # provisional handoff. The real ID is assigned at reservation.
@@ -2438,7 +2473,73 @@ def document_maintain(root: Path, role: str, base_revision: int, input_file: str
         return core.document_maintain(root, actor, base_revision, str(snapshot))
 
 
-def task_close(root: Path, base_revision: int) -> dict[str, object]:
+def _verification_actor(root: Path, state: dict, role: str, handoff_id: str | None, agent_id_hash: str | None) -> str:
+    """Label one admitted verification actor: the Controller, or an exact live handoff producer."""
+    actor = semantic_role(role)
+    if actor == "controller":
+        if handoff_id is not None or agent_id_hash is not None:
+            raise ValueError("Controller verification takes no handoff or native actor")
+        return actor
+    ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(root, state["task_id"]), state["task_id"])
+    matches = [child for child in ledger["children"] if isinstance(child, dict)
+               and child.get("handoff_id") == handoff_id and child.get("managed") is True
+               and child.get("handoff_bound") is True
+               and child.get("agent_id_hash") == agent_id_hash and child.get("role") == actor
+               and child.get("management_disposition") != "ABANDONED_DEPENDENCY"
+               and not child.get("native_status_conflict")
+               and not lifecycle._native_execution_terminal(child)]
+    if len(matches) != 1 or not isinstance(agent_id_hash, str) or not isinstance(handoff_id, str):
+        raise ValueError("verification requires the Controller or an exact live native handoff producer")
+    return "handoff:" + handoff_id
+
+
+def task_verify(root: Path, role: str, check_id: str, handoff_id: str | None = None, agent_id_hash: str | None = None,
+                *, base_revision: int | None = None) -> dict[str, object]:
+    """Run one declared check as the Controller or as an exact live handoff producer.
+
+    Core runs the Controller-declared argv outside the task lock. Because that
+    can take minutes, the result is appended in a second adapter transaction
+    that re-checks the authority anchor and the actor binding, writes the state
+    and checkpoints the anchor together: a ledger edit made during the run is
+    refused as an authority conflict instead of being anchored. The result
+    grants nothing; it only stops the gate withholding while it stays fresh.
+    """
+    from . import task_authority
+    root = core._repo_root(root)
+
+    def admitted() -> tuple[dict, str]:
+        task_authority.check(root)
+        state = core._load_state(root, active=True)
+        if base_revision is not None:
+            core.check_revision(state, base_revision)
+        return state, _verification_actor(root, state, role, handoff_id, agent_id_hash)
+
+    with task_authority._lock(root):
+        state, actor = admitted()
+        declaration = copy.deepcopy(core._declared_check(state, check_id))
+    run = core._run_declared_check(root, declaration)
+    with task_authority._lock(root):
+        state, actor = admitted()
+        result, mechanical = core.record_check_run(root, state, actor, run)
+        lifecycle._write_evidence_reservation(root, state, lifecycle._lifecycle_path(root, state["task_id"]), None)
+        standing = next(entry for entry in core.verification_view(root, state, tree=str(run["tree_identity"]))["checks"]
+                        if entry["id"] == declaration["id"])
+    changed = ["verification_results"] + (["evidence_continuity"] if mechanical else [])
+    response = core.task_write_response(state, changed) if actor == "controller" else core._task_ack(state, changed)
+    response["result"] = {
+        **{key: result[key] for key in ("id", "check_id", "run", "outcome", "exit_code", "duration_ms", "tree_identity",
+                                        "files_changed_during_run", "output_tail", "output_bytes")},
+        "tree_changed_during_run": result["tree_identity"] != result["tree_identity_before"],
+        "status": standing["status"], "fresh": standing["status"] in ("green", "red"),
+    }
+    if "reason" in standing:
+        response["result"]["reason"] = standing["reason"]
+    if mechanical:
+        response["mechanical_observations"] = mechanical
+    return response
+
+
+def task_close(root: Path, base_revision: int, *, override_reason: str | None = None) -> dict[str, object]:
     from . import task_authority
     task_authority.check(core._repo_root(root))
     state = core.task_show(root)["state"]
@@ -2450,7 +2551,9 @@ def task_close(root: Path, base_revision: int) -> dict[str, object]:
             recovery="inspect the listed exact blockers; observe supported native terminal evidence, or explicitly decide a dependency disposition using its selector and current CAS values; disposal leaves native execution UNKNOWN",
             details={**diagnostic, "base_revision": state["revision"],
                      "product_acceptance": "CONTROLLER_DECISION"})
-    result = core.task_close(root, base_revision, expected_task_id=task_id)
+    # The close gate withholds while a declared check is not green; only the Controller's recorded reason lifts it.
+    result = core.task_close(root, base_revision, expected_task_id=task_id, override_reason=override_reason,
+                             actor="controller")
     task_authority.checkpoint(core._repo_root(root))
     ledger = lifecycle._load_lifecycle(lifecycle._lifecycle_path(core._repo_root(root), task_id), task_id)
     if ledger.get("dependency_dispositions"):

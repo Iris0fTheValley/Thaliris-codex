@@ -16,6 +16,7 @@ OBSERVATION_OPTION = "--observation-json"
 INLINE_OPTIONS = {
     "task-observe": OBSERVATION_OPTION,
     "task-judge": "--json",
+    "task-check": "--json",
     "task-evidence-register": "--json",
     "task-update": "--json",
     "identity-note": "--json",

@@ -1,0 +1,15 @@
+def _agent_profile(name: str, role: str, model: str | None, effort: str | None) -> bytes:
+    # JSON string escaping is compatible with TOML basic strings; native
+    # isolation instructions contain quotes that must not terminate the value.
+    spec = roles.get_role(role)
+    binding = roles.get_codex_binding(role)
+    if spec is None or binding is None or not binding.generated_profile:
+        raise ValueError(f"unknown generated role: {role}")
+    instructions = roles.profile_instructions(role, name)
+    return (
+        f'name = "{name}"\n'
+        f'description = "Thaliris {role} execution role"\n'
+        + (f'model = "{model}"\n' if model is not None else "")
+        + (f'model_reasoning_effort = "{effort}"\n' if effort is not None else "")
+        + f'developer_instructions = {json.dumps(instructions, ensure_ascii=False)}\n'
+    ).encode("utf-8")

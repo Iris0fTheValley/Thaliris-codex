@@ -1063,7 +1063,8 @@ def test_only_current_or_compatible_prior_task_state_schema_is_accepted(tmp_path
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid task state schema"):
         core.task_show(root)
-    state["schema_version"] = core._CONTROLLER_LOCAL_SCHEMA_VERSION + 1
+    # One above the newest schema Core accepts (Core 0.6.0 accepts 9).
+    state["schema_version"] = max(core._SUPPORTED_SCHEMAS) + 1
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid task state schema"):
         core.task_show(root)

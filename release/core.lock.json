@@ -1,5 +1,5 @@
 {
   "repository": "Iris0fTheValley/Thaliris",
-  "commit": "f0ee56320a7e3d8bcd04ca9369804af66851fee9",
-  "reason": "Core 0.5.3 (ledger continuity: schema-6 task state is read as 7 without rewriting, named capacity refusals, anchor corruption reported as TASK_AUTHORITY_INVALID, bounded Git calls, adapter-neutral recovery_action); keeps natural Project Identity formation, explicit non-Git project lifecycle, structured errors and task state schema 7. Persisted state stays valid for Core 0.5.2, 0.5.1 and 0.5.0."
+  "commit": "4f4137fedf6746a9f7b054083098378ac1340dda",
+  "reason": "Core 0.6.0 (verification-first ledger: declared checks, verify, withholding gate, typed claims, dispatch usage, adaptive lane; task-state schema 9, promoted one-way at the first managed child stop)"
 }

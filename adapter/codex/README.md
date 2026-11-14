@@ -60,8 +60,10 @@ V1 fork_context=false. The default Controller work method is delegated: a long-l
 Controller keeps direction and acceptance criteria, while fresh roles perform open-ended or repeated
 investigation and stable implementation. Ordinary Controller reads, Git and diagnostics
 are legal within the task boundary; delegation follows purpose and working set rather
-than numeric permission thresholds. Explicit user choices of `controller-direct` and `single-agent` override this
+than numeric permission thresholds. Explicit user choices of `controller-direct`, `single-agent` and `adaptive` override this
 efficiency default without changing task scope, read-only role limits or file protection.
+`adaptive` adds no hook restriction beyond the default: the Controller may execute
+directly and may dispatch any registered role.
 
 Controller may authorize multiple independent child workstreams at once, including review
 of a stable candidate while implementation waits for CI. Avoid overlapping writes in one
@@ -105,8 +107,9 @@ through its bounded path without claiming child `Completed`; preserve possible s
 conflicts and fence late results.
 
 Core `task-close` checks that the selected task is active and that its expected revision
-and optional Task ID match, then records `DONE`; it does not inspect the candidate's product
-behavior. The Codex adapter protects residual execution and authorization risk: pending,
+and optional Task ID match, withholds while a declared check is not green unless
+`--override-reason` is recorded, then records `DONE`; it does not inspect the candidate's
+product behavior. The Codex adapter protects residual execution and authorization risk: pending,
 running, unknown or conflicting identities/statuses block closure. Exact native terminal
 evidence resolves execution without requiring complete historical handoff/Start/Stop
 records or success of the latest handoff. No issued child requires no child proof,
@@ -150,6 +153,55 @@ preselection for new work. Do not decrypt payloads or infer
 global relevance. Unmarked handoffs remain compatible, but observation persistence refuses
 missing provenance; return the fact and sources for exact association instead of storing
 unlinked evidence. See the [Native ownership and evidence acceptance plan](../../docs/delegated-ownership-native-acceptance.md).
+
+### Verification-first wiring (Core 0.6.0)
+
+Mechanism may withhold; only a model may grant. The adapter declares, runs, records,
+withholds and surfaces. It never marks a requirement satisfied, dismisses evidence or
+closes a task; every refusal below is Core's and the Controller lifts it with a recorded reason.
+
+- `task-check --role controller --base-revision N (--input FILE | --json '<object>') [--supersede]`
+  declares checks. It is Controller-only: the hook denies it to every child, and the CLI
+  refuses another role. The declaration is checkpointed like `task-judge`.
+- `task-verify --role ROLE --check ID [--base-revision N]` runs one declared check. The
+  Controller runs it as `controller`. A bound managed child runs it under its own role;
+  PreToolUse adds its exact `--task-id`, `--handoff-id` and `--agent-id-hash`, and the CLI
+  requires that exact live binding again before and after the run, recording the result as
+  producer `handoff:<id>`. Read-only roles may run it; a redirect or other visible write on
+  the same command line is still denied. Core runs the argv outside the task lock; the
+  adapter then re-checks the authority anchor, appends the result and checkpoints the anchor
+  in one locked transaction, so a ledger edit made during the run is an authority conflict.
+- `task-judge --override-reason TEXT` and `task-close --override-reason TEXT` pass the
+  reason to Core's withholding gate. A refusal is `VERIFICATION_WITHHELD` and writes nothing.
+- Requirement `kind` and `surface` travel in the existing `task-evidence-register` payload.
+- `task-status` passes the authority contract to Core, so an adaptive task shows
+  `Advisories`. It stays read-only and never records tamper; verify, judge and close do.
+- SubagentStop: after the exact child match (agent, profile, session, turn, managed) the
+  adapter gives `last_assistant_message` to Core's claim ingest for that child's registered
+  handoff, under the task lock, and checkpoints the anchor. A message without a block, or
+  no message field, leaves Core's `missing` marker; no claim is invented. A disposed or
+  identity-conflicted child, and a handoff with no evidence association, ingest nothing.
+  Terminal reconciliation (`wait_agent`, `list_agents`, `interrupt_agent`, `close_agent`)
+  ingests a `{"completed": <text>}` status only when the text holds a `thaliris-claims`
+  block. Ingest is idempotent. Any ingest or write failure becomes the bounded
+  `claim_ingest` diagnostic on the lifecycle child record and a `Claims.ingest_errors`
+  packet entry; the hook itself never fails.
+- Usage is recorded on the handoff at the same two points and at dependency disposal:
+  `model` from the child's own Stop payload, `effort` only from an explicit spawn argument,
+  `duration_ms` from the reservation time to the first observation, and `outcome`
+  (`completed` or `failed` only from an exact native terminal status, `disposed` from a
+  disposal, otherwise `unknown`). No hook payload carries tokens, cost or tool-use counts:
+  those fields stay null.
+- Adaptive tasks only: each owning-Controller PostToolUse adds `ceil(len(tool_response)/4)`
+  to Core's lane counter sidecar, which changes neither the revision nor anchored bytes.
+- The PostToolUse packet and Controller write responses carry bounded `Verification`,
+  `Claims` and `Advisories` lines. A not-green or uncovered check, a handoff without a
+  readable claim block and an advisory are shown even when no observation is open.
+
+Claim ingest and usage move the selected ledger to task-state schema 9 at the first child
+Stop, including for a task that declares no check; an older Core refuses schema 9 as newer.
+Whether a live Host delivers `last_assistant_message`, and what a terminal `completed`
+string contains, are Host facts this repository cannot establish: they remain `UNKNOWN`.
 
 ### Common command errors
 

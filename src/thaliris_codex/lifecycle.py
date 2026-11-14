@@ -117,7 +117,7 @@ _CONTEXT_OPERATIONS = frozenset({
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
     "task-status", "task-get", "artifact-get", "catalog", "document-get",
     "task-artifact", "task-close", "task-promote", "rollback", "version",
-    "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain",
     "identity-status", "identity-get", "identity-trace",
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
@@ -127,7 +127,8 @@ _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
-    "task-abandon", "version", "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "task-abandon", "version", "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify",
+    "document-maintain",
     "identity-status", "identity-get", "identity-trace",
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
@@ -142,10 +143,14 @@ _CHILD_CONTEXT_MUTATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
     "rollback", "init", "uninstall", "codex-uninstall",
-    "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain",
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
 })
+# Ledger appends a bound child makes under its own exact handoff identity. They
+# write no repository file of the child's choosing, so a readonly role keeps
+# them: an observation, and the result of a Controller-declared check.
+_CHILD_LEDGER_APPENDS = frozenset({"task-observe", "task-verify"})
 _RAW_CORE_IDENTITY_STATE = re.compile(r"(?i)thaliris[-_]?(?:core)?[^|;&]*identity-(?:offer|note|suggest)(?![-\w])")
 _CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
@@ -1534,7 +1539,7 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
             return _permission_deny("THALIRIS_FENCED_ACTOR: fenced management cannot regain grants through missing task evidence")
         role = _native_agent_roles().get(_native_spawn_agent_type({"tool_input": payload}), "unknown")
         binding = roles.get_codex_binding(role)
-        if _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload):
+        if _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload):
             mutating = False
         if mutating and (payload.get("readonly") is True or binding is not None and not binding.repo_write_allowed):
             return _permission_deny("THALIRIS_READONLY_ACTOR: this known role remains readonly even when task association or authority is unavailable")
@@ -1710,7 +1715,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
             if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
                 return _release_maintenance_output(root, payload, managed_hook_abi)
             if payload.get("readonly") is True and not (
-                _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload)
+                _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload)
             ) and (
                 _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
                 or _context_operation(payload) in _CHILD_CONTEXT_MUTATIONS
@@ -1795,6 +1800,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 attestation = _post_init_attestation(root, payload, managed_hook_abi)
                 if attestation:
                     return attestation
+            _best_effort_record(_record_controller_tool_output, root, payload)
             return _controller_evidence_context(root, payload)
         # Stop has no production policy role. It neither invokes a model nor
         # blocks or corrects the Controller.
@@ -1821,16 +1827,24 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
     task_id = core.selected_task(root)
     if task_id is None or active_controller_owner(root, task_id) != _session_id_hash(payload):
         return ""
-    task_authority.check(root)
+    anchor = task_authority.check(root)
     state = core._load_state(root)
-    if not state.get("evidence_continuity"):
+    try:
+        lines = verification_lines(root, state, anchor["contract"] if anchor is not None else None)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        # An unreadable standing is surfaced, never treated as green.
+        lines = {"Verification": {"status": "UNKNOWN"}} if state.get("checks") else {}
+    continuity = state.get("evidence_continuity") or {}
+    # A withheld check, an unreadable claim block or an advisory is shown even
+    # when the task has no continuity records or no open observation.
+    if not continuity and not _lines_actionable(lines):
         return ""
     packet = {"task_revision": state["revision"], **core.evidence_summary(state)}
     # Some Native Hosts supply an opaque spawn message to Hooks. A bound
     # lifecycle handoff then exists without a readable selected marker. Expose
     # that mechanical gap to the Controller; never decrypt, guess relevance or
     # silently claim its observations are durably associated.
-    associated = {item["id"] for item in state["evidence_continuity"]["handoffs"]}
+    handoffs = {item["id"]: item for item in continuity.get("handoffs", [])}
     unassociated = []
     try:
         ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
@@ -1838,7 +1852,16 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
                         "parent_handoff_id": item["root_handoff_id"] if item.get("depth") == 2 else None}
                        for item in ledger["children"]
                        if item.get("managed") is True and item.get("handoff_bound") is True
-                       and item.get("handoff_id") and item["handoff_id"] not in associated]
+                       and item.get("handoff_id") and item["handoff_id"] not in handoffs]
+        # A final message whose claims could not be ingested must not vanish.
+        failed = [{"handoff_id": item["handoff_id"], "claims": item["claim_ingest"]["claims"]}
+                  for item in ledger["children"]
+                  if isinstance(item, dict) and isinstance(item.get("claim_ingest"), dict)
+                  and str(item["claim_ingest"].get("claims", "")).startswith("error:")
+                  and item.get("handoff_id") in handoffs and "claims" not in handoffs[item["handoff_id"]]]
+        if failed and state.get("status") == "ACTIVE":
+            lines = {**lines, "Claims": {**lines.get("Claims", {}), "ingest_errors": failed[:_PACKET_LIST_MAX],
+                                         "ingest_errors_total": len(failed)}}
     except (OSError, ValueError, KeyError, TypeError):
         # An auxiliary lifecycle diagnostic must not hide existing critical
         # observations or imply that all handoffs were associated.
@@ -1852,19 +1875,21 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
         and packet.get("unincorporated_total") == 0
         and packet.get("unresolved_judgments_total") == 0
         and packet.get("latest_judgments_total") == 0
+        and not _lines_actionable(lines)
     ):
         return ""
     selected = {item["observation_id"] for item in packet["unincorporated"]}
     selected.update(item["id"] for item in packet["unresolved_judgments"])
     excerpts = []
     for kind, field in (("observations", "text"), ("judgments", "reasoning")):
-        for item in state["evidence_continuity"][kind]:
+        for item in continuity.get(kind, []):
             if item["id"] not in selected:
                 continue
             excerpt = {"id": item["id"], "excerpt": item[field][:384]}
             if len(json.dumps(excerpts + [excerpt], ensure_ascii=False).encode("utf-8")) <= 4096:
                 excerpts.append(excerpt)
     packet["decision_context_excerpts"] = excerpts
+    packet.update(lines)
     return json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext":
         f"Evidence Continuity at task revision {state['revision']} (the next write's --base-revision) before your next requirement/completion judgment. Models decide applicability; "
         "PASS, READY and Completed do not dispose evidence. Use task-get for exact records and "
@@ -1873,7 +1898,146 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
          "use Controller task-evidence-register with the exact handoff identity, candidate and requirement refs. "
          "An opaque or unmarked Host message supplies no association; do not infer it from role or lineage.\n"
          if unassociated else "") +
+        _verification_line_text(lines) +
         json.dumps(packet, ensure_ascii=False)}}, ensure_ascii=False)
+
+
+_PACKET_LIST_MAX = 8
+_PACKET_LINES_MAX_BYTES = 2048
+
+
+def verification_lines(root: Path, state: dict[str, Any], contract: dict[str, Any] | None) -> dict[str, Any]:
+    """Bounded ``Verification``/``Claims``/``Advisories`` lines for Controller packets.
+
+    Core computes every fact: check standing on the current tree, claim
+    markers and adaptive lane advisories. This only selects what a Controller
+    should see before its next judgment and caps it. It grants, dismisses and
+    decides nothing. An ACTIVE task that uses none of these features, and any
+    task that is no longer ACTIVE, yields ``{}``.
+    """
+    if state.get("status") != "ACTIVE":
+        return {}
+    sections = core.task_status_packet(state, view="compact", root=root, contract=contract)
+    lines: dict[str, Any] = {}
+    verification = sections.get("Verification")
+    if isinstance(verification, dict):
+        line: dict[str, Any] = {key: verification[key] for key in ("checks_total", "green", "red", "stale", "unrun")
+                                if key in verification}
+        not_green = [{key: entry[key] for key in ("id", "status", "reason") if key in entry}
+                     for entry in verification.get("checks", []) if entry.get("status") != "green"]
+        if not_green:
+            line["not_green"] = not_green[:_PACKET_LIST_MAX]
+        for key in ("withheld_requirements", "uncovered_requirements"):
+            if verification.get(key):
+                line[key] = list(verification[key])[:2 * _PACKET_LIST_MAX]
+        if verification.get("tamper"):
+            line["tamper"] = [{"check_id": item["check_id"], "recorded": item["recorded"]}
+                              for item in verification["tamper"][:_PACKET_LIST_MAX]]
+        if isinstance(verification.get("overrides"), dict):
+            line["overrides"] = verification["overrides"].get("total", 0) + ("close" in verification["overrides"])
+        if line:
+            lines["Verification"] = line
+    claims = sections.get("Claims")
+    if isinstance(claims, dict):
+        without = claims.get("handoffs_without_typed_claims", {})
+        line = {"handoffs_ingested": claims.get("handoffs_ingested", 0),
+                "without_typed_claims": {"total": without.get("total", 0), "ids": list(without.get("ids", []))[-_PACKET_LIST_MAX:],
+                                         "missing": without.get("missing", 0), "malformed": without.get("malformed", 0)}}
+        truncated = claims.get("handoffs_with_truncated_claims")
+        if isinstance(truncated, dict):
+            line["truncated_claims"] = {"total": truncated.get("total", 0), "ids": list(truncated.get("ids", []))[-_PACKET_LIST_MAX:]}
+        lines["Claims"] = line
+    advisories = sections.get("Advisories")
+    if isinstance(advisories, dict):
+        items = [{key: (value[:4] if isinstance(value, list) else value) for key, value in item.items()}
+                 for item in advisories.get("items", []) if isinstance(item, dict)]
+        line = {"blocking": False, "items": items[:_PACKET_LIST_MAX], "items_total": len(items)}
+        for key in ("contract_unspecified", "unavailable"):
+            if advisories.get(key):
+                line[key] = advisories[key]
+        lines["Advisories"] = line
+
+    def size() -> int:
+        return len(json.dumps(lines, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    # Keep the whole addition small: shorten the longest list first; counts and totals always stay.
+    while size() > _PACKET_LINES_MAX_BYTES:
+        candidates = [value for line in lines.values() for value in
+                      (*line.values(), *(inner for nested in line.values() if isinstance(nested, dict) for inner in nested.values()))
+                      if isinstance(value, list) and value]
+        if not candidates:
+            break
+        max(candidates, key=lambda value: len(json.dumps(value, ensure_ascii=False))).pop()
+        for line in lines.values():
+            line["truncated"] = True
+    return lines
+
+
+def _lines_actionable(lines: dict[str, Any]) -> bool:
+    """Whether a line holds something the Controller must see even with no open observation."""
+    verification = lines.get("Verification", {})
+    claims = lines.get("Claims", {})
+    return bool(
+        verification.get("status") == "UNKNOWN" or verification.get("not_green") or verification.get("tamper")
+        or any(verification.get(key) for key in ("red", "stale", "unrun", "uncovered_requirements"))
+        or claims.get("without_typed_claims", {}).get("total") or claims.get("ingest_errors")
+        or lines.get("Advisories", {}).get("items")
+    )
+
+
+def _verification_line_text(lines: dict[str, Any]) -> str:
+    """Readable sentences for the actionable lines; the exact values follow in the packet."""
+    text = ""
+    verification = lines.get("Verification", {})
+    if verification.get("status") == "UNKNOWN":
+        text += "Verification: declared-check standing is UNKNOWN; read task-status before judging satisfied or closing.\n"
+    counts = ", ".join(f"{verification[key]} {key}" for key in ("red", "stale", "unrun") if verification.get(key))
+    if counts:
+        text += (f"Verification: {counts} of {verification.get('checks_total', 0)} declared checks. A satisfied judgment on their "
+                 "requirements and task-close are withheld until task-verify is green on the current tree, or you record "
+                 "--override-reason. A green check grants nothing.\n")
+    if verification.get("uncovered_requirements"):
+        text += ("Verification: typed requirements with no declared check: " + ", ".join(verification["uncovered_requirements"]) +
+                 ". A compiled one withholds satisfied until task-check declares its check.\n")
+    if verification.get("tamper"):
+        text += ("Verification: check files changed after declaration for " + ", ".join(item["check_id"] for item in verification["tamper"]) +
+                 ". Restore the declared content or accept the current content with task-check --supersede.\n")
+    claims = lines.get("Claims", {})
+    without = claims.get("without_typed_claims", {})
+    if without.get("total"):
+        text += (f"Claims: {without['total']} handoff(s) returned no readable typed claim block. Read their FINAL reports directly; "
+                 "a missing block is neither an obligation nor evidence of no findings.\n")
+    if claims.get("ingest_errors"):
+        text += ("Claims: typed claims of " + ", ".join(item["handoff_id"] for item in claims["ingest_errors"]) +
+                 " could not be recorded. Read those FINAL reports and record their adverse findings yourself.\n")
+    advisories = lines.get("Advisories", {})
+    if advisories.get("items"):
+        text += ("Advisories (adaptive mode, non-blocking): " + ", ".join(str(item.get("code")) for item in advisories["items"]) +
+                 ". Consider escalating to delegated with task-mode.\n")
+    return text
+
+
+def _record_controller_tool_output(root: Path, payload: dict[str, Any]) -> None:
+    """Adaptive lane only: add this Controller tool result's size to Core's advisory counter.
+
+    About four characters per token. The counter is Core's task-local sidecar: it
+    changes no revision and no anchored bytes, and it only feeds a non-blocking advisory.
+    """
+    task_id = core.selected_task(root)
+    session = _session_id_hash(payload)
+    if task_id is None or session is None:
+        return
+    anchor = task_authority.read(root)
+    if anchor is None or anchor["contract"].get("execution_mode") != "adaptive":
+        return  # the common case costs one anchor read
+    if task_authority.check(root) is None or active_controller_owner(root, task_id) != session:
+        return
+    response = next((payload[key] for key in ("tool_response", "tool_result", "result", "output") if key in payload), None)
+    if response is None:
+        return
+    text = response if isinstance(response, str) else json.dumps(response, ensure_ascii=False, separators=(",", ":"))
+    if text:
+        core.task_lane_counter(root, add=-(-len(text) // 4))
 
 
 def _hook_repository_root(root: Path, payload: dict[str, Any]) -> Path:
@@ -3024,6 +3188,13 @@ def _reserve_managed_spawn(
                     state.setdefault("pending_authorized_spawns", [])
             else:
                 state["pending_authorized_spawn"] = new_pending
+            effort = next((overrides[key] for key in ("reasoning_effort", "model_reasoning_effort")
+                           if isinstance(overrides.get(key), str) and overrides[key].strip()), None)
+            if effort is not None and len(effort) <= 128:
+                # Only the Controller's explicit spawn argument is known here; a routed default stays unreported.
+                efforts = state.get("spawn_efforts")
+                efforts = {**(efforts if isinstance(efforts, dict) else {}), handoff_id: effort.strip()}
+                state["spawn_efforts"] = dict(list(efforts.items())[-MAX_RAW_RECORDS:])
             _runtime_metadata(state, payload)
             if evidence_registered:
                 _write_evidence_reservation(root, task_state, path, state)
@@ -3269,7 +3440,10 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
         value = json.loads(prior_fence.read_text(encoding="utf-8")) if prior_fence.is_file() else {"version": 1}
         _write_capture(prior_fence, {**value, "version": 1, "children": fence, "agent_id_hashes": sorted(agents)})
         _write_capture(path, ledger)
-        state["revision"] += 1
+        revision = state["revision"]
+        _record_disposed_usage(state, [child.get("handoff_id") for child in selected]
+                               + ([pending.get("handoff_id")] if pending_selected else []))
+        state["revision"] = revision + 1
         core._write_state(root, state)
         task_authority.checkpoint(root)
     unfenced = [entry["agent_fence_reason"] for entry in fencing if not entry["agent_fenced"]]
@@ -3468,9 +3642,142 @@ def _record_subagent_stop(root: Path, payload: dict[str, Any]) -> bool:
                 # An optional hook observation is not native terminal proof.
                 # Preserve naturally returned execution evidence in either order.
                 _runtime_metadata(state, payload)
-                _write_capture(path, state)
+                # The final message of this exact handoff: Core ingests its typed claims; a
+                # message without a block leaves Core's marker. The stop is recorded either way.
+                task_state = _record_child_results(root, task_id, state, [
+                    (child, payload.get("last_assistant_message"), True, payload.get("model"))], "SubagentStop")
+                _write_child_result(root, task_state, path, state, child)
                 return True
     return False
+
+
+def _usage_outcome(child: dict[str, Any]) -> str:
+    """Map exact recorded facts to a Core usage outcome; everything else stays unknown."""
+    if child.get("management_disposition") == _DISPOSED:
+        return "disposed"
+    if child.get("native_status_conflict") or not _native_execution_terminal(child):
+        return "unknown"
+    return {"completed": "completed", "errored": "failed"}.get(str(child.get("native_terminal_status")), "unknown")
+
+
+def _record_child_results(root: Path, task_id: str, state: dict[str, Any],
+                          entries: list[tuple[dict[str, Any], object, bool, object]], source: str) -> dict[str, Any] | None:
+    """Record exact handoffs' typed claims and adapter-observable usage in one loaded task state.
+
+    ``entries`` are ``(child, final message or None, record a missing block, observed model)``
+    of one hook observation. The caller holds the task lock and writes the
+    returned state together with the lifecycle ledger (``_write_child_result``);
+    ``None`` means the task ledger is unchanged. Mechanism only records here.
+    Core parses the claim block: adverse claims become ordinary open
+    observations, a missing or malformed block leaves Core's marker, and
+    nothing is judged, dismissed or closed. No hook payload carries tokens,
+    cost or tool-use counts, so usage holds only the observed model, an
+    explicit spawn effort, the handoff-to-observation duration and the
+    outcome; the rest stays null. A failure degrades to the bounded
+    ``claim_ingest`` diagnostic on the child record.
+    """
+    task_state: dict[str, Any] | None = None
+    unavailable = False
+    revision = 0
+    for child, message, record_missing, model in entries:
+        earlier = child.get("claim_ingest") if isinstance(child.get("claim_ingest"), dict) else {}
+        diagnostic: dict[str, Any] = {"source": source, "claims": "skipped", "usage": "skipped"}
+        child["claim_ingest"] = diagnostic
+        handoff_id = child.get("handoff_id")
+        if child.get("managed") is not True or child.get("handoff_bound") is not True or not isinstance(handoff_id, str):
+            continue
+        if task_state is None and not unavailable:
+            try:
+                task_authority.check(root)
+                task_state = core._load_state(root, active=True)
+                if task_state.get("task_id") != task_id:
+                    raise ValueError("task changed")
+                revision = task_state["revision"]
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+                task_state, unavailable = None, True
+        if task_state is None:
+            diagnostic.update(claims="error:TASK_UNAVAILABLE", usage="error:TASK_UNAVAILABLE")
+            continue
+        handoff = next((item for item in task_state.get("evidence_continuity", {}).get("handoffs", [])
+                        if item["id"] == handoff_id), None)
+        if handoff is None:
+            # No exact evidence association: nothing is ingested and nothing is guessed.
+            # Nothing was ingested, so no diagnostic key is left on the child record.
+            child.pop("claim_ingest", None)
+            continue
+        prior = dict(handoff.get("usage") or {})
+        if child.get("management_disposition") == _DISPOSED or child.get("native_status_conflict"):
+            diagnostic["claims"] = "skipped:not-exact"
+        elif isinstance(message, str) or record_missing:
+            diagnostic["message"] = "PRESENT" if isinstance(message, str) else "ABSENT"
+            try:
+                ingested = core.ingest_claims(task_state, handoff_id, message)
+                diagnostic["claims"] = "already_ingested" if ingested["already_ingested"] else str(ingested["status"])
+            except core.ThalirisError as exc:
+                diagnostic["claims"] = "error:" + str(exc.code)[:64]
+            except (ValueError, TypeError, KeyError, RecursionError) as exc:
+                diagnostic["claims"] = "error:" + type(exc).__name__
+        elif earlier.get("claims") not in (None, "skipped"):
+            # A usage-only update keeps what the final message's ingest recorded.
+            diagnostic.update({key: earlier[key] for key in ("claims", "message") if key in earlier})
+        usage: dict[str, object] = {"outcome": _usage_outcome(child)}
+        if isinstance(model, str) and model.strip() and len(model) <= 128:
+            usage["model"] = model
+        effort = state.get("spawn_efforts", {}).get(handoff_id) if isinstance(state.get("spawn_efforts"), dict) else None
+        if isinstance(effort, str) and effort.strip() and len(effort) <= 128:
+            usage["effort"] = effort
+        created, observed = child.get("handoff_created_at_ns"), time.time_ns()
+        if type(created) is int and observed >= created and prior.get("duration_ms") is None:
+            usage["duration_ms"] = (observed - created) // 1_000_000
+        if usage["outcome"] == "unknown" and prior.get("outcome") is not None:
+            del usage["outcome"]  # never replace a recorded outcome with a weaker one
+        usage = {key: value for key, value in usage.items() if prior.get(key) != value}
+        if not usage:
+            diagnostic["usage"] = "unchanged"
+            continue
+        try:
+            core.set_handoff_usage(task_state, handoff_id, usage)
+            diagnostic["usage"] = "recorded"
+        except core.ThalirisError as exc:
+            diagnostic["usage"] = "error:" + str(exc.code)[:64]
+        except (ValueError, TypeError, KeyError) as exc:
+            diagnostic["usage"] = "error:" + type(exc).__name__
+    if task_state is None or task_state["revision"] == revision:
+        return None
+    task_state["revision"] = revision + 1  # one hook observation, one revision
+    return task_state
+
+
+def _write_child_result(root: Path, task_state: dict[str, Any] | None, path: Path, state: dict[str, Any],
+                        *children: dict[str, Any]) -> None:
+    """Write the lifecycle ledger, with the task ledger and its anchor checkpoint when it changed.
+
+    A task-ledger write failure restores the previous bytes and still records
+    the lifecycle observation: a hook never fails on an ingest error.
+    """
+    if task_state is not None:
+        try:
+            _write_evidence_reservation(root, task_state, path, state)
+            return
+        except Exception as exc:  # noqa: BLE001 - degrade to a diagnostic; the observation is kept below
+            code = str(exc.code)[:64] if isinstance(exc, core.ThalirisError) else type(exc).__name__
+            for child in children:
+                if isinstance(child.get("claim_ingest"), dict):
+                    child["claim_ingest"].update(claims="error:" + code, usage="error:" + code)
+    _write_capture(path, state)
+
+
+def _record_disposed_usage(task_state: dict[str, Any], handoff_ids: list[object]) -> None:
+    """Mark disposed dispatches on their registered handoffs; a recorded specific outcome is kept."""
+    registered = {item["id"]: item for item in task_state.get("evidence_continuity", {}).get("handoffs", [])}
+    for handoff_id in handoff_ids:
+        handoff = registered.get(handoff_id) if isinstance(handoff_id, str) else None
+        if handoff is None or (handoff.get("usage") or {}).get("outcome") in {"completed", "failed", "disposed"}:
+            continue
+        try:
+            core.set_handoff_usage(task_state, handoff_id, {"outcome": "disposed"})
+        except (ValueError, TypeError, KeyError):
+            continue
 
 
 def _native_terminal_status(value: object) -> str | None:
@@ -3726,6 +4033,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
         elif session_hash is None or (task_authority.check(root) is None and active_controller_owner(root, task_id) != session_hash):
             return
         changed = observed = False
+        results: list[tuple[dict[str, Any], object, bool]] = []  # (child, raw native status, newly recorded)
         if (tool in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}
                 and (_native_status_call_key(payload, tool) is not None
                      or _dispatch_identity_required(root, state, session_hash))):
@@ -3799,6 +4107,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                 if child is not None:
                     observed = True
                     changed = _record_native_terminal(state, child, status, tool)
+                    results.append((child, response.get("previous_status"), changed))
                     changed = _record_pending_terminal(state, target, status, tool) or changed
                 else:
                     changed = _record_pending_terminal(state, target, status, tool) or changed
@@ -3823,7 +4132,9 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                             changed = _record_pending_terminal(state, agent_id, status, "wait_agent") or changed
                         continue
                     observed = True
-                    changed = _record_native_terminal(state, matches[0], status, "wait_agent") or changed
+                    recorded = _record_native_terminal(state, matches[0], status, "wait_agent")
+                    results.append((matches[0], value, recorded))
+                    changed = recorded or changed
                     changed = _record_pending_terminal(state, agent_id, status, "wait_agent") or changed
         elif tool == "list_agents":
             entries = response.get("agents")
@@ -3840,11 +4151,38 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         continue
                     observed = True
                     did_reconcile = _record_native_terminal(state, child, status, "list_agents")
+                    results.append((child, entry.get("agent_status"), did_reconcile))
                     changed = _record_pending_terminal(state, name, status, "list_agents") or changed
                     changed = changed or did_reconcile
         if changed or observed:
             _runtime_metadata(state, payload)
-            _write_capture(path, state)
+            entries = _terminal_result_entries(results)
+            task_state = _record_child_results(root, task_id, state, entries, tool) if entries else None
+            _write_child_result(root, task_state, path, state, *(entry[0] for entry in entries))
+
+
+def _terminal_result_entries(results: list[tuple[dict[str, Any], object, bool]]) -> list[tuple[dict[str, Any], object, bool, object]]:
+    """Select exact terminal observations of bound handoffs worth carrying into the task ledger.
+
+    A newly recorded terminal status updates the handoff's usage outcome. A
+    ``{"completed": <text>}`` status whose text holds a ``thaliris-claims`` block
+    is ingested, best effort and once; text without a block records nothing,
+    because this snapshot is not known to be the complete final message. The
+    child's own model is not in the observer's payload, so none is reported.
+    """
+    entries: list[tuple[dict[str, Any], object, bool, object]] = []
+    for child, value, recorded in results:
+        if (child.get("managed") is not True or child.get("handoff_bound") is not True
+                or not isinstance(child.get("handoff_id"), str) or not _native_execution_terminal(child)
+                or any(child is entry[0] for entry in entries)):
+            continue
+        text = value["completed"] if isinstance(value, dict) and set(value) == {"completed"} and isinstance(value["completed"], str) else None
+        ingested = isinstance(child.get("claim_ingest"), dict) and child["claim_ingest"].get("claims") in {"present", "already_ingested"}
+        if text is not None and (ingested or core.parse_claim_block(text)["status"] == "missing"):
+            text = None
+        if recorded or text is not None:
+            entries.append((child, text, False, None))
+    return entries
 
 
 def _subagent_start_output(root: Path, payload: dict[str, Any]) -> str:
@@ -5331,7 +5669,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     if isinstance(raw_command, str) and _RAW_CORE_IDENTITY_STATE.search(raw_command):
         _best_effort_record(_record_protocol_deviation, root, payload, operation="identity-raw-core", target="thaliris-core identity", blocked=True)
         return _permission_deny(f"THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION: a {role_names} session may not run Controller-owned identity state commands.")
-    if operation in {"task-observe", "document-maintain"}:
+    if operation in _CHILD_LEDGER_APPENDS | {"document-maintain"}:
         task_id = _active_task_id(root)
         if task_id is None:
             return _permission_deny("THALIRIS_EVIDENCE_TASK_UNAVAILABLE: selected evidence operations require an active task")
@@ -5344,10 +5682,11 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: exact live role and handoff required")
         if selected_task is not None and selected_task != task_id:
             return _permission_deny("THALIRIS_EVIDENCE_TASK_CONFLICT: selected task differs from the native handoff")
-        if operation == "task-observe":
+        if operation in _CHILD_LEDGER_APPENDS:
             actor = _direct_context_option(payload, {"--agent-id-hash"})
             if actor is not None and actor != child["agent_id_hash"]:
-                return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: observation native producer differs")
+                return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: " + (
+                    "observation" if operation == "task-observe" else "verification") + " native producer differs")
         elif child["role"] != "curator":
             return _permission_deny("THALIRIS_CURATOR_SELECTION_REQUIRED")
         additions = []
@@ -5355,7 +5694,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             additions.append("--task-id " + task_id)
         if selected_handoff is None:
             additions.append("--handoff-id " + child["handoff_id"])
-        if operation == "task-observe" and actor is None:
+        if operation in _CHILD_LEDGER_APPENDS and actor is None:
             additions.append("--agent-id-hash " + child["agent_id_hash"])
         return _updated_command_output(payload, " ".join(additions)) if additions else ""
     if operation in _CHILD_CONTEXT_MUTATIONS:
@@ -6072,6 +6411,9 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
                 " the selected evidence in a new handoff and spawn a fresh named-role child with fork_turns=\"none\".")
         if normalized in {"send_message", "followup_task", "send_input"} and _active_child_communication(root, payload):
             return ""
+        if operation == "task-verify" and payload.get("readonly") is True:
+            # A bound readonly role verifies through its own exact handoff, never as the Controller.
+            return _permission_deny("THALIRIS_READONLY_ACTOR: Controller verification is unavailable to a readonly actor")
         if operation in {"task-evidence-register", "task-observe"}:
             if operation == "task-observe" and payload.get("readonly") is True:
                 # Readonly children have their separate exact handoff append

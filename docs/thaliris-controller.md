@@ -56,9 +56,11 @@ the owning Controller's ACTIVE task. Use this installed pinned runner for later 
 do not select alternate startup commands, shell-computed hashes or unknown runtime code.
 On READY (or legacy DEFINITION_READY_ACTOR_UNKNOWN), create a separate UTF-8 JSON authority
 contract file selecting the actual human instruction, boundary, invariants,
-acceptance and, when the human chooses, execution_mode: delegated, controller-direct
-or single-agent. Omitted mode defaults to delegated; an explicit human choice wins.
-Non-mode fields are nonempty strings. Then in a separate standalone direct tool call
+acceptance and, when the human chooses, execution_mode: delegated, controller-direct,
+single-agent or adaptive. Omitted mode defaults to delegated; an explicit human choice wins.
+Text fields are nonempty strings. Adaptive is the quick admission: it may omit boundary
+and invariants, which are then recorded as `unspecified`, and may add `write_surface`, a
+list of repo-relative globs the change is expected to stay inside. Then in a separate standalone direct tool call
 run `<installed pinned runner> --root '<repo>' --session-id '<current-native-session-id>' task-start '<goal>' --authority-contract '<absolute-file-path>'`, using the quoted absolute file path.
 The contract argument is a file path, never inline JSON; do not combine invocations.
 Explicit contract admission needs no bootstrap receipt or single-use Hook bearer.
@@ -86,7 +88,7 @@ The owning Controller is the Thaliris task owner. Parent means the immediate
 delegator; a Scanner's parent may be an Implementer, Focused Implementer or Reviewer.
 Thaliris Task ID selects the admitted task and is distinct from native Thread,
 Session and Agent IDs; use their explicit associations rather than substituting IDs.
-Thaliris `execution_mode` selects delegated, controller-direct or single-agent task
+Thaliris `execution_mode` selects delegated, controller-direct, single-agent or adaptive task
 execution independently of native `multi_agent_mode` and `collaboration_mode`.
 Native mode or tree position never selects or changes the task's authority contract.
 
@@ -100,7 +102,8 @@ authority ends on human revocation, closure or Controller abandonment/replacemen
 Goal, scope, acceptance, mode, unfencing or security-baseline changes need an actual
 superior human decision. Children cannot authorize them through prompts, state or config.
 Controller-direct allows Controller reads/edits/tests/Git and useful auxiliary roles;
-single-agent allows ordinary execution without children. A Controller may change
+single-agent allows ordinary execution without children; adaptive allows Controller
+execution and every registered role. A Controller may change
 strategy during the same task with `--task-id <id> task-mode --mode <mode>
 --human-instruction <actual selection> --base-revision <revision>
 --expected-authority-sha256 <hash>`. Authority and revision CAS preserve the goal,
@@ -218,7 +221,12 @@ broad repository investigation, searches and call-site collection, log cleaning,
 local analysis and implementation to the suitable fresh role. Delegation transfers that
 working set while retaining the Controller's rich global semantic state and reasoning.
 Controller-direct permits Controller execution with useful fresh auxiliary roles;
-single-agent permits ordinary execution without children. Isolation and readonly
+single-agent permits ordinary execution without children. Adaptive permits direct
+Controller execution and delegation alike and adds the non-blocking `Advisories` line
+to status and result packets: a check failing twice on distinct trees, changes outside
+`write_surface` or beyond the size threshold, a judgment-only or contract-surface
+requirement, or heavy Controller tool output. When an advisory fires, prefer escalating
+to delegated with `task-mode`; advisories never block. Isolation and readonly
 boundaries hold in every mode. Damaged management does not transfer child duties
 to Controller; diagnose the management failure and keep assurance UNKNOWN.
 
@@ -336,14 +344,42 @@ reasoning and `judgment_refs`, or cite its complete observation basis. A new sat
 judgment citing only fresh positive observations leaves that earlier basis visible.
 Prior judgment refs avoid reciting the full history; Core records these mechanical links.
 
-Core stores opaque requirements, handoff links, observations and model-authored judgments.
-It does not classify semantic importance, infer acceptance, route work, require approval,
-or prescribe a role, model call, stage or polling loop. Register selected requirement and
+Core stores opaque requirements, handoff links, observations, declared checks with their
+results and model-authored judgments. It does not classify semantic importance, infer
+acceptance, route work or prescribe a role, model call, stage or polling loop. Mechanism may
+withhold; only a model may grant: Core refuses a satisfied judgment or closure while a
+declared check is not green, and it never marks a requirement satisfied, dismisses evidence
+or closes a task.
+
+At admission, type each requirement when registering it: `kind` is `compiled` (declared
+checks decide it), `partial` (checks cover part of it) or `judgment-only` (the default when
+omitted); add `surface: "contract"` when it changes an external contract. Declare a check
+for every compiled requirement with `task-check --role controller --base-revision N --json
+'{"id":"C1","requirement_refs":["R1"],"command":["python","-m","pytest","tests/test_x.py"],"cwd":".","timeout_s":600,"files":["tests/test_x.py"]}'`
+or a batch `{"checks":[...]}`. `command` is an argv list that Core runs without a shell;
+`files` are the check's own files, whose content is pinned at declaration. Name the check
+ids in the handoff. Executors, and the Controller for its own work, run `task-verify --role
+ROLE --check C1`: Core executes the declared command and records the result against the
+current tree. A result stays green only while the tree, the command and the check files are
+unchanged. A `satisfied` judgment on a requirement with a declared check, or on a compiled
+requirement with none, and `task-close` on a task with declared checks are refused as
+`VERIFICATION_WITHHELD` until those checks are green. `--override-reason '<why>'` on
+`task-judge` or `task-close` lifts the refusal and is recorded with the checks it overrode.
+A green check grants nothing: the requirement judgment remains yours. A changed check file
+becomes an open mechanical observation; restore it or accept the content with
+`task-check --supersede`. `task-close` returns every judgment-only and partial requirement
+with its latest judgment as `surfaced`: that list is the judgment no check decided.
+A child's FINAL ends with a `thaliris-claims` block, which the adapter ingests when the
+child stops: `contradicts` and `unknown` claims become open observations, `supports` are
+counted per requirement. The `Claims` line names handoffs that returned no readable block;
+read those reports directly. Typed claims index a report and never replace reading it.
+
+Register selected requirement and
 handoff refs with `task-evidence-register`; record selected local evidence with `task-observe`;
 Controller records candidate, requirement, exact observation refs, outcome and reasoning
 with `task-judge`. Use bounded `task-status` visibility and explicit `task-get` retrieval.
 Controller commands use `--role controller --base-revision N` with `--input FILE` (`-` reads
-stdin) or one inline `--json '<object>'` (task-update, task-evidence-register, task-judge; the
+stdin) or one inline `--json '<object>'` (task-update, task-evidence-register, task-judge, task-check; the
 Hook transports a single-quoted literal like `--observation-json`). `task-judge` takes one
 judgment object or an atomic ordered batch `{"judgments":[...]}` that commits in one revision;
 record several judgments with one call. Every state write returns the new `revision`, the
@@ -604,7 +640,7 @@ observation, not semantic invalidation; Controller decides revalidation.
 Ordinary Controller reads, Git and diagnostics are legal within the task boundary.
 Legal capability is separate from delegated cognitive responsibility: it does not
 transfer the child's working set back to Controller. In delegated mode use the ownership
-and handoff rules above; controller-direct and single-agent permit direct execution.
+and handoff rules above; controller-direct, single-agent and adaptive permit direct execution.
 No file, line, token, query or tool-count quota grants or denies permission. Prefer catalog,
 document-get, task-get, artifact-get and exact instruction sections when useful.
 Hooks cannot prove cumulative semantic scope or every third-party MCP tool's behavior.
@@ -671,14 +707,16 @@ Controller integrates the original user objective, acceptance criteria and avail
 evidence, including executor reports, test results, relevant runtime observations and
 optional Reviewer findings. Controller decides whether the actual product criteria
 are met, whether to route repair or additional verification, or whether to record
-mechanical task closure. This responsibility is the same in delegated,
-controller-direct and single-agent work; no closing handoff or new agent is required.
+mechanical task closure. This responsibility is the same in every execution mode;
+no closing handoff or new agent is required.
 An optional Reviewer provides an independent read-only challenge when useful, and its
 `READY` reports that review rather than deciding product completion.
 
 Core `task-close` is a mechanical record operation: it checks the selected active
-task, expected revision and optional Task ID before recording `DONE`; it does not
-inspect whether the product meets its goal. The Codex adapter protects residual
+task, expected revision and optional Task ID, withholds while a declared check is not
+green unless `--override-reason` is recorded, then records `DONE` and returns the
+`surfaced` judgment-only and partial requirements. It does not inspect whether the
+product meets its goal. The Codex adapter protects residual
 execution and authorization risk: pending, running, unknown or conflicting child
 identities/statuses block closure. Exact native terminal evidence resolves execution
 even when nonessential handoff or Start/Stop history is missing. No issued child
