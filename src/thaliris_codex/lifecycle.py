@@ -4437,7 +4437,7 @@ def _wait_identity_conflicts(
                     if row.get(key) is not None]
         if any(not isinstance(value, str) or value not in names for value in supplied):
             raise _ManagedWaitUnknown(scope, "native identity is malformed")
-        if not names and row is not state.get("pending_authorized_spawn"):
+        if not names and not any(row is item for item in _pending_reservations(state)):
             raise _ManagedWaitUnknown(scope, "native identity is unavailable")
         if any(other is not row and (actor_ids(row) & actor_ids(other)
                 or named_dependencies and scope == "direct-dependency" and native_name(row) is not None
@@ -4569,12 +4569,13 @@ def _managed_wait_guard(root: Path, payload: dict[str, Any]) -> str:
             scalar_target = next((value for key, value in (("target", _delegation_input(payload).get("target")),
                                                             ("id", _delegation_input(payload).get("id")))
                                   if isinstance(value, str) and value), None)
-            concrete_rows = [row for row in rows if row is not pending and isinstance(row, dict)]
-            if (scalar_target is not None and pending in rows and
-                    not pending.get("task_name_hash") and not pending.get("native_agent_id_hash") and
-                    not concrete_rows):
+            # ``pending`` is the reservation collection; compare by identity.
+            reserved_rows = [row for row in rows if any(row is item for item in pending)]
+            concrete_rows = [row for row in rows if isinstance(row, dict) and not any(row is item for item in reserved_rows)]
+            if (scalar_target is not None and reserved_rows and not concrete_rows and
+                    not any(row.get("task_name_hash") or row.get("native_agent_id_hash") for row in reserved_rows)):
                 return ""
-        records = [*state["children"], *([pending] if isinstance(pending, dict) else [])]
+        records = [*state["children"], *pending]
         _wait_identity_conflicts(state, records, scoped + [(row, "direct-dependency") for row in rows],
                                  named_dependencies=targets is None)
         waitable = False
@@ -4583,9 +4584,10 @@ def _managed_wait_guard(root: Path, payload: dict[str, Any]) -> str:
                 if row.get("native_terminal_source") not in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}:
                     raise _ManagedWaitUnknown("direct-dependency", "terminal source is unavailable")
                 continue
-            if row is pending and not (row.get("task_name_hash") or row.get("native_agent_id_hash")):
+            reserved = any(row is item for item in pending)
+            if reserved and not (row.get("task_name_hash") or row.get("native_agent_id_hash")):
                 raise _ManagedWaitUnknown("direct-dependency", "reserved dispatch has no observable native identity")
-            if row is pending or row.get("managed") is True and row.get("native_terminal_status") != "not_found":
+            if reserved or row.get("managed") is True and row.get("native_terminal_status") != "not_found":
                 waitable = True
             else:
                 raise _ManagedWaitUnknown("direct-dependency", "native dependency liveness is unknown")

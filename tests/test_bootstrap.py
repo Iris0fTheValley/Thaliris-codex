@@ -723,9 +723,12 @@ def test_required_bootstrap_delivers_normal_guidance_without_extra_retrieval_or_
     assert result["controller_actor_assurance"] == "UNKNOWN"
     assert result["managed_control_authority"] == "EXPLICIT_CONTROLLER_ASSERTION_REQUIRED"
     guidance = result["controller_guidance"]
+    # Sections may name the installed runner (routing does since O3); compare
+    # each against the exact runner the bootstrap delivery is rendered with.
+    runner = bootstrap._controller_guidance_runner()
     for name in controller_instructions.RESIDENT_SECTIONS:
         if name != "startup":
-            assert controller_instructions.render(section=name).strip() in guidance
+            assert controller_instructions.render(runner, section=name).strip() in guidance
     for detail in ("task-recover-authority", "offline_recovery.py", "--maintenance-contract"):
         assert detail not in guidance
     assert "--authority-contract" in guidance and "causal diagnosis" in guidance.lower()

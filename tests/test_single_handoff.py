@@ -1434,6 +1434,11 @@ def test_release_pinned_host_does_not_normalize_with_unknown_turn_cap(tmp_path: 
     original_input = {"timeout_ms": 60_000, "future_argument": {"keep": True}}
     wait = hook_payload(tool_name="wait_agent", tool_input=original_input)
 
+    # A reservation without an observed native identity remains UNKNOWN.
+    assert "reserved dispatch has no observable native identity" in codex_adapter.audit_hook(root, "PreToolUse", wait)
+    assert wait["tool_input"] == original_input
+    assert handle_hook(root, "PostToolUse", {**spawn, "tool_response": {
+        "agent_id": "pending-wait-child", "nickname": None}}) == ""
     assert codex_adapter.audit_hook(root, "PreToolUse", wait) == ""
     assert wait["tool_input"] == original_input
 
@@ -1560,7 +1565,12 @@ def test_active_controller_keeps_ordinary_work_available_and_gates_managed_contr
     assert handle_hook(root, "PreToolUse", hook_payload(
         tool_name="Bash", tool_input={"command": "thaliris stale"},
     )) == ""
-    for name in ("wait_agent", "list_agents", "interrupt_agent"):
+    # An empty direct dependency set is refused as a bounded diagnostic, never
+    # a disposal or a denial of the ordinary status and interrupt tools.
+    empty_wait = handle_hook(root, "PreToolUse", hook_payload(tool_name="wait_agent", tool_input={}))
+    assert json.loads(empty_wait)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "THALIRIS_WAIT_NO_UNFINISHED_DEPENDENCY" in empty_wait
+    for name in ("list_agents", "interrupt_agent"):
         assert handle_hook(root, "PreToolUse", hook_payload(tool_name=name, tool_input={})) == ""
     for name in ("followup_task", "send_message", "send_input"):
         assert handle_hook(root, "PreToolUse", hook_payload(tool_name=name, tool_input={"target": "old-child"})) == ""
@@ -2973,8 +2983,13 @@ def test_unsupported_completed_payload_keeps_native_status_unknown(tmp_path, uns
     assert "terminal_state" not in child
     assert child["native_terminal_status"] is None
     assert not lifecycle_module.native_execution_closed(root)
-    with pytest.raises(ValueError, match="exact native terminal status"):
-        codex_adapter.task_close(root, core.task_show(root)["state"]["revision"])
+    before = core.task_show(root)["state"]["revision"]
+    with pytest.raises(core.ThalirisError) as caught:
+        codex_adapter.task_close(root, before)
+    assert caught.value.code == "TASK_NATIVE_EXECUTION_RISK"
+    assert any(row["kind"] == "child-native-execution-unresolved" and row["native_status"] == "UNKNOWN"
+               for row in caught.value.details["blockers"])
+    assert core.task_show(root)["state"]["revision"] == before
 
 
 @pytest.mark.parametrize("result", [None, "result"])

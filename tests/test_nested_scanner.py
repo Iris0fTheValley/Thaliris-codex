@@ -393,13 +393,16 @@ def test_parent_wait_preserves_event_duration_with_pending_scanner(active, monke
     parent = start(active, role)
     wait_input = {"timeout_ms": 10_000, "future_argument": {"keep": True}}
     wait = {**parent, "tool_name": "wait_agent", "tool_input": wait_input}
-    assert codex_adapter.audit_hook(active, "PreToolUse", wait) == ""
+    # Without an unfinished direct Scanner the wait is refused, not normalized.
+    assert "THALIRIS_WAIT_NO_UNFINISHED_DEPENDENCY" in codex_adapter.audit_hook(active, "PreToolUse", wait)
     assert wait["tool_input"] == wait_input
     scanner = start(active, "investigator", "scanner", parent)
     assert codex_adapter.audit_hook(active, "PreToolUse", wait) == ""
     assert wait["tool_input"] == wait_input
     finish(active, scanner, parent)
-    assert codex_adapter.audit_hook(active, "PreToolUse", wait) == ""
+    # An ended Scanner is not waited on again; the caller duration stays intact.
+    assert "THALIRIS_WAIT_NO_UNFINISHED_DEPENDENCY" in codex_adapter.audit_hook(active, "PreToolUse", wait)
+    assert wait["tool_input"] == wait_input
 
 
 @pytest.mark.parametrize("role", ["implementer", "focused-implementer", "reviewer"])

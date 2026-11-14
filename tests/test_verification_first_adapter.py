@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -445,19 +446,22 @@ def test_an_ingest_or_write_failure_degrades_to_a_diagnostic_and_keeps_the_stop(
     def refuse(*_args, **_kwargs):
         raise core.ThalirisError("TASK_STATE_CAPACITY_EXCEEDED", "observations are full")
 
-    monkeypatch.setattr(core, "ingest_claims", refuse)
-    assert lifecycle.handle_hook(root, "SubagentStop", _stop(child, message)) == ""
-    record = _child_record(root, task_id, "failing-implementer")
-    assert record["stop_observed"] and record["claim_ingest"]["claims"] == "error:TASK_STATE_CAPACITY_EXCEEDED"
-    assert record["claim_ingest"]["usage"] == "recorded" and "claims" not in _handoff(root, handoff)
-    assert task_authority.check(root) is not None
-    # The failed ingest is surfaced to the Controller instead of vanishing.
-    context, packet = _packet(lifecycle._controller_evidence_context(root, _event(tool_name="Bash", tool_response="ok")))
-    assert packet["Claims"]["ingest_errors"] == [{"handoff_id": handoff, "claims": "error:TASK_STATE_CAPACITY_EXCEEDED"}]
-    assert "could not be recorded" in context
-    monkeypatch.undo()
+    # Scope only the refusal: monkeypatch.undo() would also revert the fixture's
+    # isolated CODEX_HOME/THALIRIS_HOME and task-authority directory, so the
+    # rest of the test would depend on the developer machine's Host profiles.
+    with monkeypatch.context() as refusal:
+        refusal.setattr(core, "ingest_claims", refuse)
+        assert lifecycle.handle_hook(root, "SubagentStop", _stop(child, message)) == ""
+        record = _child_record(root, task_id, "failing-implementer")
+        assert record["stop_observed"] and record["claim_ingest"]["claims"] == "error:TASK_STATE_CAPACITY_EXCEEDED"
+        assert record["claim_ingest"]["usage"] == "recorded" and "claims" not in _handoff(root, handoff)
+        assert task_authority.check(root) is not None
+        # The failed ingest is surfaced to the Controller instead of vanishing.
+        context, packet = _packet(lifecycle._controller_evidence_context(root, _event(tool_name="Bash", tool_response="ok")))
+        assert packet["Claims"]["ingest_errors"] == [{"handoff_id": handoff, "claims": "error:TASK_STATE_CAPACITY_EXCEEDED"}]
+        assert "could not be recorded" in context
 
-    monkeypatch.setattr(task_authority, "directory", lambda: root.parent / (root.name + "-task-authority"))
+    assert os.environ["CODEX_HOME"] == str(root / "isolated-codex-home")
     second, second_handoff = _spawn(root, "investigator", "unwritable-investigator", marker=_selected_message("C1"))
 
     def unwritable(*_args, **_kwargs):
