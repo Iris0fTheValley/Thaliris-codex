@@ -15,7 +15,7 @@ import pytest
 from thaliris_codex import runtime_setup, runtime_identity, host_maintenance, host_preflight, codex_adapter
 
 
-def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False, version="0.5.2"):
+def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False, version="0.6.0"):
     """Pack current test source as a disposable fixture, not a release artifact."""
     path = tmp_path / f"{name}-{version}-py3-none-any.whl"
     info = f"{name}-{version}.dist-info"
@@ -606,3 +606,24 @@ def test_runtime_setup_rejects_unpinned_or_changed_artifacts_before_create(tmp_p
     with pytest.raises(ValueError, match="artifact identity mismatch"):
         runtime_setup.create(target, str(artifact) + "#sha256=" + "0" * 64, "unreviewed")
     assert not target.exists()
+
+
+@pytest.mark.parametrize("found", ["0.6.0", "0.6.9"])
+def test_core_range_accepts_declared_versions(found):
+    runtime_setup.verify_core_version(found, ["thaliris>=0.6.0,<0.7"])
+    runtime_setup.verify_core_version(found)
+
+
+@pytest.mark.parametrize("found", ["0.5.9", "0.7.0"])
+def test_core_range_refuses_outside_versions_with_exception(found):
+    with pytest.raises(RuntimeError) as error:
+        runtime_setup.verify_core_version(found, ["thaliris>=0.6.0,<0.7"])
+    assert found in str(error.value) and ">=0.6.0,<0.7" in str(error.value)
+
+
+def test_core_range_comes_from_declared_dependency():
+    assert runtime_setup.core_version_range(["pytest", "thaliris>=0.8.1,<0.9"]) == ((0, 8, 1), (0, 9))
+    runtime_setup.verify_core_version("0.8.5", ["thaliris>=0.8.1,<0.9"])
+    with pytest.raises(RuntimeError):
+        runtime_setup.verify_core_version("0.6.0", ["thaliris>=0.8.1,<0.9"])
+    assert runtime_setup.core_version_range([]) == ((0, 6, 0), (0, 7))
