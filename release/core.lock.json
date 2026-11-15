@@ -1,5 +1,5 @@
 {
   "repository": "Iris0fTheValley/Thaliris",
-  "commit": "1ecc5c41a2e66298eeeb17a190e84a0955b5880b",
-  "reason": "Core 0.6.0 (verification-first ledger: declared checks, verify, withholding gate, typed claims, dispatch usage, adaptive lane; task-state schema 9, promoted one-way at the first managed child stop); parallel_dispatch is user-directed: budget and workstreams optional, no program cap, only write-write scope overlap refused; scopes are canonicalised (public canonical_scope/scopes_overlap: NFC, casefold, separator normalisation, unsafe forms rejected) so write overlap cannot be bypassed by spelling"
+  "commit": "8e5cdce2d9458ae226fa5fa93032a4eda220237e",
+  "reason": "Core 0.6.0 (verification-first ledger: declared checks, verify, withholding gate, typed claims, dispatch usage, adaptive lane; task-state schema 9, promoted one-way at the first managed child stop); parallel_dispatch is user-directed: budget and workstreams optional, no program cap, only write-write scope overlap refused; scopes are canonicalised (public canonical_scope/scopes_overlap: NFC, casefold, separator normalisation, unsafe forms rejected) so write overlap cannot be bypassed by spelling; canonical_scope treats [ ] { } ( ) literally and aliases 8.3-looking segments to siblings; near-linear overlap index"
 }
