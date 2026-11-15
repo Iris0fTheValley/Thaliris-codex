@@ -29,6 +29,49 @@ from . import runtime_identity
 _HOST_PACKAGE_FAMILY_ENV = "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY"
 _HOST_PACKAGE_FAMILY = re.compile(r"OpenAI\.Codex_[A-Za-z0-9]{13}")
 
+# Fallback only; must match the ``thaliris`` requirement in pyproject.toml.
+CORE_REQUIREMENT_FALLBACK = "thaliris>=0.6.0,<0.7"
+
+
+def _version_tuple(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.match(r"\d+(?:\.\d+)*", text.strip()).group(0).split("."))[:3]
+
+
+def core_version_range(requirements=None) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return (inclusive lower, exclusive upper) Core bounds.
+
+    Taken from the installed adapter's declared ``thaliris`` dependency; falls
+    back to CORE_REQUIREMENT_FALLBACK when metadata is unavailable.
+    """
+    if requirements is None:
+        try:
+            from importlib.metadata import requires
+            requirements = requires("thaliris-codex")
+        except Exception:
+            requirements = None
+    for requirement in [*(requirements or []), CORE_REQUIREMENT_FALLBACK]:
+        name = re.match(r"\s*([A-Za-z0-9_.-]+)\s*(.*)", requirement)
+        if not name or name.group(1).lower().replace("_", "-") != "thaliris":
+            continue
+        spec = name.group(2).split(";")[0]
+        lower = re.search(r">=\s*([0-9][0-9.]*)", spec)
+        upper = re.search(r"(?<![=!~<>])<\s*([0-9][0-9.]*)", spec)
+        if lower and upper:
+            return _version_tuple(lower.group(1)), _version_tuple(upper.group(1))
+    raise RuntimeError("cannot determine the accepted Core version range")
+
+
+def verify_core_version(found: str | None = None, requirements=None) -> None:
+    """Refuse a Core outside the adapter's declared range (not an assert)."""
+    if found is None:
+        from importlib.metadata import version
+        found = version("thaliris")
+    lower, upper = core_version_range(requirements)
+    if not lower <= _version_tuple(found) < upper:
+        fmt = lambda v: ".".join(map(str, v))
+        raise RuntimeError(f"Core thaliris {found} is outside the accepted range "
+                           f">={fmt(lower)},<{fmt(upper)} required by thaliris-codex")
+
 
 def _host_package_family() -> str:
     """Use the current Host's package context, or its exact registered identity."""
@@ -317,9 +360,8 @@ def create(directory: Path, core_source: str, adapter_source: str) -> dict:
         # Check runtime dependency versions without installing package-manager
         # machinery into the runtime or importing code from the caller's checkout.
         subprocess.run([str(interpreter), "-I", "-B", "-c",
-                        "from importlib.metadata import version; "
-                        "v=tuple(map(int,version('thaliris').split('.')[:3])); "
-                        "assert (0,5,2)<=v<(0,6,0); import thaliris_codex.cli"],
+                        "from thaliris_codex.runtime_setup import verify_core_version; "
+                        "verify_core_version(); import thaliris_codex.cli"],
                        env=environment, check=True, stdout=sys.stderr)
         if runtime_identity.manifest_bytes(executable) != contents:
             raise ValueError("new runtime changed during verification")
