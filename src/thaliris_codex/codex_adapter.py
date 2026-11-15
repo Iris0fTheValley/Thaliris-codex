@@ -2659,6 +2659,7 @@ def doctor(root: Path) -> dict[str, object]:
     pretool_tools: set[str] = set()
     host_tool_names: set[str] = set()
     hook_shape_gaps: list[dict[str, object]] = []
+    unattributed_gaps: list[dict[str, object]] = []
     stale_gaps = 0
     gap_binary = lifecycle._host_binary_stamp()
     gap_binary = None if gap_binary == "UNKNOWN" else gap_binary
@@ -2698,6 +2699,12 @@ def doctor(root: Path) -> dict[str, object]:
                 if gap_binary is not None and gap.get("host_binary_sha256") == gap_binary:
                     if len(hook_shape_gaps) < 16:
                         hook_shape_gaps.append(gap)
+                elif gap_binary is None and gap.get("host_binary_sha256") in (None, "UNKNOWN"):
+                    # Neither side can name a binary (a .cmd launcher, or no Host
+                    # found): list the gap instead of hiding it as "not current".
+                    marked = {**gap, "attribution": "UNATTRIBUTED"}
+                    if len(unattributed_gaps) < 16 and marked not in unattributed_gaps:
+                        unattributed_gaps.append(marked)
                 else:
                     stale_gaps += 1
         if current and isinstance(runtime.get("subagent_start_agent_types"), list):
@@ -2817,6 +2824,7 @@ def doctor(root: Path) -> dict[str, object]:
     result["host_hook_shape"] = host_hook_shape(home, observed_tool_names=host_tool_names,
                                                 runtime_gaps=hook_shape_gaps)
     result["host_hook_shape"]["runtime_payload_gaps_not_current"] = stale_gaps
+    result["host_hook_shape"]["runtime_payload_gaps_unattributed"] = unattributed_gaps
     posttool_schema = "PASS" if any(item.get("native_response_contract") in {"CURRENT_V2", "LEGACY_V1"}
         for tool, item in tool_schemas.items() if tool in lifecycle._COLLABORATION_TOOL_NAMES) else "UNKNOWN"
     result["lifecycle_reconciliation"] = {

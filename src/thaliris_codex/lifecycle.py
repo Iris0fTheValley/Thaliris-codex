@@ -18,7 +18,7 @@ from typing import Any
 
 from thaliris import core
 
-from . import roles, runtime_identity, host_preflight, task_authority, diagnostics
+from . import roles, runtime_identity, host_preflight, task_authority, diagnostics, write_detection
 
 HOOK_COMMAND_PREFIX = "thaliris audit-hook"
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop")
@@ -1533,13 +1533,13 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
     if event == "PreToolUse":
         tool = payload.get("tool_name") or payload.get("tool")
         normalized = _tool_basename(tool) if isinstance(tool, str) else ""
-        mutating = (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
+        mutating = (_obvious_write_attempt(payload, broad=True) or _obvious_mutation_tool(normalized)
             or _context_operation(payload) in _CHILD_CONTEXT_MUTATIONS)
         if payload.get("fenced") is True:
             return _permission_deny("THALIRIS_FENCED_ACTOR: fenced management cannot regain grants through missing task evidence")
         role = _native_agent_roles().get(_native_spawn_agent_type({"tool_input": payload}), "unknown")
         binding = roles.get_codex_binding(role)
-        if _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload):
+        if _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload, broad=True):
             mutating = False
         if mutating and (payload.get("readonly") is True or binding is not None and not binding.repo_write_allowed):
             return _permission_deny("THALIRIS_READONLY_ACTOR: this known role remains readonly even when task association or authority is unavailable")
@@ -1718,9 +1718,9 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
             if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
                 return _release_maintenance_output(root, payload, managed_hook_abi)
             if payload.get("readonly") is True and not (
-                _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload)
+                _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload, broad=True)
             ) and (
-                _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
+                _obvious_write_attempt(payload, broad=True) or _obvious_mutation_tool(normalized)
                 or _context_operation(payload) in _CHILD_CONTEXT_MUTATIONS
                 or normalized in _DELEGATION_TOOL_NAMES
             ):
@@ -2314,14 +2314,20 @@ def _record_collaboration_tool_name(root: Path, payload: dict[str, Any]) -> None
     """Keep a raw Host multi-agent tool name even when the PostToolUse matcher misses it.
 
     PreToolUse uses the match-all matcher, so every Host tool name reaches it;
-    a name whose suffix is a collaboration base name is recorded verbatim
-    (bounded) so the doctor's matcher check can observe a mismatch that
-    PostToolUse alone could never report.
+    a name that is a collaboration base name, exactly or behind a namespace or
+    separator, is recorded verbatim (bounded) so the doctor's matcher check can
+    observe a mismatch that PostToolUse alone could never report.
     """
     from . import hook_shape
     tool = payload.get("tool_name") or payload.get("tool")
     if not hook_shape.multi_agent_name(tool):
-        return
+        # Only a name that ends in a base name can be a custom-namespace tool;
+        # read the configured namespace for that rare candidate alone.
+        if not hook_shape.has_base_suffix(tool):
+            return
+        configured = hook_shape._configured_namespace(_host_home_path())
+        if configured is None or not hook_shape.multi_agent_name(tool, (configured,)):
+            return
     path = _session_dir(root, payload) / "runtime.json"
     try:
         names = _load_runtime(path).get("collaboration_tool_names_observed", [])
@@ -5773,14 +5779,51 @@ def _control_state_target(payload: dict[str, Any]) -> str | None:
     return agents if agents in normalized else None
 
 
-def _obvious_write_attempt(payload: dict[str, Any]) -> bool:
+def _command_material(payload: dict[str, Any]) -> str | list[str] | None:
+    """The shell command text, or the argv list of a shell-array ``command``."""
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    command = tool_input.get("command") or tool_input.get("cmd")
+    if isinstance(command, str):
+        return command if command.strip() else None
+    if isinstance(command, list) and command:
+        return [str(item) for item in command]
+    return None
+
+
+def _obvious_write_attempt(payload: dict[str, Any], *, broad: bool = False) -> bool:
+    """Heuristic write detection; ``broad`` widens it for deny-only contexts.
+
+    The legacy pattern stays the default for every caller. ``broad=True`` also
+    recognizes the wider command families of ``write_detection`` (file moves,
+    in-place editors, Git working-tree and ref changes, package installs,
+    script one-liners, shell-array commands). Only a call site that already
+    refuses writes (a readonly, parallel-readonly or non-write role actor) may
+    pass it, because it can only make that refusal stricter. A site that could
+    refuse an authorized writer, or that observes rather than denies, must not.
+    """
     tool = payload.get("tool_name") or payload.get("tool")
     if not isinstance(tool, str):
         return False
     if _tool_basename(tool) in _CONTROLLER_MUTATION_TOOL_NAMES:
         return True
     command = _bash_command(payload)
-    return isinstance(command, str) and _OBVIOUS_WRITE.search(command) is not None
+    if isinstance(command, str) and _OBVIOUS_WRITE.search(command) is not None:
+        return True
+    if not broad:
+        return False
+    material = _command_material(payload)
+    if material is None:
+        return False
+    if isinstance(material, list):
+        if _OBVIOUS_WRITE.search(" ".join(material)) is not None:
+            return True
+    elif _context_operation(payload) in _CHILD_LEDGER_APPENDS:
+        # A standalone observe/verify call carries free text; a read-only actor
+        # must stay able to record it whatever words the text contains.
+        return False
+    return write_detection.broad_write(material)
 
 
 def _obvious_mutation_tool(tool: str) -> bool:
@@ -6026,7 +6069,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             blocked=False,
             notify_controller=role in roles.notice_roles(),
         )
-    if _obvious_write_attempt(payload) and _parallel_readonly_actor(root, payload):
+    if _obvious_write_attempt(payload, broad=True) and _parallel_readonly_actor(root, payload):
         _best_effort_record(
             _record_protocol_deviation,
             root,
@@ -6037,7 +6080,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
         )
         return _permission_deny("THALIRIS_READONLY_ACTOR: this parallel dispatch declared no write workstream and was"
                                 " admitted read-only; repository writes need a declared write workstream")
-    if binding is not None and not binding.repo_write_allowed and _obvious_write_attempt(payload):
+    if binding is not None and not binding.repo_write_allowed and _obvious_write_attempt(payload, broad=True):
         _best_effort_record(
             _record_protocol_deviation,
             root,

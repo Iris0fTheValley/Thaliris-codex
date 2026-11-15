@@ -37,14 +37,22 @@ The check requires, for each of the seven registered events, a schema whose
 count once). `agent_id` and `agent_type` must be declared for prompt and tool
 events but are absent for root actors at runtime. Observed multi-agent tool names
 are matched against `POST_TOOL_MATCHER`; without observations the matcher result
-is `UNKNOWN`. A custom `features.multi_agent_v2.tool_namespace` in user config is
+is `UNKNOWN`. A name counts as a collaboration tool only when it equals a base
+name, or a base name follows a known namespace (`collaboration`, `multi_agent_v1`,
+the configured `tool_namespace`) or one of the separators `.`, `/`, `__`, `:`; a
+name that merely ends in one (`ReadAgent`) is another tool and is not recorded. A custom `features.multi_agent_v2.tool_namespace` in user config is
 read, never written, and reported `INCOMPATIBLE` when the matcher cannot select
 its names. The overall result is never a runtime refusal.
 
 At runtime, a hook payload that lacks a required key keeps its existing
 fail-closed handling. The session's `runtime.json` gains at most 16 entries
 `{"status": "UNKNOWN", "event": …, "missing_keys": […]}`, and `doctor` lists them
-under `host_hook_shape.runtime_payload_gaps`.
+under `host_hook_shape.runtime_payload_gaps`. Each entry is stamped with the
+resolved Host binary digest. When the current Host binary cannot be resolved
+(a `.cmd` launcher, or no Host), `doctor` lists gaps whose stamp is also unknown
+or missing under `host_hook_shape.runtime_payload_gaps_unattributed`, marked
+`"attribution": "UNATTRIBUTED"`; gaps stamped with a different known binary stay
+counted in `runtime_payload_gaps_not_current`. This is diagnostic only.
 
 ## Observed builds (evidence)
 

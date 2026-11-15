@@ -96,7 +96,9 @@ def test_unmatched_observed_tool_name_is_incompatible():
     assert result["schema_status"] == "COMPATIBLE" and result["matcher_status"] == "INCOMPATIBLE"
     assert result["matchers"]["post_tool_unmatched"] == ["multi_agent_v1send_input"]
     # Without schemas a matcher mismatch is still reported.
-    assert hook_shape.check(None, tool_names=["teamspawn_agent"])["status"] == "INCOMPATIBLE"
+    # The unmatched custom namespace is a collaboration name only when it is the configured one.
+    assert hook_shape.check(None, tool_names=["teamspawn_agent"], namespaces=["team"])["status"] == "INCOMPATIBLE"
+    assert hook_shape.check(None, tool_names=["teamspawn_agent"])["status"] == "UNKNOWN"
 
 
 def test_observed_v1_and_mcp_names():
@@ -308,8 +310,11 @@ def test_gap_is_deduplicated_before_the_lock_and_skipped_for_fenced_actors(
 def test_pretool_records_raw_collaboration_names_the_matcher_would_miss(
         tmp_path, managed_role_profile_home, fixture_host):
     root = _project(tmp_path / "repo")
+    (codex_adapter._codex_home() / "config.toml").write_bytes(
+        b'[features.multi_agent_v2]\nenabled = true\ntool_namespace = "team"\n')
     base = {"session_id": "session-f", "cwd": str(root), "turn_id": "t", "tool_use_id": "u", "tool_input": {}}
-    for name in ("teamspawn_agent", "resume_agent", "mcp__srv__send_message", "Bash", "teamspawn_agent"):
+    for name in ("teamspawn_agent", "resume_agent", "mcp__srv__send_message", "Bash", "teamspawn_agent",
+                 "ReadAgent", "myspawn_agentX", "unrelated.Agent.tool"):
         lifecycle.handle_hook(root, "PreToolUse", {**base, "tool_name": name})
     names = []
     for path in (root / ".context" / "audit").glob("*/runtime.json"):
@@ -332,3 +337,79 @@ def test_pretool_gap_keeps_the_existing_decision(tmp_path, managed_role_profile_
     assert with_diagnostic == without
     assert {"status": "UNKNOWN", "event": "PreToolUse", "missing_keys": ["turn_id", "tool_use_id|call_id|tool_call_id"],
             "host_binary_sha256": hashlib.sha256(fixture_host.read_bytes()).hexdigest()} in _runtime_gaps(root)
+
+
+@pytest.mark.parametrize("name,namespaces,expected", [
+    # Not collaboration tools: a base name is only a suffix of some other word.
+    ("ReadAgent", (), False), ("ReadAgent", ("team",), False), ("myspawn_agentX", (), False),
+    ("myspawn_agent", (), False), ("teamspawn_agent", (), False), ("xsend_message", ("team",), False),
+    ("foo_spawn_agent", (), False), ("mcp__srv__send_message", (), False), ("__spawn_agent", (), False),
+    ("", (), False), (None, (), False),
+    # Collaboration tools: exact, known namespace, configured namespace or an explicit separator.
+    ("spawn_agent", (), True), ("Agent", (), True), ("resume_agent", (), True),
+    ("collaborationspawn_agent", (), True), ("multi_agent_v1spawn_agent", (), True),
+    ("teamspawn_agent", ("team",), True), ("collaboration.spawn_agent", (), True), ("ns/send_input", (), True),
+    ("ns__wait_agent", (), True), ("ns:close_agent", (), True), ("functions.spawn_agent", (), True),
+])
+def test_multi_agent_name_requires_an_exact_or_namespaced_base_name(name, namespaces, expected):
+    assert hook_shape.multi_agent_name(name, namespaces) is expected
+    if namespaces == ():
+        assert hook_shape.multi_agent_name(name) is expected
+
+
+def test_lookalike_names_do_not_make_the_matcher_incompatible():
+    result = hook_shape.check(upstream(), tool_names=["ReadAgent", "myspawn_agentX", "collaborationspawn_agent"])
+    assert result["matchers"]["observed_tool_names"] == ["collaborationspawn_agent"]
+    assert result["matchers"]["status"] == "COMPATIBLE"
+    only_lookalike = hook_shape.check(upstream(), tool_names=["ReadAgent"])["matchers"]
+    assert only_lookalike["status"] == "UNKNOWN" and only_lookalike["post_tool_unmatched"] == []
+
+
+def _collaboration_names(root: Path) -> list:
+    names = []
+    for path in (root / ".context" / "audit").glob("*/runtime.json"):
+        names += json.loads(path.read_text(encoding="utf-8")).get("collaboration_tool_names_observed", [])
+    return names
+
+
+def test_recorder_applies_the_same_rule_with_the_configured_namespace(tmp_path, managed_role_profile_home, fixture_host):
+    root = _project(tmp_path / "repo")
+    base = {"session_id": "session-n3", "cwd": str(root), "turn_id": "t", "tool_use_id": "u", "tool_input": {}}
+    # No configured namespace: neither a lookalike nor an unconfigured prefix is recorded.
+    for name in ("ReadAgent", "myspawn_agentX", "teamspawn_agent", "collaborationspawn_agent"):
+        lifecycle.handle_hook(root, "PreToolUse", {**base, "tool_name": name})
+    assert _collaboration_names(root) == ["collaborationspawn_agent"]
+    (codex_adapter._codex_home() / "config.toml").write_bytes(
+        b'[features.multi_agent_v2]\ntool_namespace = "team"\n')
+    lifecycle.handle_hook(root, "PreToolUse", {**base, "tool_name": "teamspawn_agent"})
+    assert _collaboration_names(root) == ["collaborationspawn_agent", "teamspawn_agent"]
+
+
+def test_unresolvable_host_lists_unattributed_runtime_gaps(tmp_path, managed_role_profile_home, fixture_host, monkeypatch):
+    root = _project(tmp_path / "repo")
+    lifecycle.handle_hook(root, "SubagentStop", {"session_id": "session-n2", "cwd": str(root)})  # known Host stamp
+    stamp = hashlib.sha256(fixture_host.read_bytes()).hexdigest()
+    known = _runtime_gaps(root)
+    assert len(known) == 1 and known[0]["host_binary_sha256"] == stamp
+    # A launcher or an absent Host: the stamp is UNKNOWN when the gap is recorded and when doctor reads it.
+    monkeypatch.setattr(lifecycle, "_host_binary_stamp", lambda: "UNKNOWN")
+    lifecycle.handle_hook(root, "SubagentStop", {"session_id": "session-n2b", "cwd": str(root)})
+    unknown = [gap for gap in _runtime_gaps(root) if gap["host_binary_sha256"] == "UNKNOWN"]
+    assert len(unknown) == 1
+    report = codex_adapter.doctor(root)["host_hook_shape"]
+    assert report["runtime_payload_gaps"] == []
+    assert report["runtime_payload_gaps_unattributed"] == [{**unknown[0], "attribution": "UNATTRIBUTED"}]
+    # A gap stamped with a known, different binary is still only counted as not current.
+    assert report["runtime_payload_gaps_not_current"] == 1
+    assert report["runtime_refusal"] == "NEVER"
+
+
+def test_resolved_host_keeps_unknown_stamped_gaps_out_of_the_unattributed_list(
+        tmp_path, managed_role_profile_home, fixture_host, monkeypatch):
+    root = _project(tmp_path / "repo")
+    with monkeypatch.context() as patched:
+        patched.setattr(lifecycle, "_host_binary_stamp", lambda: "UNKNOWN")
+        lifecycle.handle_hook(root, "SubagentStop", {"session_id": "session-n2c", "cwd": str(root)})
+    report = codex_adapter.doctor(root)["host_hook_shape"]
+    assert report["runtime_payload_gaps"] == [] and report["runtime_payload_gaps_unattributed"] == []
+    assert report["runtime_payload_gaps_not_current"] == 1

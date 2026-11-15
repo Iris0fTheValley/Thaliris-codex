@@ -719,3 +719,101 @@ def test_pre_ca46611_overlapping_contract_refuses_writers_and_admits_reads_reado
     assert pre(root, request("reviewer", message="Review under a stale contract")) == ""
     # Another session is not the owner: the stale contract is not its evidence.
     assert not lifecycle._parallel_contract_invalid(root, hashlib.sha256(b"other").hexdigest())
+
+
+# N1: the deny-only write heuristic recognizes the wider command families.
+
+_WRITE_FAMILIES = {
+    "file-ops": ["mv a.py b.py", "cp a.py b.py", "rm -rf build", "rmdir build", "touch x.py", "ln -s a b"],
+    "in-place-and-tee": ["sed -i 's/a/b/' x.py", "sed -i.bak s/a/b/ x.py", "perl -pi -e 's/a/b/' x.py",
+                         "cat x.py | tee y.py"],
+    "powershell": ["Get-Date | Out-File x.txt", "Rename-Item a b", "Clear-Content x.txt", "ni x.txt", "ri x.txt",
+                   "mi a b", "cpi a b", "Set-Content x v", "Add-Content x v"],
+    "dotnet": ["[IO.File]::WriteAllText('x','y')", "[System.IO.File]::AppendAllText('x','y')",
+               "[IO.File]::Delete('x')", "[IO.Directory]::CreateDirectory('d')"],
+    "python-node-one-liners": [
+        "python -c \"open('x','w').write('y')\"", "python3 -c \"open('x', mode='a')\"",
+        "python -c \"from pathlib import Path; Path('x').write_text('y')\"",
+        "python -c \"Path('x').write_bytes(b'y')\"", "python -c \"import shutil; shutil.rmtree('d')\"",
+        "python -c \"import os; os.remove('x')\"", "python -c \"import os; os.rename('a','b')\"",
+        "python -c \"import os; os.makedirs('d')\"",
+        "node -e \"require('fs').writeFileSync('x','y')\"", "node -e \"fs.rmSync('x')\"",
+        "node -e \"fs.unlinkSync('x')\"", "node -e \"fs.renameSync('a','b')\"", "node -e \"fs.mkdirSync('d')\"",
+        "node -e \"fs.copyFileSync('a','b')\""],
+    "git-working-tree": ["git add .", "git stash", "git stash push -m x", "git restore x.py", "git clean -fd",
+                         "git rm x.py", "git mv a b", "git merge other", "git rebase main",
+                         "git cherry-pick abc", "git revert abc", "git am p.patch", "git pull",
+                         "git switch other", "git -c safe.directory=* add ."],
+    "git-refs": ["git tag v1", "git tag -d v1", "git branch -d old", "git branch -D old", "git branch -m a b",
+                 "git branch newbranch", "git worktree add ../w"],
+    "package-installs": ["npm install", "npm i left-pad", "pnpm add x", "yarn add x", "pip install x",
+                         "uv add x", "uv sync", "npm ci", "pnpm remove x", "python -m pip install x",
+                         "uv pip install x"],
+    "wrapped-and-compound": ["cd src && rm x.py", "bash -lc 'rm x.py'", "powershell -Command \"Remove-Item x\"",
+                             "cmd /c del x.py", "find . -name x -delete", "ls | xargs rm", "sudo rm x.py"],
+    "argv-lists": [["rm", "x.py"], ["git", "add", "."], ["bash", "-lc", "rm x.py"], ["npm", "install"],
+                   ["python", "-c", "open('x','w')"], ["pwsh", "-Command", "Get-Date | Out-File x"]],
+}
+_READ_COMMANDS = [
+    "git status", "git log --oneline", "git diff", "git show HEAD", "git stash list", "git stash show",
+    "git branch", "git branch -a", "git branch --list 'feat/*'", "git tag", "git tag -l", "git worktree list",
+    "git -C repo status", "cat README.md", "ls -la", "rg rm src", "rg \"rm -rf\" docs",
+    "grep -r 'git add' .", "Get-Content x.txt", "Get-ChildItem", "python -c \"print(1)\"",
+    "python -c \"print(open('x').read())\"", "node -e \"console.log(1)\"", "npm test", "pytest", "pytest -q tests/",
+    "pip list", "uv run pytest", "sed -n '1,5p' x.py", ["git", "status"], ["cat", "README.md"],
+]
+
+
+def _readonly_attempts(child: dict, command) -> dict:
+    return {**child, "tool_name": "Bash", "tool_input": {"command": command}}
+
+
+@pytest.mark.parametrize("family", sorted(_WRITE_FAMILIES))
+def test_widened_write_detection_is_denied_for_readonly_actors_and_parallel_readers(parallel, family):
+    root = parallel
+    value = request("investigator", message="Read slice A")
+    assert pre(root, value) == ""
+    reader = bind(root, value, "investigator", "wide-reader")
+    assert child_record(root, "wide-reader")["parallel_readonly"] is True
+    for command in _WRITE_FAMILIES[family]:
+        for actor in (reader, {"cwd": str(root), "session_id": "readonly-session", "readonly": True}):
+            output = lifecycle.handle_hook(root, "PreToolUse", _readonly_attempts(actor, command),
+                                           lifecycle.MANAGED_HOOK_ABI)
+            assert denied(output, "THALIRIS_READONLY_ACTOR"), (command, output)
+
+
+def test_widened_write_detection_leaves_read_commands_available(parallel):
+    root = parallel
+    value = request("investigator", message="Read slice B")
+    assert pre(root, value) == ""
+    reader = bind(root, value, "investigator", "wide-reader-2")
+    for command in _READ_COMMANDS:
+        for actor in (reader, {"cwd": str(root), "session_id": "readonly-session", "readonly": True}):
+            output = lifecycle.handle_hook(root, "PreToolUse", _readonly_attempts(actor, command),
+                                           lifecycle.MANAGED_HOOK_ABI)
+            assert not denied(output, "THALIRIS_READONLY_ACTOR"), (command, output)
+
+
+def test_widened_write_detection_does_not_refuse_the_declared_writer(parallel):
+    root = parallel
+    value = request("focused-implementer", workstream="ws-a")
+    assert pre(root, value) == ""
+    writer = bind(root, value, "focused-implementer", "wide-writer")
+    for command in ("git add .", "npm install", "mv a.py b.py", "sed -i s/a/b/ x.py", "rm x.py"):
+        output = lifecycle.handle_hook(root, "PreToolUse", _readonly_attempts(writer, command),
+                                       lifecycle.MANAGED_HOOK_ABI)
+        assert not denied(output, "THALIRIS_READONLY_ACTOR"), (command, output)
+
+
+def test_readonly_actor_can_still_record_an_observation_that_mentions_write_words(parallel):
+    root = parallel
+    inline = json.dumps({"text": "git add and rm -rf and npm install were all refused for readers"})
+    command = f"thaliris --root \"{root}\" task-observe --role investigator --observation-json '{inline}'"
+    assert lifecycle._context_operation({"tool_input": {"command": command}}) == "task-observe"
+    for actor in ({"readonly": True}, ):
+        output = lifecycle.handle_hook(root, "PreToolUse", {"cwd": str(root), "session_id": "ro", "tool_name": "Bash",
+                                                            "tool_input": {"command": command}, **actor})
+        assert not denied(output, "THALIRIS_READONLY_ACTOR"), output
+    assert lifecycle._obvious_write_attempt({"tool_name": "Bash", "tool_input": {"command": command}}, broad=True) is False
+    chained = command + "; rm -rf x"
+    assert lifecycle._obvious_write_attempt({"tool_name": "Bash", "tool_input": {"command": chained}}, broad=True) is True

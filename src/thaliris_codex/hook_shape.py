@@ -169,26 +169,59 @@ def directory_schemas(directory: Path) -> dict[str, Any] | None:
     return found
 
 
-def multi_agent_name(name: object) -> bool:
-    """A raw Host tool name whose suffix is a multi-agent base name (any namespace form).
+# Namespaces upstream attaches to collaboration tools: the default V2 namespace
+# and the V1 one. Hook names are ``namespace + name`` (core/src/tools/mod.rs:50,
+# rust-v0.169.0), so these concatenate with no separator.
+KNOWN_TOOL_NAMESPACES = (DEFAULT_TOOL_NAMESPACE, "multi_agent_v1")
+_NAME_SEPARATORS = (".", "/", "__", ":")
 
-    MCP tools (``mcp__server__tool``) are server tools, not Host collaboration
-    tools, even when their suffix happens to coincide.
-    """
+
+def _collaboration_bases() -> tuple[str, ...]:
     from . import lifecycle
-    return (isinstance(name, str) and 0 < len(name) <= 128 and not name.startswith("mcp__")
-            and any(name.endswith(base) for base in lifecycle._COLLABORATION_TOOL_NAMES + V1_TOOL_NAMES))
+    return lifecycle._COLLABORATION_TOOL_NAMES + V1_TOOL_NAMES
 
 
-def _multi_agent_names(names: Iterable[str] | None) -> list[str]:
-    """Keep names that end in a known multi-agent tool name (any namespace form)."""
-    return sorted({name for name in (names or ()) if multi_agent_name(name)})[:64]
+def has_base_suffix(name: object) -> bool:
+    """True when the name merely ends in a collaboration base name (a candidate only)."""
+    return isinstance(name, str) and any(name.endswith(base) for base in _collaboration_bases())
 
 
-def _matchers(tool_names: Iterable[str] | None) -> dict[str, Any]:
+def multi_agent_name(name: object, namespaces: Iterable[str] | None = ()) -> bool:
+    """A raw Host tool name that is a collaboration tool: a base name, exactly or namespaced.
+
+    A name counts only when it equals a base name, or a base name preceded by a
+    known namespace (``collaboration``, ``multi_agent_v1``, a configured
+    ``tool_namespace`` from ``namespaces``) or by a separator (``.``, ``/``,
+    ``__``, ``:``). A name that merely ends in a base name (``ReadAgent``,
+    ``myspawn_agent``) is some other tool unless that prefix is the configured
+    namespace. MCP tools (``mcp__server__tool``) are server tools, not Host
+    collaboration tools.
+    """
+    if not isinstance(name, str) or not 0 < len(name) <= 128 or name.startswith("mcp__"):
+        return False
+    known = tuple(KNOWN_TOOL_NAMESPACES) + tuple(
+        value for value in (namespaces or ()) if isinstance(value, str) and 0 < len(value) <= 64)
+    for base in _collaboration_bases():
+        if not name.endswith(base):
+            continue
+        prefix = name[: -len(base)]
+        if not prefix or prefix in known:
+            return True
+        if any(prefix.endswith(separator) and len(prefix) > len(separator) for separator in _NAME_SEPARATORS):
+            return True
+    return False
+
+
+def _multi_agent_names(names: Iterable[str] | None, namespaces: Iterable[str] | None = ()) -> list[str]:
+    """Keep names that are collaboration tool names (see ``multi_agent_name``)."""
+    namespaces = tuple(namespaces or ())
+    return sorted({name for name in (names or ()) if multi_agent_name(name, namespaces)})[:64]
+
+
+def _matchers(tool_names: Iterable[str] | None, namespaces: Iterable[str] | None = ()) -> dict[str, Any]:
     """Check observed Host tool names against the registered matchers."""
     from . import lifecycle
-    names = _multi_agent_names(tool_names)
+    names = _multi_agent_names(tool_names, namespaces)
     if not names:
         return {"status": "UNKNOWN", "reason": "no Host multi-agent tool names observed",
                 "pre_tool_matcher": lifecycle.PRE_TOOL_MATCHER, "post_tool_unmatched": []}
@@ -218,7 +251,8 @@ def namespace_check(namespace: str | None, *, v2_enabled: bool | None = None,
     """
     from . import lifecycle
     v1_unmatched = [name for name in V1_TOOL_NAMES if re.fullmatch(lifecycle.POST_TOOL_MATCHER, name) is None]
-    observed_v2 = any(lifecycle._tool_basename(name) != name for name in _multi_agent_names(observed_tool_names))
+    observed_v2 = any(lifecycle._tool_basename(name) != name
+                      for name in _multi_agent_names(observed_tool_names, (namespace,) if namespace else ()))
     if namespace is None:
         return {"status": "UNKNOWN", "tool_namespace": "UNKNOWN", "multi_agent_v2": "UNKNOWN",
                 "reason": "Host config is unreadable"}
@@ -238,7 +272,8 @@ def namespace_check(namespace: str | None, *, v2_enabled: bool | None = None,
             "reason": "custom tool_namespace", "post_tool_unmatched": unmatched}
 
 
-def check(schemas: Mapping[str, Any] | None, *, tool_names: Iterable[str] | None = None) -> dict[str, Any]:
+def check(schemas: Mapping[str, Any] | None, *, tool_names: Iterable[str] | None = None,
+          namespaces: Iterable[str] | None = ()) -> dict[str, Any]:
     """Compare Host-declared hook inputs with the adapter's reliance.
 
     The schema check needs every registered event's schema and every
@@ -249,7 +284,7 @@ def check(schemas: Mapping[str, Any] | None, *, tool_names: Iterable[str] | None
     and otherwise UNKNOWN.
     """
     from . import lifecycle
-    matchers = _matchers(tool_names)
+    matchers = _matchers(tool_names, namespaces)
     if not schemas:
         return {"status": "INCOMPATIBLE" if matchers["status"] == "INCOMPATIBLE" else "UNKNOWN",
                 "schema_status": "UNKNOWN", "matcher_status": matchers["status"],
@@ -325,8 +360,8 @@ def host_report(*, executable: str | None = None, codex_home: Path | None = None
     from .config_capability import resolve_executable
     selected = executable or resolve_executable()
     schemas, digest = embedded_identity(selected)
-    result = check(schemas, tool_names=observed_tool_names)
     configured, v2_enabled = _configured_multi_agent(codex_home)
+    result = check(schemas, tool_names=observed_tool_names, namespaces=(configured,) if configured else ())
     namespace = namespace_check(configured, v2_enabled=v2_enabled, observed_tool_names=observed_tool_names)
     result["tool_namespace"] = namespace
     if namespace["status"] == "INCOMPATIBLE":
