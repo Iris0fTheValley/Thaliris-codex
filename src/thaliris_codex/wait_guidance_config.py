@@ -26,18 +26,14 @@ GUIDANCE = (
 )
 
 MARKER = "# thaliris:controller-wait-guidance\n"
-_SUPPORTED_VERSIONS = frozenset({
-    "codex-cli 0.162.0-alpha.2",
-    "codex-cli 0.162.0-alpha.17.2",
-    "codex-cli 0.162.0",
-    "codex-cli 0.162.1",
-    "codex-cli 0.165.0",
-})
 
 
 def capability() -> str:
-    """Use source evidence or an isolated check of the actual config effect."""
-    return config_capability("developer_instructions", _SUPPORTED_VERSIONS)
+    """Isolated check of the actual config effect, cached per exact binary.
+
+    No version string decides support; see ``mode_hint_config.capability``.
+    """
+    return config_capability("developer_instructions")
 
 
 def read(home: Path) -> tuple[bytes, dict]:

@@ -159,12 +159,18 @@ def recover(root: Path, expected: str, reason: str) -> dict:
         from . import lifecycle
         ledger_path = lifecycle._lifecycle_path(root, record["task_id"])
         ledger = record.get("lifecycle_snapshot", {})
+        # Every dropped reservation is reset like the singular slot, and an
+        # agent already identified for one is fenced with the old children.
+        reservations = lifecycle._pending_reservations(ledger) if isinstance(ledger, dict) else []
         record["fenced_agents"] = sorted(set(record["fenced_agents"]) |
-            {child["agent_id_hash"] for child in ledger.get("children", []) if child.get("agent_id_hash")})
+            {child["agent_id_hash"] for child in ledger.get("children", []) if child.get("agent_id_hash")} |
+            {item["native_agent_id_hash"] for item in reservations if isinstance(item.get("native_agent_id_hash"), str)})
         if ledger:
             # Core archived the exact old provenance. A fresh handoff is
             # required; no old child is called Completed.
             ledger = {**ledger, "children": [], "pending_authorized_spawn": None}
+            if "pending_authorized_spawns" in ledger:
+                ledger["pending_authorized_spawns"] = []
             core._atomic_write(ledger_path, (json.dumps(ledger, sort_keys=True, indent=2) + "\n").encode())
             record["lifecycle_snapshot"] = ledger
             record["lifecycle_sha256"] = digest(ledger_path)

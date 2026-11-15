@@ -18,7 +18,7 @@ from typing import Any
 
 from thaliris import core
 
-from . import roles, runtime_identity, host_preflight, task_authority, diagnostics
+from . import roles, runtime_identity, host_preflight, task_authority, diagnostics, write_detection
 
 HOOK_COMMAND_PREFIX = "thaliris audit-hook"
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop")
@@ -117,7 +117,7 @@ _CONTEXT_OPERATIONS = frozenset({
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
     "task-status", "task-get", "artifact-get", "catalog", "document-get",
     "task-artifact", "task-close", "task-promote", "rollback", "version",
-    "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain",
     "identity-status", "identity-get", "identity-trace",
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
@@ -127,7 +127,8 @@ _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
-    "task-abandon", "version", "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "task-abandon", "version", "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify",
+    "document-maintain",
     "identity-status", "identity-get", "identity-trace",
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
@@ -142,12 +143,16 @@ _CHILD_CONTEXT_MUTATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
     "rollback", "init", "uninstall", "codex-uninstall",
-    "task-evidence-register", "task-observe", "task-judge", "document-maintain",
+    "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain",
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
 })
+# Ledger appends a bound child makes under its own exact handoff identity. They
+# write no repository file of the child's choosing, so a readonly role keeps
+# them: an observation, and the result of a Controller-declared check.
+_CHILD_LEDGER_APPENDS = frozenset({"task-observe", "task-verify"})
 _RAW_CORE_IDENTITY_STATE = re.compile(r"(?i)thaliris[-_]?(?:core)?[^|;&]*identity-(?:offer|note|suggest)(?![-\w])")
-_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]task-authority|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
+_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]+(?:task-authority|host-capability)|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
 _START_ATTESTATION_TTL_NS = 120 * 1_000_000_000
 
@@ -1528,13 +1533,13 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
     if event == "PreToolUse":
         tool = payload.get("tool_name") or payload.get("tool")
         normalized = _tool_basename(tool) if isinstance(tool, str) else ""
-        mutating = (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
+        mutating = (_obvious_write_attempt(payload, broad=True) or _obvious_mutation_tool(normalized)
             or _context_operation(payload) in _CHILD_CONTEXT_MUTATIONS)
         if payload.get("fenced") is True:
             return _permission_deny("THALIRIS_FENCED_ACTOR: fenced management cannot regain grants through missing task evidence")
         role = _native_agent_roles().get(_native_spawn_agent_type({"tool_input": payload}), "unknown")
         binding = roles.get_codex_binding(role)
-        if _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload):
+        if _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload, broad=True):
             mutating = False
         if mutating and (payload.get("readonly") is True or binding is not None and not binding.repo_write_allowed):
             return _permission_deny("THALIRIS_READONLY_ACTOR: this known role remains readonly even when task association or authority is unavailable")
@@ -1592,6 +1597,9 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
                     binding = roles.get_codex_binding(known[0]["role"])
                     if mutating and binding is not None and not binding.repo_write_allowed:
                         return _permission_deny("THALIRIS_READONLY_ACTOR: the known handoff role remains readonly despite missing fields or damaged authority")
+                    if mutating and known[0].get("parallel_readonly") is True:
+                        return _permission_deny("THALIRIS_READONLY_ACTOR: this parallel dispatch declared no write workstream and was"
+                                                " admitted read-only; repository writes need a declared write workstream")
                     expected = known[0]
                     if mutating and _native_execution_terminal(expected):
                         return _permission_deny("THALIRIS_TERMINAL_ROLE_SESSION: native terminal evidence closes this handoff's execution; later work needs its own authorization")
@@ -1614,6 +1622,10 @@ def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_ab
             except (ValueError, TypeError, AttributeError):
                 decision = "deny"
             if decision != "deny":
+                if normalized == "wait_agent":
+                    wait_decision = _managed_wait_guard(root, payload)
+                    if wait_decision:
+                        return wait_decision
                 _best_effort_record(_record_native_status_call, root, payload, normalized)
         return output
     except (OSError, ValueError, TypeError, KeyError):
@@ -1642,10 +1654,9 @@ def _managed_collaboration_target(root: Path, payload: dict[str, Any]) -> bool:
         return True
     if target is None:
         return False
-    pending = state.get("pending_authorized_spawn")
+    pending = _pending_reservations(state)
     return (_child_for_native_name(state["children"], target) is not None
-        or isinstance(pending, dict) and _identity_hash(target) in
-        {pending.get("task_name_hash"), pending.get("native_agent_id_hash")})
+        or any(_identity_hash(target) in {item.get("task_name_hash"), item.get("native_agent_id_hash")} for item in pending))
 
 
 def _session_associated_managed_actor(root: Path, payload: dict[str, Any]) -> bool:
@@ -1707,9 +1718,9 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
             if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
                 return _release_maintenance_output(root, payload, managed_hook_abi)
             if payload.get("readonly") is True and not (
-                _context_operation(payload) == "task-observe" and not _obvious_write_attempt(payload)
+                _context_operation(payload) in _CHILD_LEDGER_APPENDS and not _obvious_write_attempt(payload, broad=True)
             ) and (
-                _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
+                _obvious_write_attempt(payload, broad=True) or _obvious_mutation_tool(normalized)
                 or _context_operation(payload) in _CHILD_CONTEXT_MUTATIONS
                 or normalized in _DELEGATION_TOOL_NAMES
             ):
@@ -1747,6 +1758,13 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                     return _permission_deny("THALIRIS_ABANDONED_SESSION: this native session belongs to an abandoned managed task.")
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 return _permission_deny("THALIRIS_ABANDONED_SESSION_FENCE_UNAVAILABLE")
+        if payload.get("fenced") is not True:
+            # Diagnostic only, after the fence and abandoned-actor checks so a
+            # fenced actor records nothing: every decision below keeps its own
+            # fail-closed handling of the same missing fields.
+            _best_effort_record(_record_hook_shape_gap, root, event, payload)
+            if event == "PreToolUse":
+                _best_effort_record(_record_collaboration_tool_name, root, payload)
         if event == "SubagentStart":
             return _subagent_start_output(root, payload)
         if event == "SubagentStop":
@@ -1792,6 +1810,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 attestation = _post_init_attestation(root, payload, managed_hook_abi)
                 if attestation:
                     return attestation
+            _best_effort_record(_record_controller_tool_output, root, payload)
             return _controller_evidence_context(root, payload)
         # Stop has no production policy role. It neither invokes a model nor
         # blocks or corrects the Controller.
@@ -1818,16 +1837,24 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
     task_id = core.selected_task(root)
     if task_id is None or active_controller_owner(root, task_id) != _session_id_hash(payload):
         return ""
-    task_authority.check(root)
+    anchor = task_authority.check(root)
     state = core._load_state(root)
-    if not state.get("evidence_continuity"):
+    try:
+        lines = verification_lines(root, state, anchor["contract"] if anchor is not None else None)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        # An unreadable standing is surfaced, never treated as green.
+        lines = {"Verification": {"status": "UNKNOWN"}} if state.get("checks") else {}
+    continuity = state.get("evidence_continuity") or {}
+    # A withheld check, an unreadable claim block or an advisory is shown even
+    # when the task has no continuity records or no open observation.
+    if not continuity and not _lines_actionable(lines):
         return ""
     packet = {"task_revision": state["revision"], **core.evidence_summary(state)}
     # Some Native Hosts supply an opaque spawn message to Hooks. A bound
     # lifecycle handoff then exists without a readable selected marker. Expose
     # that mechanical gap to the Controller; never decrypt, guess relevance or
     # silently claim its observations are durably associated.
-    associated = {item["id"] for item in state["evidence_continuity"]["handoffs"]}
+    handoffs = {item["id"]: item for item in continuity.get("handoffs", [])}
     unassociated = []
     try:
         ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
@@ -1835,7 +1862,16 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
                         "parent_handoff_id": item["root_handoff_id"] if item.get("depth") == 2 else None}
                        for item in ledger["children"]
                        if item.get("managed") is True and item.get("handoff_bound") is True
-                       and item.get("handoff_id") and item["handoff_id"] not in associated]
+                       and item.get("handoff_id") and item["handoff_id"] not in handoffs]
+        # A final message whose claims could not be ingested must not vanish.
+        failed = [{"handoff_id": item["handoff_id"], "claims": item["claim_ingest"]["claims"]}
+                  for item in ledger["children"]
+                  if isinstance(item, dict) and isinstance(item.get("claim_ingest"), dict)
+                  and str(item["claim_ingest"].get("claims", "")).startswith("error:")
+                  and item.get("handoff_id") in handoffs and "claims" not in handoffs[item["handoff_id"]]]
+        if failed and state.get("status") == "ACTIVE":
+            lines = {**lines, "Claims": {**lines.get("Claims", {}), "ingest_errors": failed[:_PACKET_LIST_MAX],
+                                         "ingest_errors_total": len(failed)}}
     except (OSError, ValueError, KeyError, TypeError):
         # An auxiliary lifecycle diagnostic must not hide existing critical
         # observations or imply that all handoffs were associated.
@@ -1849,19 +1885,21 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
         and packet.get("unincorporated_total") == 0
         and packet.get("unresolved_judgments_total") == 0
         and packet.get("latest_judgments_total") == 0
+        and not _lines_actionable(lines)
     ):
         return ""
     selected = {item["observation_id"] for item in packet["unincorporated"]}
     selected.update(item["id"] for item in packet["unresolved_judgments"])
     excerpts = []
     for kind, field in (("observations", "text"), ("judgments", "reasoning")):
-        for item in state["evidence_continuity"][kind]:
+        for item in continuity.get(kind, []):
             if item["id"] not in selected:
                 continue
             excerpt = {"id": item["id"], "excerpt": item[field][:384]}
             if len(json.dumps(excerpts + [excerpt], ensure_ascii=False).encode("utf-8")) <= 4096:
                 excerpts.append(excerpt)
     packet["decision_context_excerpts"] = excerpts
+    packet.update(lines)
     return json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext":
         f"Evidence Continuity at task revision {state['revision']} (the next write's --base-revision) before your next requirement/completion judgment. Models decide applicability; "
         "PASS, READY and Completed do not dispose evidence. Use task-get for exact records and "
@@ -1870,7 +1908,146 @@ def _controller_evidence_context(root: Path, payload: dict[str, Any]) -> str:
          "use Controller task-evidence-register with the exact handoff identity, candidate and requirement refs. "
          "An opaque or unmarked Host message supplies no association; do not infer it from role or lineage.\n"
          if unassociated else "") +
+        _verification_line_text(lines) +
         json.dumps(packet, ensure_ascii=False)}}, ensure_ascii=False)
+
+
+_PACKET_LIST_MAX = 8
+_PACKET_LINES_MAX_BYTES = 2048
+
+
+def verification_lines(root: Path, state: dict[str, Any], contract: dict[str, Any] | None) -> dict[str, Any]:
+    """Bounded ``Verification``/``Claims``/``Advisories`` lines for Controller packets.
+
+    Core computes every fact: check standing on the current tree, claim
+    markers and adaptive lane advisories. This only selects what a Controller
+    should see before its next judgment and caps it. It grants, dismisses and
+    decides nothing. An ACTIVE task that uses none of these features, and any
+    task that is no longer ACTIVE, yields ``{}``.
+    """
+    if state.get("status") != "ACTIVE":
+        return {}
+    sections = core.task_status_packet(state, view="compact", root=root, contract=contract)
+    lines: dict[str, Any] = {}
+    verification = sections.get("Verification")
+    if isinstance(verification, dict):
+        line: dict[str, Any] = {key: verification[key] for key in ("checks_total", "green", "red", "stale", "unrun")
+                                if key in verification}
+        not_green = [{key: entry[key] for key in ("id", "status", "reason") if key in entry}
+                     for entry in verification.get("checks", []) if entry.get("status") != "green"]
+        if not_green:
+            line["not_green"] = not_green[:_PACKET_LIST_MAX]
+        for key in ("withheld_requirements", "uncovered_requirements"):
+            if verification.get(key):
+                line[key] = list(verification[key])[:2 * _PACKET_LIST_MAX]
+        if verification.get("tamper"):
+            line["tamper"] = [{"check_id": item["check_id"], "recorded": item["recorded"]}
+                              for item in verification["tamper"][:_PACKET_LIST_MAX]]
+        if isinstance(verification.get("overrides"), dict):
+            line["overrides"] = verification["overrides"].get("total", 0) + ("close" in verification["overrides"])
+        if line:
+            lines["Verification"] = line
+    claims = sections.get("Claims")
+    if isinstance(claims, dict):
+        without = claims.get("handoffs_without_typed_claims", {})
+        line = {"handoffs_ingested": claims.get("handoffs_ingested", 0),
+                "without_typed_claims": {"total": without.get("total", 0), "ids": list(without.get("ids", []))[-_PACKET_LIST_MAX:],
+                                         "missing": without.get("missing", 0), "malformed": without.get("malformed", 0)}}
+        truncated = claims.get("handoffs_with_truncated_claims")
+        if isinstance(truncated, dict):
+            line["truncated_claims"] = {"total": truncated.get("total", 0), "ids": list(truncated.get("ids", []))[-_PACKET_LIST_MAX:]}
+        lines["Claims"] = line
+    advisories = sections.get("Advisories")
+    if isinstance(advisories, dict):
+        items = [{key: (value[:4] if isinstance(value, list) else value) for key, value in item.items()}
+                 for item in advisories.get("items", []) if isinstance(item, dict)]
+        line = {"blocking": False, "items": items[:_PACKET_LIST_MAX], "items_total": len(items)}
+        for key in ("contract_unspecified", "unavailable"):
+            if advisories.get(key):
+                line[key] = advisories[key]
+        lines["Advisories"] = line
+
+    def size() -> int:
+        return len(json.dumps(lines, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    # Keep the whole addition small: shorten the longest list first; counts and totals always stay.
+    while size() > _PACKET_LINES_MAX_BYTES:
+        candidates = [value for line in lines.values() for value in
+                      (*line.values(), *(inner for nested in line.values() if isinstance(nested, dict) for inner in nested.values()))
+                      if isinstance(value, list) and value]
+        if not candidates:
+            break
+        max(candidates, key=lambda value: len(json.dumps(value, ensure_ascii=False))).pop()
+        for line in lines.values():
+            line["truncated"] = True
+    return lines
+
+
+def _lines_actionable(lines: dict[str, Any]) -> bool:
+    """Whether a line holds something the Controller must see even with no open observation."""
+    verification = lines.get("Verification", {})
+    claims = lines.get("Claims", {})
+    return bool(
+        verification.get("status") == "UNKNOWN" or verification.get("not_green") or verification.get("tamper")
+        or any(verification.get(key) for key in ("red", "stale", "unrun", "uncovered_requirements"))
+        or claims.get("without_typed_claims", {}).get("total") or claims.get("ingest_errors")
+        or lines.get("Advisories", {}).get("items")
+    )
+
+
+def _verification_line_text(lines: dict[str, Any]) -> str:
+    """Readable sentences for the actionable lines; the exact values follow in the packet."""
+    text = ""
+    verification = lines.get("Verification", {})
+    if verification.get("status") == "UNKNOWN":
+        text += "Verification: declared-check standing is UNKNOWN; read task-status before judging satisfied or closing.\n"
+    counts = ", ".join(f"{verification[key]} {key}" for key in ("red", "stale", "unrun") if verification.get(key))
+    if counts:
+        text += (f"Verification: {counts} of {verification.get('checks_total', 0)} declared checks. A satisfied judgment on their "
+                 "requirements and task-close are withheld until task-verify is green on the current tree, or you record "
+                 "--override-reason. A green check grants nothing.\n")
+    if verification.get("uncovered_requirements"):
+        text += ("Verification: typed requirements with no declared check: " + ", ".join(verification["uncovered_requirements"]) +
+                 ". A compiled one withholds satisfied until task-check declares its check.\n")
+    if verification.get("tamper"):
+        text += ("Verification: check files changed after declaration for " + ", ".join(item["check_id"] for item in verification["tamper"]) +
+                 ". Restore the declared content or accept the current content with task-check --supersede.\n")
+    claims = lines.get("Claims", {})
+    without = claims.get("without_typed_claims", {})
+    if without.get("total"):
+        text += (f"Claims: {without['total']} handoff(s) returned no readable typed claim block. Read their FINAL reports directly; "
+                 "a missing block is neither an obligation nor evidence of no findings.\n")
+    if claims.get("ingest_errors"):
+        text += ("Claims: typed claims of " + ", ".join(item["handoff_id"] for item in claims["ingest_errors"]) +
+                 " could not be recorded. Read those FINAL reports and record their adverse findings yourself.\n")
+    advisories = lines.get("Advisories", {})
+    if advisories.get("items"):
+        text += ("Advisories (adaptive mode, non-blocking): " + ", ".join(str(item.get("code")) for item in advisories["items"]) +
+                 ". Consider escalating to delegated with task-mode.\n")
+    return text
+
+
+def _record_controller_tool_output(root: Path, payload: dict[str, Any]) -> None:
+    """Adaptive lane only: add this Controller tool result's size to Core's advisory counter.
+
+    About four characters per token. The counter is Core's task-local sidecar: it
+    changes no revision and no anchored bytes, and it only feeds a non-blocking advisory.
+    """
+    task_id = core.selected_task(root)
+    session = _session_id_hash(payload)
+    if task_id is None or session is None:
+        return
+    anchor = task_authority.read(root)
+    if anchor is None or anchor["contract"].get("execution_mode") != "adaptive":
+        return  # the common case costs one anchor read
+    if task_authority.check(root) is None or active_controller_owner(root, task_id) != session:
+        return
+    response = next((payload[key] for key in ("tool_response", "tool_result", "result", "output") if key in payload), None)
+    if response is None:
+        return
+    text = response if isinstance(response, str) else json.dumps(response, ensure_ascii=False, separators=(",", ":"))
+    if text:
+        core.task_lane_counter(root, add=-(-len(text) // 4))
 
 
 def _hook_repository_root(root: Path, payload: dict[str, Any]) -> Path:
@@ -2083,6 +2260,91 @@ def _runtime_metadata(state: dict[str, Any], payload: dict[str, Any]) -> None:
     state["observed_at_ns"] = time.time_ns()
 
 
+MAX_HOOK_SHAPE_GAPS = 16
+MAX_COLLABORATION_TOOL_NAMES = 16
+
+
+def _hook_shape_gap_known(gaps: object, event: str, missing: list[str]) -> bool:
+    """True when the gap is already recorded or the bounded record is full (or unusable)."""
+    if not isinstance(gaps, list):
+        return True
+    return len(gaps) >= MAX_HOOK_SHAPE_GAPS or any(
+        isinstance(gap, dict) and gap.get("event") == event and gap.get("missing_keys") == missing for gap in gaps)
+
+
+def _host_binary_stamp() -> str:
+    """SHA-256 of the resolved Host binary a gap is attributed to, or UNKNOWN."""
+    from . import config_capability
+    executable = config_capability.resolve_executable()
+    digest = config_capability.binary_sha256(executable) if executable else None
+    return digest or "UNKNOWN"
+
+
+def _record_hook_shape_gap(root: Path, event: str, payload: dict[str, Any]) -> None:
+    """Name a live payload's missing adapter inputs as ``host_hook_shape: UNKNOWN``.
+
+    Bounded: only the event, the absent key names and the resolved Host
+    binary's digest are kept. A duplicate is dropped before the lock is taken;
+    the binary is hashed only for a new gap.
+    """
+    from . import hook_shape
+    missing = hook_shape.missing_payload_keys(event, payload)
+    if not missing:
+        return
+    path = _session_dir(root, payload) / "runtime.json"
+    try:
+        known = _hook_shape_gap_known(_load_runtime(path).get("host_hook_shape", []), event, missing)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        known = False  # Decide under the lock.
+    if known:
+        return
+    item = {"status": "UNKNOWN", "event": event, "missing_keys": missing,
+            "host_binary_sha256": _host_binary_stamp()}
+    with task_authority._lock(root):
+        state = _load_runtime(path)
+        gaps = state.get("host_hook_shape", [])
+        if _hook_shape_gap_known(gaps, event, missing):
+            return
+        _runtime_metadata(state, payload)
+        state["host_hook_shape"] = [*gaps, item]
+        _write_capture(path, state)
+
+
+def _record_collaboration_tool_name(root: Path, payload: dict[str, Any]) -> None:
+    """Keep a raw Host multi-agent tool name even when the PostToolUse matcher misses it.
+
+    PreToolUse uses the match-all matcher, so every Host tool name reaches it;
+    a name that is a collaboration base name, exactly or behind a namespace or
+    separator, is recorded verbatim (bounded) so the doctor's matcher check can
+    observe a mismatch that PostToolUse alone could never report.
+    """
+    from . import hook_shape
+    tool = payload.get("tool_name") or payload.get("tool")
+    if not hook_shape.multi_agent_name(tool):
+        # Only a name that ends in a base name can be a custom-namespace tool;
+        # read the configured namespace for that rare candidate alone.
+        if not hook_shape.has_base_suffix(tool):
+            return
+        configured = hook_shape._configured_namespace(_host_home_path())
+        if configured is None or not hook_shape.multi_agent_name(tool, (configured,)):
+            return
+    path = _session_dir(root, payload) / "runtime.json"
+    try:
+        names = _load_runtime(path).get("collaboration_tool_names_observed", [])
+        if isinstance(names, list) and (tool in names or len(names) >= MAX_COLLABORATION_TOOL_NAMES):
+            return
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    with task_authority._lock(root):
+        state = _load_runtime(path)
+        names = state.get("collaboration_tool_names_observed", [])
+        if not isinstance(names, list) or tool in names or len(names) >= MAX_COLLABORATION_TOOL_NAMES:
+            return
+        _runtime_metadata(state, payload)
+        state["collaboration_tool_names_observed"] = [*names, tool]
+        _write_capture(path, state)
+
+
 def _record_runtime_event(root: Path, payload: dict[str, Any], event: str, tool: str) -> None:
     """Persist bounded evidence that a root hook event reached this adapter."""
     with task_authority._lock(root):
@@ -2291,12 +2553,50 @@ def _lifecycle_path(root: Path, task_id: str) -> Path:
     return root / ".context" / "audit" / "lifecycle" / f"{_task_key(task_id)}.json"
 
 
+_RESERVATION_FIELDS = frozenset({
+    "role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id",
+    "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role",
+    "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"})
+_RESERVATION_OPTIONAL_FIELDS = frozenset({"spawn_turn_id_hash", "workstream_id", "parallel_readonly"})
+_RESERVATION_IDENTITY_FIELDS = frozenset({"native_agent_id_hash", "native_identity_source"})
+
+
+def _valid_pending_reservation(pending: object) -> bool:
+    """Validate one authorized spawn reservation (singular slot or collection item)."""
+    if not isinstance(pending, dict):
+        return False
+    keys = set(pending) - _RESERVATION_IDENTITY_FIELDS
+    if not _RESERVATION_FIELDS <= keys or keys - _RESERVATION_FIELDS - _RESERVATION_OPTIONAL_FIELDS:
+        return False
+    return not (
+        pending.get("role") not in set(_native_agent_roles().values())
+        or pending.get("expected_agent_type") not in _native_agent_roles()
+        or not isinstance(pending.get("session_id_hash"), str)
+        or type(pending.get("authorized_sequence")) is not int
+        or not isinstance(pending.get("handoff_id"), str)
+        or type(pending.get("task_revision")) is not int
+        or pending.get("producer") != "controller"
+        or not isinstance(pending.get("payload_hash"), str)
+        or type(pending.get("created_at_ns")) is not int
+        or ("native_agent_id_hash" in pending and (not isinstance(pending["native_agent_id_hash"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", pending["native_agent_id_hash"]) is None))
+        or ("native_identity_source" in pending and pending["native_identity_source"] not in {
+            "legacy_spawn_response", "app_server_subagent_activity"})
+        or ("spawn_turn_id_hash" in pending and pending["spawn_turn_id_hash"] is not None
+            and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
+        or ("workstream_id" in pending and (not isinstance(pending["workstream_id"], str)
+            or not pending["workstream_id"].strip() or len(pending["workstream_id"]) > 256))
+        or ("parallel_readonly" in pending and pending["parallel_readonly"] is not True)
+        or not _valid_parent_metadata(pending)
+    )
+
+
 def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) -> dict[str, Any]:
     if verify_authority:
         with task_authority._lock(path.parents[3]):
             task_authority._store(path.parents[3], task_id).check()
     if not path.is_file():
-        return {"version": LIFECYCLE_STATE_VERSION, "task_id_hash": _task_key(task_id), "children": [], "pending_authorized_spawn": None, "sequence": 0}
+        return {"version": LIFECYCLE_STATE_VERSION, "task_id_hash": _task_key(task_id), "children": [], "pending_authorized_spawn": None, "pending_authorized_spawns": [], "sequence": 0}
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION or value.get("task_id_hash") != _task_key(task_id) or not isinstance(value.get("children"), list):
         raise ValueError("invalid lifecycle runtime state")
@@ -2312,30 +2612,29 @@ def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) 
             or selection.get("owner_session_id_hash") != owner):
         raise ValueError("invalid lifecycle evidence selection")
     pending = value.get("pending_authorized_spawn")
-    if pending is not None and (
-        not isinstance(pending, dict)
-        or (set(pending) - {"native_agent_id_hash", "native_identity_source"}) not in (
-            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"},
-            {"role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id", "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash"},
-        )
-        or pending.get("role") not in set(_native_agent_roles().values())
-        or pending.get("expected_agent_type") not in _native_agent_roles()
-        or not isinstance(pending.get("session_id_hash"), str)
-        or not isinstance(pending.get("authorized_sequence"), int)
-        or not isinstance(pending.get("handoff_id"), str)
-        or type(pending.get("task_revision")) is not int
-        or pending.get("producer") != "controller"
-        or not isinstance(pending.get("payload_hash"), str)
-        or type(pending.get("created_at_ns")) is not int
-        or ("native_agent_id_hash" in pending and (not isinstance(pending["native_agent_id_hash"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", pending["native_agent_id_hash"]) is None))
-        or ("native_identity_source" in pending and pending["native_identity_source"] not in {
-            "legacy_spawn_response", "app_server_subagent_activity"})
-        or ("spawn_turn_id_hash" in pending and pending["spawn_turn_id_hash"] is not None
-            and (not isinstance(pending["spawn_turn_id_hash"], str) or re.fullmatch(r"[0-9a-f]{64}", pending["spawn_turn_id_hash"]) is None))
-        or not _valid_parent_metadata(pending)
-    ):
+    if pending is not None and not _valid_pending_reservation(pending):
         raise ValueError("invalid lifecycle authorized spawns")
+    pending_many = value.get("pending_authorized_spawns", [])
+    if not isinstance(pending_many, list):
+        raise ValueError("invalid lifecycle authorized spawn collection")
+    # Parallel reservations retain the exact record shape of the legacy single
+    # reservation: every item passes the same validator, and no handoff id or
+    # authorization sequence may appear twice across the singular slot and the
+    # collection.
+    for extra in pending_many:
+        if not _valid_pending_reservation(extra):
+            raise ValueError("invalid lifecycle authorized spawn collection")
+    every = ([pending] if pending is not None else []) + pending_many
+    if (len({item["handoff_id"] for item in every}) != len(every)
+            or len({item["authorized_sequence"] for item in every}) != len(every)):
+        raise ValueError("duplicate lifecycle authorized spawn reservation")
+    if pending is None and pending_many:
+        # The singular slot is the first item of the collection, never an
+        # independent source of truth. Promote a stranded collection head
+        # (written by an earlier disposal that cleared only the slot) so
+        # every pending reservation stays visible to every reader.
+        value["pending_authorized_spawn"] = pending_many[0]
+        value["pending_authorized_spawns"] = pending_many[1:]
     return value
 
 
@@ -2363,10 +2662,14 @@ def active_controller_owner(root: Path, task_id: str) -> str | None:
     owner = ledger.get("owner_session_id_hash")
     if owner is not None:
         return owner
-    pending = ledger.get("pending_authorized_spawn")
-    if isinstance(pending, dict) and pending.get("depth") == 1 and pending.get("parent_role") == "controller":
-        return pending["session_id_hash"]
-    return None
+    return _pending_controller_owner(ledger)
+
+
+def _pending_controller_owner(ledger: dict[str, Any]) -> str | None:
+    """Legacy owner evidence: the one session of every depth-one pending reservation."""
+    sessions = {item.get("session_id_hash") for item in _pending_reservations(ledger)
+                if item.get("depth") == 1 and item.get("parent_role") == "controller"}
+    return next(iter(sessions)) if len(sessions) == 1 else None
 
 
 def _valid_parent_metadata(record: dict[str, Any]) -> bool:
@@ -2780,6 +3083,177 @@ def _write_evidence_reservation(root: Path, task_state: dict[str, Any],
         raise
 
 
+def _parallel_dispatch_policy(root: Path, session_hash: str | None = None) -> dict[str, Any] | None:
+    """Return a validated, Controller-selected parallel dispatch contract.
+
+    Presence alone never widens dispatch: the caller must also be the current
+    owning Controller session.  A malformed or stale contract fails closed.
+    """
+    if session_hash is None:
+        return None
+    try:
+        authority = task_authority.check(root)
+        if authority is None or active_controller_owner(root, authority["task_id"]) != session_hash:
+            return None
+        contract = authority.get("contract", {})
+        policy = contract.get("parallel_dispatch") if isinstance(contract, dict) else None
+        if not isinstance(policy, dict) or policy.get("enabled") is not True:
+            return None
+        from thaliris import authority as core_authority
+        core_authority.validate_contract(contract)
+        return policy
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
+def _parallel_contract_invalid(root: Path, session_hash: str | None) -> bool:
+    """Deny-only: the owning Controller's contract names ``parallel_dispatch`` but Core refuses it.
+
+    A contract stored before the current Core validator (for example one with
+    cross-domain overlapping write scopes, admitted before ``ca46611``) must
+    not silently fall back to the legacy rules, under which workstream-less
+    writers could run side by side. Unreadable authority is not evidence here;
+    the ordinary authorization checks refuse it on their own.
+    """
+    if session_hash is None:
+        return False
+    try:
+        authority = task_authority.read(root)
+        contract = authority.get("contract") if isinstance(authority, dict) else None
+        if not isinstance(contract, dict) or "parallel_dispatch" not in contract:
+            return False
+        if active_controller_owner(root, authority["task_id"]) != session_hash:
+            return False
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+    from thaliris import authority as core_authority
+    try:
+        core_authority.validate_contract(contract)
+    except (core.ThalirisError, ValueError, TypeError, KeyError):
+        return True
+    return False
+
+
+def _pending_reservations(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read legacy and parallel pending reservation fields as one collection."""
+    values: list[dict[str, Any]] = []
+    singular = state.get("pending_authorized_spawn")
+    if isinstance(singular, dict):
+        values.append(singular)
+    many = state.get("pending_authorized_spawns", [])
+    if isinstance(many, list):
+        for item in many:
+            if isinstance(item, dict) and all(item.get("handoff_id") != prior.get("handoff_id") for prior in values):
+                values.append(item)
+    return values
+
+
+def _set_pending_reservations(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    """Write the collection; the legacy singular slot is always its first item."""
+    state["pending_authorized_spawn"] = items[0] if items else None
+    state["pending_authorized_spawns"] = list(items[1:])
+
+
+def _remove_pending_reservation(state: dict[str, Any], handoff_id: str) -> dict[str, Any] | None:
+    """Remove one reservation and promote the next into the legacy slot."""
+    items = _pending_reservations(state)
+    found = next((item for item in items if item.get("handoff_id") == handoff_id), None)
+    _set_pending_reservations(state, [item for item in items if item is not found])
+    return found
+
+
+# Under a parallel policy write classification follows the handoff, not the
+# role name: a repo-writing role that declares a write workstream is writing;
+# without one it is admitted only as an enforced read-only dispatch
+# (``parallel_readonly``), so read fan-out never needs or contends for a
+# workstream. These roles gather facts or reason by function, so a missing
+# workstream admits them read-only; every other repo-writing role is an
+# executor whose job is writing and still needs a declared write workstream.
+_PARALLEL_READ_TYPE_ROLES = frozenset({"investigator", "reasoning-specialist"})
+
+
+def _parallel_executor_role(role: object) -> bool:
+    """Implementer, focused-implementer, curator or any other registered writing role."""
+    return isinstance(role, str) and role not in _PARALLEL_READ_TYPE_ROLES and roles.repo_write_allowed(role)
+
+
+def _parallel_record_writes(record: dict[str, Any]) -> bool:
+    """A reservation or child counts as a live writer unless it was admitted read-only.
+
+    Records written before ``parallel_readonly`` existed carry no flag; a
+    repo-writing role among them is counted as a writer (fail closed).
+    """
+    role = record.get("role")
+    return isinstance(role, str) and roles.repo_write_allowed(role) and record.get("parallel_readonly") is not True
+
+
+def _live_parallel_writes(state: dict[str, Any]) -> list[object]:
+    """Workstream ids of live top-level writing dispatches: pending, or bound and unfinished."""
+    live: list[object] = [item.get("workstream_id") for item in _pending_reservations(state)
+                          if item.get("depth") == 1 and _parallel_record_writes(item)]
+    live.extend(child.get("workstream_id") for child in state.get("children", [])
+                if isinstance(child, dict) and child.get("depth") == 1 and child.get("managed") is True
+                and _parallel_record_writes(child)
+                and child.get("management_disposition") != _DISPOSED
+                and (not _native_execution_terminal(child) or child.get("native_status_conflict")))
+    return live
+
+
+def _workstream_scope(stream: dict[str, Any]) -> list[str] | None:
+    """Core-canonical declared write surface, or None when it is absent or unusable.
+
+    Core's ``canonical_scope`` is the one normalisation (NFC, casefold,
+    backslash to ``/``, collapsed and stripped separators); a spelling Core
+    rejects is unusable, which the overlap check treats as undeclared (fail closed).
+    """
+    from thaliris import authority as core_authority
+    scope = stream.get("scope")
+    items = [scope] if isinstance(scope, str) else scope if isinstance(scope, list) else None
+    if not items:
+        return None
+    paths = []
+    for item in items:
+        if not isinstance(item, str):
+            return None
+        try:
+            paths.append(core_authority.canonical_scope(item))
+        except ValueError:
+            return None
+    return paths
+
+
+def _parallel_domain_overlap(declared: dict[object, dict[str, Any]], stream: dict[str, Any],
+                             live: list[object]) -> str | None:
+    """Explain why a new write workstream overlaps a live one, or None.
+
+    Declared scope paths are compared across every live write workstream (a
+    path equal to, inside or containing another). A write workstream without a
+    usable declared scope cannot run beside another live write workstream.
+    """
+    mine = _workstream_scope(stream)
+    for other_id in live:
+        other = declared.get(other_id) if isinstance(other_id, str) else None
+        if other is not None and other.get("mode") != "write":
+            continue
+        if other_id == stream.get("id"):
+            continue
+        theirs = _workstream_scope(other) if other is not None else None
+        label = json.dumps(other_id) if isinstance(other_id, str) else "<unrecorded>"
+        if mine is None or theirs is None:
+            return ("has no declared scope to compare with live write workstream " + label
+                    if mine is None else "cannot be compared with live write workstream " + label
+                    + ", whose scope is undeclared")
+        from thaliris import authority as core_authority
+        if any(core_authority.scopes_overlap(a, b) for a in mine for b in theirs):
+            return "overlaps the declared scope of live write workstream " + label
+    return None
+
+
+def _pending_for_payload(root: Path, state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    matches = [item for item in _pending_reservations(state) if _spawn_parent_matches(root, item, payload)]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _reserve_managed_spawn(
     root: Path,
     payload: dict[str, Any],
@@ -2822,6 +3296,13 @@ def _reserve_managed_spawn(
     session_id_hash = _session_id_hash(payload)
     if session_id_hash is None:
         return _permission_deny("THALIRIS_MANAGED_SESSION_REQUIRED: managed spawn authorization requires a current session identity.")
+    # The parallel contract widens only the owning Controller's own top-level
+    # dispatch. Child hook payloads may carry the Controller's session id, so
+    # nesting (an agent_id/agent_type actor), never session equality, decides:
+    # a nested spawn keeps the one-Scanner-per-parent and one-unbound-dispatch
+    # rules and never reserves or consumes a workstream.
+    parallel_policy = None if nested else _parallel_dispatch_policy(root, session_id_hash)
+    parallel_invalid = parallel_policy is None and not nested and _parallel_contract_invalid(root, session_id_hash)
     try:
         with task_authority._lock(root):
             # Re-read while holding the same lock used by task mutations.
@@ -2850,9 +3331,62 @@ def _reserve_managed_spawn(
             blocking = _undisposed_identity_conflicts(state)
             if blocking:
                 return _permission_deny(_identity_conflict_denial(root, task_id, path, blocking))
-            if nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
+            # Ordinary tasks retain one Scanner slot per exact parent.  A
+            # Controller-selected parallel contract permits distinct
+            # workstreams while keeping the parent/identity checks intact.
+            workstream_id = _dispatch_workstream_id(payload)
+            parallel_readonly = False
+            if parallel_invalid:
+                # The stored contract names parallel_dispatch but Core refuses
+                # it: no writer may fall back to the legacy rules. Read-type
+                # dispatch proceeds, enforced read-only.
+                if _parallel_executor_role(role):
+                    return _permission_deny(
+                        "THALIRIS_PARALLEL_CONTRACT_INVALID: the authority contract declares parallel_dispatch but it"
+                        " fails the current Core validation (for example overlapping write scopes admitted by an older"
+                        " Core), so no writing dispatch is authorized under it. Re-admit the task with a valid"
+                        " parallel_dispatch contract (or none); read-type roles may still be dispatched read-only.")
+                parallel_readonly = roles.repo_write_allowed(role)
+            elif parallel_policy is not None:
+                declared = {item.get("id"): item for item in parallel_policy.get("workstreams", []) if isinstance(item, dict)}
+                executor = _parallel_executor_role(role)
+                if executor and not isinstance(workstream_id, str):
+                    return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_REQUIRED: each parallel handoff of a writing role must"
+                                            " name exactly one declared write workstream (thaliris-workstream: <id>).")
+                stream = declared.get(workstream_id) if isinstance(workstream_id, str) else None
+                if isinstance(workstream_id, str) and stream is None:
+                    return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_UNKNOWN: handoff workstream is not declared by the owning Controller.")
+                if executor and stream.get("mode") != "write":
+                    return _permission_deny("THALIRIS_PARALLEL_WRITE_WORKSTREAM_REQUIRED: a writing role needs a declared"
+                                            " write workstream; name one with mode \"write\" and its scope.")
+                # A repo-writing role is writing only with a declared write
+                # workstream; otherwise it is admitted read-only and, like
+                # non-writing roles, never refused for count, duplication or overlap.
+                writing = roles.repo_write_allowed(role) and stream is not None and stream.get("mode") == "write"
+                parallel_readonly = roles.repo_write_allowed(role) and not writing
+                if writing:
+                    live = _live_parallel_writes(state)
+                    if workstream_id in live:
+                        return _permission_deny("THALIRIS_PARALLEL_WORKSTREAM_DUPLICATE: this declared write workstream already has a"
+                                                " pending or unfinished dispatch; a new dispatch may reuse it only after the"
+                                                " previous one is terminal (completed, failed, interrupted, shut down or disposed).")
+                    # Overlap of live write domains is the only mechanical refusal.
+                    overlap = _parallel_domain_overlap(declared, stream, live)
+                    if overlap is not None:
+                        return _permission_deny(
+                            "THALIRIS_PARALLEL_DOMAIN_OVERLAP: write workstream " + json.dumps(workstream_id)
+                            + " " + overlap + ". Declare disjoint write scopes in the authority contract, or wait"
+                            " until the overlapping write workstream is terminal; read work never conflicts.")
+                    # No adapter cap of its own: a missing budget is uncapped; a
+                    # stated one counts live top-level writing dispatches only.
+                    budget = parallel_policy.get("budget")
+                    if type(budget) is int and len(live) >= budget:
+                        return _permission_deny(
+                            f"THALIRIS_PARALLEL_DISPATCH_BUDGET: the authority contract sets {budget} concurrent top-level"
+                            " writing dispatches and all are live; observe or dispose one before another handoff.")
+            elif nested and any(isinstance(child, dict) and child.get("management_disposition") != "ABANDONED_DEPENDENCY" and child.get("parent_agent_id_hash") == parent["agent_id_hash"] and child.get("managed") is True and not _native_execution_terminal(child) for child in state["children"]):
                 return _permission_deny("THALIRIS_SCANNER_SLOT_ACTIVE: this exact parent already has a live Scanner; coordinate its result before another same-parent Scanner")
-            if state["pending_authorized_spawn"] is not None:
+            if _pending_reservations(state) and parallel_policy is None:
                 return _permission_deny("THALIRIS_UNBOUND_DISPATCH_PENDING: associate or cancel this one unbound native dispatch before another same-task dispatch; missing Host identity fields cannot choose between reservations.")
             selection = state.get("next_evidence_dispatch") if not nested else None
             if selection is not None and (
@@ -2878,11 +3412,14 @@ def _reserve_managed_spawn(
             evidence_registered = _register_spawn_evidence(task_state, handoff_id, role, handoff_text, parent,
                 {key: selection[key] for key in ("candidate", "requirement_refs", "durable_paths") if key in selection}
                 if selection is not None else None)
+            # The workstream binding stays in the adapter's own reservation and
+            # child records; Core's continuity handoff schema has no such field.
             if evidence_registered:
                 task_state["revision"] += 1
             if selection is not None:
                 del state["next_evidence_dispatch"]
-            state["pending_authorized_spawn"] = {
+            prior_pending = _pending_reservations(state)
+            new_pending = {
                 "role": role,
                 "expected_agent_type": expected_agent_type,
                 "session_id_hash": session_id_hash,
@@ -2901,6 +3438,21 @@ def _reserve_managed_spawn(
                 "spawn_tool_use_id_hash": _identity_hash(payload.get("tool_use_id")) if isinstance(payload.get("tool_use_id"), str) else None,
                 "spawn_turn_id_hash": _turn_id_hash(payload),
             }
+            if parallel_policy is not None and isinstance(workstream_id, str):
+                new_pending["workstream_id"] = workstream_id
+            if parallel_readonly:
+                # Enforced by the readonly guards exactly like a non-writing role.
+                new_pending["parallel_readonly"] = True
+            # Without a parallel contract ``prior_pending`` is empty (refused
+            # above); with one, the first reservation stays in the legacy slot.
+            _set_pending_reservations(state, prior_pending + [new_pending])
+            effort = next((overrides[key] for key in ("reasoning_effort", "model_reasoning_effort")
+                           if isinstance(overrides.get(key), str) and overrides[key].strip()), None)
+            if effort is not None and len(effort) <= 128:
+                # Only the Controller's explicit spawn argument is known here; a routed default stays unreported.
+                efforts = state.get("spawn_efforts")
+                efforts = {**(efforts if isinstance(efforts, dict) else {}), handoff_id: effort.strip()}
+                state["spawn_efforts"] = dict(list(efforts.items())[-MAX_RAW_RECORDS:])
             _runtime_metadata(state, payload)
             if evidence_registered:
                 _write_evidence_reservation(root, task_state, path, state)
@@ -3060,20 +3612,21 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
         if task_authority.digest(path) != expected_lifecycle:
             raise ValueError("TASK_LIFECYCLE_CHANGED")
         ledger = _load_lifecycle(path, task_id)
-        pending = ledger.get("pending_authorized_spawn")
         collisions = ledger.get("identity_collisions") or []
         if not isinstance(collisions, list):
             raise ValueError("TASK_DEPENDENCY_CONFLICT_MALFORMED: preserve identity collision evidence for a separate repair decision")
         if handoff_id is not None:
             selected = [child for child in ledger["children"] if isinstance(child, dict)
                 and (child.get("handoff_id") == handoff_id or child.get("root_handoff_id") == handoff_id)]
-            pending_selected = isinstance(pending, dict) and (pending.get("handoff_id") == handoff_id or pending.get("root_handoff_id") == handoff_id)
+            # Any pending reservation of the collection, not only the first.
+            pending_selected = [item for item in _pending_reservations(ledger)
+                                if item.get("handoff_id") == handoff_id or item.get("root_handoff_id") == handoff_id]
             if not selected and not pending_selected:
                 raise ValueError("TASK_DEPENDENCY_HANDOFF_NOT_FOUND")
             # Collisions observed for this dispatch, or naming one of its actors.
             actors = {child.get("agent_id_hash") for child in selected if isinstance(child.get("agent_id_hash"), str)}
-            if pending_selected and isinstance(pending.get("native_agent_id_hash"), str):
-                actors.add(pending["native_agent_id_hash"])
+            actors.update(item["native_agent_id_hash"] for item in pending_selected
+                          if isinstance(item.get("native_agent_id_hash"), str))
             selected_collisions = [(index, item) for index, item in enumerate(collisions) if isinstance(item, dict)
                 and item.get("management_disposition") != _DISPOSED
                 and (item.get("pending_handoff_id") == handoff_id or item.get("agent_id_hash") in actors)]
@@ -3085,7 +3638,7 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
             selected_collisions = [(index, item) for index, item in enumerate(collisions) if isinstance(item, dict)
                 and item.get("management_disposition") != _DISPOSED
                 and _conflict_id("collision", index, item) == conflict_id]
-            pending_selected = False
+            pending_selected = []
             if len(selected) + len(selected_collisions) != 1:
                 raise ValueError("TASK_DEPENDENCY_CONFLICT_NOT_FOUND")
         records = ledger.setdefault("dependency_dispositions", [])
@@ -3133,7 +3686,7 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
                 "agent_fence_reason": fence_reason})
             item["management_disposition"] = _DISPOSED
             item["disposition_reason"] = reason
-        if pending_selected:
+        for pending in pending_selected:
             records.append({"kind": "pending", "record": dict(pending), "reason": reason,
                 "management_disposition": "ABANDONED_DEPENDENCY", "native_execution": "UNKNOWN"})
             pending_fenced = isinstance(pending.get("native_agent_id_hash"), str)
@@ -3141,12 +3694,17 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
                 agents.add(pending["native_agent_id_hash"])
             fencing.append({"kind": "pending", "agent_fenced": pending_fenced,
                 "agent_fence_reason": None if pending_fenced else "no native actor identity recorded"})
-            ledger["pending_authorized_spawn"] = None
+            # Remove exactly this reservation; the next one is promoted into
+            # the legacy slot, so the rest of the collection stays pending.
+            _remove_pending_reservation(ledger, pending["handoff_id"])
         prior_fence = _abandoned_child_fence_path(root)
         value = json.loads(prior_fence.read_text(encoding="utf-8")) if prior_fence.is_file() else {"version": 1}
         _write_capture(prior_fence, {**value, "version": 1, "children": fence, "agent_id_hashes": sorted(agents)})
         _write_capture(path, ledger)
-        state["revision"] += 1
+        revision = state["revision"]
+        _record_disposed_usage(state, [child.get("handoff_id") for child in selected]
+                               + [pending.get("handoff_id") for pending in pending_selected])
+        state["revision"] = revision + 1
         core._write_state(root, state)
         task_authority.checkpoint(root)
     unfenced = [entry["agent_fence_reason"] for entry in fencing if not entry["agent_fenced"]]
@@ -3176,7 +3734,7 @@ def task_state_recovery_blocker(root: Path, task_id: str) -> str | None:
         state = _load_lifecycle(path, task_id)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return "lifecycle state is unreadable or incompatible"
-    if state.get("pending_authorized_spawn") is not None:
+    if _pending_reservations(state):
         return "an authorized spawn reservation is still pending"
     children = state.get("children")
     if not isinstance(children, list):
@@ -3188,6 +3746,27 @@ def task_state_recovery_blocker(root: Path, task_id: str) -> str | None:
     ):
         return "one or more child lifecycles are not explicitly terminal"
     return None
+
+
+def _start_reservation(state: dict[str, Any], child_hash: str, role: str, native_agent_type: str,
+                       session_id_hash: str) -> dict[str, Any] | None:
+    """Select the one reservation a SubagentStart may concern, never a guess.
+
+    An exact native-id match wins. Otherwise only a single unidentified
+    reservation of the same role, profile and session is a candidate; it still
+    cannot authorize binding without its exact native id. Any ambiguity
+    selects nothing, so the child stays unbound (fail closed).
+    """
+    reservations = _pending_reservations(state)
+    exact = [item for item in reservations if item.get("native_agent_id_hash") == child_hash]
+    if exact:
+        return exact[0] if len(exact) == 1 else None
+    unidentified = [item for item in reservations
+                    if item.get("native_agent_id_hash") is None
+                    and item.get("role") == role
+                    and item.get("expected_agent_type") == native_agent_type
+                    and item.get("session_id_hash") == session_id_hash]
+    return unidentified[0] if len(unidentified) == 1 else None
 
 
 def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
@@ -3212,7 +3791,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
         state["sequence"] = int(state.get("sequence", 0)) + 1
         child_hash = _identity_hash(agent_id)
         children = state["children"]
-        pending = state["pending_authorized_spawn"]
+        pending = _start_reservation(state, child_hash, role, native_agent_type, session_id_hash)
         constrained_model_status = None
         observed_model = payload.get("model")
         if authority is not None and authority["contract"].get("execution_constraint") == "luna-only":
@@ -3257,7 +3836,7 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 "native_terminal_status": None,
                 "task_name_hash": pending.get("task_name_hash") if bound else None,
                 "native_identity_source": pending.get("native_identity_source") if bound else None,
-                **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")},
+                **{key: pending.get(key) if bound else None for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id", "parallel_readonly")},
             }
             if constrained_model_status is not None:
                 # SubagentStart is a Host observation. A failed check leaves
@@ -3268,15 +3847,15 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
                 child_record["execution_constraint_model"] = observed_model if isinstance(observed_model, str) else None
             children.append(child_record)
             if bound:
-                state["pending_authorized_spawn"] = None
+                _remove_pending_reservation(state, pending.get("handoff_id"))
         elif bound:
             prior.update({"managed": True, "handoff_bound": True,
                 "handoff_id": pending["handoff_id"], "task_revision": pending["task_revision"],
                 "producer": pending["producer"], "payload_hash": pending["payload_hash"],
                 "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
                 "native_identity_source": pending.get("native_identity_source"),
-                **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")}})
-            state["pending_authorized_spawn"] = None
+                **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id", "parallel_readonly")}})
+            _remove_pending_reservation(state, pending.get("handoff_id"))
         elif (prior.get("managed") is True and prior.get("handoff_bound") is True
                 and prior.get("management_disposition") != "ABANDONED_DEPENDENCY"
                 and prior.get("agent_type") == native_agent_type
@@ -3340,9 +3919,142 @@ def _record_subagent_stop(root: Path, payload: dict[str, Any]) -> bool:
                 # An optional hook observation is not native terminal proof.
                 # Preserve naturally returned execution evidence in either order.
                 _runtime_metadata(state, payload)
-                _write_capture(path, state)
+                # The final message of this exact handoff: Core ingests its typed claims; a
+                # message without a block leaves Core's marker. The stop is recorded either way.
+                task_state = _record_child_results(root, task_id, state, [
+                    (child, payload.get("last_assistant_message"), True, payload.get("model"))], "SubagentStop")
+                _write_child_result(root, task_state, path, state, child)
                 return True
     return False
+
+
+def _usage_outcome(child: dict[str, Any]) -> str:
+    """Map exact recorded facts to a Core usage outcome; everything else stays unknown."""
+    if child.get("management_disposition") == _DISPOSED:
+        return "disposed"
+    if child.get("native_status_conflict") or not _native_execution_terminal(child):
+        return "unknown"
+    return {"completed": "completed", "errored": "failed"}.get(str(child.get("native_terminal_status")), "unknown")
+
+
+def _record_child_results(root: Path, task_id: str, state: dict[str, Any],
+                          entries: list[tuple[dict[str, Any], object, bool, object]], source: str) -> dict[str, Any] | None:
+    """Record exact handoffs' typed claims and adapter-observable usage in one loaded task state.
+
+    ``entries`` are ``(child, final message or None, record a missing block, observed model)``
+    of one hook observation. The caller holds the task lock and writes the
+    returned state together with the lifecycle ledger (``_write_child_result``);
+    ``None`` means the task ledger is unchanged. Mechanism only records here.
+    Core parses the claim block: adverse claims become ordinary open
+    observations, a missing or malformed block leaves Core's marker, and
+    nothing is judged, dismissed or closed. No hook payload carries tokens,
+    cost or tool-use counts, so usage holds only the observed model, an
+    explicit spawn effort, the handoff-to-observation duration and the
+    outcome; the rest stays null. A failure degrades to the bounded
+    ``claim_ingest`` diagnostic on the child record.
+    """
+    task_state: dict[str, Any] | None = None
+    unavailable = False
+    revision = 0
+    for child, message, record_missing, model in entries:
+        earlier = child.get("claim_ingest") if isinstance(child.get("claim_ingest"), dict) else {}
+        diagnostic: dict[str, Any] = {"source": source, "claims": "skipped", "usage": "skipped"}
+        child["claim_ingest"] = diagnostic
+        handoff_id = child.get("handoff_id")
+        if child.get("managed") is not True or child.get("handoff_bound") is not True or not isinstance(handoff_id, str):
+            continue
+        if task_state is None and not unavailable:
+            try:
+                task_authority.check(root)
+                task_state = core._load_state(root, active=True)
+                if task_state.get("task_id") != task_id:
+                    raise ValueError("task changed")
+                revision = task_state["revision"]
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+                task_state, unavailable = None, True
+        if task_state is None:
+            diagnostic.update(claims="error:TASK_UNAVAILABLE", usage="error:TASK_UNAVAILABLE")
+            continue
+        handoff = next((item for item in task_state.get("evidence_continuity", {}).get("handoffs", [])
+                        if item["id"] == handoff_id), None)
+        if handoff is None:
+            # No exact evidence association: nothing is ingested and nothing is guessed.
+            # Nothing was ingested, so no diagnostic key is left on the child record.
+            child.pop("claim_ingest", None)
+            continue
+        prior = dict(handoff.get("usage") or {})
+        if child.get("management_disposition") == _DISPOSED or child.get("native_status_conflict"):
+            diagnostic["claims"] = "skipped:not-exact"
+        elif isinstance(message, str) or record_missing:
+            diagnostic["message"] = "PRESENT" if isinstance(message, str) else "ABSENT"
+            try:
+                ingested = core.ingest_claims(task_state, handoff_id, message)
+                diagnostic["claims"] = "already_ingested" if ingested["already_ingested"] else str(ingested["status"])
+            except core.ThalirisError as exc:
+                diagnostic["claims"] = "error:" + str(exc.code)[:64]
+            except (ValueError, TypeError, KeyError, RecursionError) as exc:
+                diagnostic["claims"] = "error:" + type(exc).__name__
+        elif earlier.get("claims") not in (None, "skipped"):
+            # A usage-only update keeps what the final message's ingest recorded.
+            diagnostic.update({key: earlier[key] for key in ("claims", "message") if key in earlier})
+        usage: dict[str, object] = {"outcome": _usage_outcome(child)}
+        if isinstance(model, str) and model.strip() and len(model) <= 128:
+            usage["model"] = model
+        effort = state.get("spawn_efforts", {}).get(handoff_id) if isinstance(state.get("spawn_efforts"), dict) else None
+        if isinstance(effort, str) and effort.strip() and len(effort) <= 128:
+            usage["effort"] = effort
+        created, observed = child.get("handoff_created_at_ns"), time.time_ns()
+        if type(created) is int and observed >= created and prior.get("duration_ms") is None:
+            usage["duration_ms"] = (observed - created) // 1_000_000
+        if usage["outcome"] == "unknown" and prior.get("outcome") is not None:
+            del usage["outcome"]  # never replace a recorded outcome with a weaker one
+        usage = {key: value for key, value in usage.items() if prior.get(key) != value}
+        if not usage:
+            diagnostic["usage"] = "unchanged"
+            continue
+        try:
+            core.set_handoff_usage(task_state, handoff_id, usage)
+            diagnostic["usage"] = "recorded"
+        except core.ThalirisError as exc:
+            diagnostic["usage"] = "error:" + str(exc.code)[:64]
+        except (ValueError, TypeError, KeyError) as exc:
+            diagnostic["usage"] = "error:" + type(exc).__name__
+    if task_state is None or task_state["revision"] == revision:
+        return None
+    task_state["revision"] = revision + 1  # one hook observation, one revision
+    return task_state
+
+
+def _write_child_result(root: Path, task_state: dict[str, Any] | None, path: Path, state: dict[str, Any],
+                        *children: dict[str, Any]) -> None:
+    """Write the lifecycle ledger, with the task ledger and its anchor checkpoint when it changed.
+
+    A task-ledger write failure restores the previous bytes and still records
+    the lifecycle observation: a hook never fails on an ingest error.
+    """
+    if task_state is not None:
+        try:
+            _write_evidence_reservation(root, task_state, path, state)
+            return
+        except Exception as exc:  # noqa: BLE001 - degrade to a diagnostic; the observation is kept below
+            code = str(exc.code)[:64] if isinstance(exc, core.ThalirisError) else type(exc).__name__
+            for child in children:
+                if isinstance(child.get("claim_ingest"), dict):
+                    child["claim_ingest"].update(claims="error:" + code, usage="error:" + code)
+    _write_capture(path, state)
+
+
+def _record_disposed_usage(task_state: dict[str, Any], handoff_ids: list[object]) -> None:
+    """Mark disposed dispatches on their registered handoffs; a recorded specific outcome is kept."""
+    registered = {item["id"]: item for item in task_state.get("evidence_continuity", {}).get("handoffs", [])}
+    for handoff_id in handoff_ids:
+        handoff = registered.get(handoff_id) if isinstance(handoff_id, str) else None
+        if handoff is None or (handoff.get("usage") or {}).get("outcome") in {"completed", "failed", "disposed"}:
+            continue
+        try:
+            core.set_handoff_usage(task_state, handoff_id, {"outcome": "disposed"})
+        except (ValueError, TypeError, KeyError):
+            continue
 
 
 def _native_terminal_status(value: object) -> str | None:
@@ -3469,8 +4181,11 @@ def _record_native_terminal(state: dict[str, Any], child: dict[str, Any], status
 
 def _record_pending_terminal(state: dict[str, Any], name: str, status: str, source: str) -> bool:
     """Retire an exact native dispatch without granting missing Start authority."""
-    pending = state.get("pending_authorized_spawn")
     identity_hash = _identity_hash(name)
+    named = [item for item in _pending_reservations(state)
+             if identity_hash in (item.get("task_name_hash"), item.get("native_agent_id_hash"))]
+    # A name shared by several reservations selects none of them.
+    pending = named[0] if len(named) == 1 else None
     matches_task_name = isinstance(pending, dict) and pending.get("task_name_hash") == identity_hash
     matches_native_id = isinstance(pending, dict) and pending.get("native_agent_id_hash") == identity_hash
     if (status not in {"completed", "interrupted", "errored", "shutdown"}
@@ -3494,7 +4209,7 @@ def _record_pending_terminal(state: dict[str, Any], name: str, status: str, sour
     if not matches:
         state["children"].append(child)
     _record_native_terminal(state, child, status, source)
-    state["pending_authorized_spawn"] = None
+    _remove_pending_reservation(state, pending.get("handoff_id"))
     return True
 
 
@@ -3559,8 +4274,8 @@ def _corroborate_dispatch_identity(root: Path, task_id: str, state: dict[str, An
             "producer": pending["producer"], "payload_hash": pending["payload_hash"],
             "handoff_created_at_ns": pending["created_at_ns"], "task_name_hash": pending.get("task_name_hash"),
             "native_identity_source": source,
-            **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash")}})
-        state["pending_authorized_spawn"] = None
+            **{key: pending.get(key) for key in ("parent_agent_id_hash", "parent_role", "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash", "spawn_turn_id_hash", "workstream_id", "parallel_readonly")}})
+        _remove_pending_reservation(state, pending.get("handoff_id"))
 
 
 def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: str) -> None:
@@ -3596,6 +4311,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
         elif session_hash is None or (task_authority.check(root) is None and active_controller_owner(root, task_id) != session_hash):
             return
         changed = observed = False
+        results: list[tuple[dict[str, Any], object, bool]] = []  # (child, raw native status, newly recorded)
         if (tool in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}
                 and (_native_status_call_key(payload, tool) is not None
                      or _dispatch_identity_required(root, state, session_hash))):
@@ -3606,7 +4322,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
             calls.remove(key)
             changed = True
         if tool == "spawn_agent":
-            pending = state.get("pending_authorized_spawn")
+            pending = _pending_for_payload(root, state, payload)
             # A native tool error may follow thread creation and best-effort
             # asynchronous cleanup. It proves neither no child nor termination,
             # even when this callback matches the exact reserved call.
@@ -3628,7 +4344,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
             task_name = response.get("task_name")
             if set(response) == {"task_name"} and isinstance(task_name, str) and task_name:
                 name_hash = _identity_hash(task_name)
-                pending = state.get("pending_authorized_spawn")
+                pending = _pending_for_payload(root, state, payload)
                 if (isinstance(pending, dict) and _spawn_parent_matches(root, pending, payload)
                         and pending.get("task_name_hash") in {None, name_hash}):
                     pending["task_name_hash"] = name_hash
@@ -3669,6 +4385,7 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                 if child is not None:
                     observed = True
                     changed = _record_native_terminal(state, child, status, tool)
+                    results.append((child, response.get("previous_status"), changed))
                     changed = _record_pending_terminal(state, target, status, tool) or changed
                 else:
                     changed = _record_pending_terminal(state, target, status, tool) or changed
@@ -3693,7 +4410,9 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                             changed = _record_pending_terminal(state, agent_id, status, "wait_agent") or changed
                         continue
                     observed = True
-                    changed = _record_native_terminal(state, matches[0], status, "wait_agent") or changed
+                    recorded = _record_native_terminal(state, matches[0], status, "wait_agent")
+                    results.append((matches[0], value, recorded))
+                    changed = recorded or changed
                     changed = _record_pending_terminal(state, agent_id, status, "wait_agent") or changed
         elif tool == "list_agents":
             entries = response.get("agents")
@@ -3710,11 +4429,38 @@ def _reconcile_lifecycle_post_tool(root: Path, payload: dict[str, Any], tool: st
                         continue
                     observed = True
                     did_reconcile = _record_native_terminal(state, child, status, "list_agents")
+                    results.append((child, entry.get("agent_status"), did_reconcile))
                     changed = _record_pending_terminal(state, name, status, "list_agents") or changed
                     changed = changed or did_reconcile
         if changed or observed:
             _runtime_metadata(state, payload)
-            _write_capture(path, state)
+            entries = _terminal_result_entries(results)
+            task_state = _record_child_results(root, task_id, state, entries, tool) if entries else None
+            _write_child_result(root, task_state, path, state, *(entry[0] for entry in entries))
+
+
+def _terminal_result_entries(results: list[tuple[dict[str, Any], object, bool]]) -> list[tuple[dict[str, Any], object, bool, object]]:
+    """Select exact terminal observations of bound handoffs worth carrying into the task ledger.
+
+    A newly recorded terminal status updates the handoff's usage outcome. A
+    ``{"completed": <text>}`` status whose text holds a ``thaliris-claims`` block
+    is ingested, best effort and once; text without a block records nothing,
+    because this snapshot is not known to be the complete final message. The
+    child's own model is not in the observer's payload, so none is reported.
+    """
+    entries: list[tuple[dict[str, Any], object, bool, object]] = []
+    for child, value, recorded in results:
+        if (child.get("managed") is not True or child.get("handoff_bound") is not True
+                or not isinstance(child.get("handoff_id"), str) or not _native_execution_terminal(child)
+                or any(child is entry[0] for entry in entries)):
+            continue
+        text = value["completed"] if isinstance(value, dict) and set(value) == {"completed"} and isinstance(value["completed"], str) else None
+        ingested = isinstance(child.get("claim_ingest"), dict) and child["claim_ingest"].get("claims") in {"present", "already_ingested"}
+        if text is not None and (ingested or core.parse_claim_block(text)["status"] == "missing"):
+            text = None
+        if recorded or text is not None:
+            entries.append((child, text, False, None))
+    return entries
 
 
 def _subagent_start_output(root: Path, payload: dict[str, Any]) -> str:
@@ -3761,71 +4507,128 @@ def _bash_command(payload: dict[str, Any]) -> str | None:
     return command if isinstance(command, str) and command.strip() else None
 
 
-def native_execution_closed(root: Path) -> bool:
-    """Check remaining execution risk, without judging handoffs or the product."""
+def native_execution_diagnostic(root: Path) -> dict[str, Any]:
+    """Explain execution-risk closure, without disposing or judging the product.
+
+    The bounded list has exact ledger selectors; omitted rows can be read from
+    the named local lifecycle file. Its digest is the disposal CAS, not a grant.
+    """
     task_id = _active_task_id(root)
+    blockers: list[dict[str, Any]] = []
+    path = _lifecycle_path(root, task_id) if task_id is not None else None
+
+    def add(kind: str, **details: Any) -> None:
+        blockers.append({"kind": kind, **details})
+
+    def report() -> dict[str, Any]:
+        return {"closed": not blockers, "task_id": task_id,
+                "expected_lifecycle_sha256": task_authority.digest(path) if path is not None else "UNKNOWN",
+                "blockers": blockers[:32], "blocker_count": len(blockers),
+                "omitted_blockers": max(0, len(blockers) - 32),
+                "scope": "native-agent-execution",
+                "external_process_termination": "UNKNOWN; agent status does not establish it",
+                "next_diagnostic": {"path": path.relative_to(root).as_posix() if path is not None else None,
+                                    "action": "read exact lifecycle records if blockers are omitted; preserve unknown evidence"},
+                "native_execution": "UNKNOWN" if blockers else "RESOLVED_OR_DISPOSED"}
+
     if task_id is None:
-        return False
-    path = _lifecycle_path(root, task_id)
+        add("active-task-unavailable")
+        return report()
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         anchor = task_authority.read(root)
-        return (isinstance(anchor, dict) and anchor.get("lifecycle_sha256") == "ABSENT"
-                and not anchor.get("lifecycle_snapshot"))
-    except (OSError, ValueError, json.JSONDecodeError):
-        return False
+        if not (isinstance(anchor, dict) and anchor.get("lifecycle_sha256") == "ABSENT"
+                and not anchor.get("lifecycle_snapshot")):
+            add("lifecycle-missing-without-absent-anchor")
+        return report()
+    except (OSError, ValueError):
+        add("lifecycle-unreadable")
+        return report()
     if (not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION
             or value.get("task_id_hash") != _task_key(task_id)
-            or not isinstance(value.get("children"), list)
-            or value.get("pending_authorized_spawn") is not None):
-        return False
+            or not isinstance(value.get("children"), list)):
+        add("lifecycle-schema-or-task-conflict")
+        return report()
+    # Every reservation blocks, wherever it is stored; a malformed entry or
+    # collection blocks too instead of being skipped.
+    many = value.get("pending_authorized_spawns", [])
+    if not isinstance(many, list):
+        add("malformed-authorized-reservations")
+        many = []
+    for pending in [value.get("pending_authorized_spawn"), *many]:
+        if pending is None:
+            continue
+        add("authorized-reservation", handoff_id=pending.get("handoff_id") if isinstance(pending, dict) else None,
+            expected_agent_type=pending.get("expected_agent_type") if isinstance(pending, dict) else None,
+            next_step="observe exact native dispatch result or explicitly dispose this handoff")
+    dispositions = value.get("dependency_dispositions", [])
     collisions = value.get("identity_collisions") or []
-    if not isinstance(collisions, list) or value.get(_UNRECORDED_COLLISIONS):
-        return False
+    if not isinstance(collisions, list):
+        add("malformed-identity-collisions")
+        collisions = []
+    if value.get(_UNRECORDED_COLLISIONS):
+        add("unrecorded-identity-collisions", native_execution="UNKNOWN")
     for index, item in enumerate(collisions):
-        # Only an exact recorded Controller disposition retires a collision.
         if not isinstance(item, dict) or item.get("management_disposition") != "ABANDONED_DEPENDENCY" or not any(
                 isinstance(disposition, dict) and disposition.get("kind") == "collision"
                 and disposition.get("conflict_id") == _conflict_id("collision", index, item)
-                for disposition in value.get("dependency_dispositions", [])):
-            return False
+                for disposition in dispositions):
+            add("identity-collision", conflict_id=_conflict_id("collision", index, item) if isinstance(item, dict) else None,
+                next_step="preserve malformed evidence or explicitly dispose the exact conflict")
     abandoned = [child for child in value["children"] if isinstance(child, dict)
         and child.get("management_disposition") == "ABANDONED_DEPENDENCY"]
     if abandoned:
         try:
             fenced = _read_abandoned_agent_hashes(root)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return False
-        for child in abandoned:
+        except (OSError, ValueError, TypeError):
+            fenced = set()
+            add("abandoned-agent-fence-unreadable")
+        for index, child in enumerate(abandoned):
             if child.get("agent_id_hash") not in fenced or not any(
                 isinstance(disposition, dict) and disposition.get("kind") == "child"
                 and isinstance(disposition.get("record"), dict)
                 and disposition["record"].get("agent_id_hash") == child.get("agent_id_hash")
                 and disposition["record"].get("handoff_id") == child.get("handoff_id")
-                for disposition in value.get("dependency_dispositions", [])):
-                return False
+                for disposition in dispositions):
+                add("abandoned-child-unfenced-or-unrecorded", handoff_id=child.get("handoff_id"), native_execution="UNKNOWN")
     children = [child for child in value["children"] if not isinstance(child, dict) or child.get("management_disposition") != "ABANDONED_DEPENDENCY"]
-    if not children:
-        return True
-    if (value.get("managed_hook_spec_hash") != managed_hook_spec_hash()
+    if children and (value.get("managed_hook_spec_hash") != managed_hook_spec_hash()
             or value.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION):
-        return False
-    identities = set()
-    for child in children:
-        if (not isinstance(child, dict)
-                or not _native_execution_terminal(child)
-                or child.get("native_status_conflict")):
-            return False
+        add("lifecycle-protocol-conflict")
+    identities: set[str] = set()
+    for index, child in enumerate(value["children"]):
+        if isinstance(child, dict) and child.get("management_disposition") == "ABANDONED_DEPENDENCY":
+            continue
+        if not isinstance(child, dict):
+            add("malformed-child", child_index=index)
+            continue
+        selector = {"handoff_id": child.get("handoff_id"), "agent_id_hash": child.get("agent_id_hash"),
+                    "task_name_hash": child.get("task_name_hash"), "role": child.get("role")}
+        if child.get("native_status_conflict") and not isinstance(child.get("handoff_id"), str):
+            selector["conflict_id"] = _conflict_id("child", index, child.get("agent_id_hash"))
+        if not _native_execution_terminal(child) or child.get("native_status_conflict"):
+            add("child-native-execution-unresolved", **selector,
+                native_status=child.get("native_terminal_status") or "UNKNOWN",
+                native_status_conflict=child.get("native_status_conflict") is True,
+                turn_identity="UNKNOWN" if child.get("native_turn_identity_unknown") else "RECORDED",
+                next_step="observe exact native terminal status via supported list_agents/wait_agent; or explicitly dispose the dependency")
         child_identities = [child.get(key) for key in ("task_name_hash", "agent_id_hash") if child.get(key) is not None]
-        if (not child_identities or any(not isinstance(identity, str)
-                or re.fullmatch(r"[0-9a-f]{64}", identity) is None for identity in child_identities)
-                or child.get("native_terminal_source") not in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}):
-            return False
-        if set(child_identities) & identities:
-            return False
-        identities.update(child_identities)
-    return True
+        valid = bool(child_identities) and all(isinstance(identity, str)
+                and re.fullmatch(r"[0-9a-f]{64}", identity) is not None for identity in child_identities)
+        if not valid or child.get("native_terminal_source") not in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}:
+            add("child-native-identity-or-source-unverified", **selector,
+                native_terminal_source=child.get("native_terminal_source") or "UNKNOWN")
+        if valid:
+            if set(child_identities) & identities:
+                add("duplicate-child-native-identity", **selector)
+            identities.update(child_identities)
+    return report()
+
+
+def native_execution_closed(root: Path) -> bool:
+    """Check remaining execution risk, without judging handoffs or the product."""
+    return native_execution_diagnostic(root)["closed"]
 
 
 def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None = None) -> bool:
@@ -3855,7 +4658,7 @@ def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None
         and value.get("managed_hook_spec_hash") == managed_hook_spec_hash()
         and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
         and (
-            selected(value.get("pending_authorized_spawn"))
+            any(selected(item) for item in _pending_reservations(value))
             or any(
                 selected(child)
                 and child.get("managed") is True
@@ -3864,6 +4667,211 @@ def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None
             )
         )
     )
+
+
+class _ManagedWaitUnknown(ValueError):
+    """Static, bounded diagnosis; never include native text or ledger values."""
+
+    def __init__(self, scope: str, reason: str):
+        self.scope, self.reason = scope, reason
+        super().__init__(reason)
+
+
+def _wait_parent(state: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve association independently of liveness, without granting authority."""
+    if not _valid_parent_metadata(row) or not isinstance(row.get("handoff_id"), str):
+        raise _ManagedWaitUnknown("unattributed", "dependency association is unavailable")
+    owner = state.get("owner_session_id_hash")
+    if owner is not None and row.get("session_id_hash") != owner:
+        raise _ManagedWaitUnknown("unattributed", "Controller ancestry is inconsistent")
+    if row["depth"] == 1:
+        return None
+    parents = [parent for parent in state["children"] if isinstance(parent, dict)
+        and parent.get("agent_id_hash") == row["parent_agent_id_hash"]]
+    if (len(parents) != 1 or parents[0].get("depth") != 1
+            or not _valid_parent_metadata(parents[0])
+            or any(parents[0].get(key) != row.get(field) for key, field in (
+                ("role", "parent_role"), ("turn_id_hash", "parent_turn_id_hash"),
+                ("session_id_hash", "session_id_hash"), ("handoff_id", "root_handoff_id")))):
+        raise _ManagedWaitUnknown("unattributed", "parent association is ambiguous or inconsistent")
+    return parents[0]
+
+
+def _wait_identity_conflicts(
+    state: dict[str, Any], records: list[dict[str, Any]], scoped: list[tuple[dict[str, Any], str]],
+    *, named_dependencies: bool,
+) -> None:
+    """Ignore only conflicts proven outside this wait; keep global guards intact."""
+    def identities(row: dict[str, Any]) -> set[str]:
+        return {row[key] for key in ("agent_id_hash", "native_agent_id_hash", "task_name_hash")
+                if isinstance(row.get(key), str) and re.fullmatch(r"[0-9a-f]{64}", row[key])}
+
+    def actor_ids(row: dict[str, Any]) -> set[str]:
+        return {row[key] for key in ("agent_id_hash", "native_agent_id_hash") if isinstance(row.get(key), str)}
+
+    def native_name(row: dict[str, Any]) -> object:
+        # Mirror _child_for_native_name: V2 observes canonical names, while V1
+        # exact target/status maps and Hook callers use native actor identity.
+        return row.get("task_name_hash") or row.get("agent_id_hash") or row.get("native_agent_id_hash")
+
+    for row, scope in scoped:
+        if row.get("native_status_conflict") or row.get("native_turn_identity_unknown"):
+            raise _ManagedWaitUnknown(scope, "native identity or turn status conflicts")
+        names = identities(row)
+        supplied = [row[key] for key in ("agent_id_hash", "native_agent_id_hash", "task_name_hash")
+                    if row.get(key) is not None]
+        if any(not isinstance(value, str) or value not in names for value in supplied):
+            raise _ManagedWaitUnknown(scope, "native identity is malformed")
+        if not names and not any(row is item for item in _pending_reservations(state)):
+            raise _ManagedWaitUnknown(scope, "native identity is unavailable")
+        if any(other is not row and (actor_ids(row) & actor_ids(other)
+                or named_dependencies and scope == "direct-dependency" and native_name(row) is not None
+                and native_name(row) == native_name(other)) for other in records):
+            raise _ManagedWaitUnknown(scope, "native identity is shared by multiple records")
+
+    # A conflicting record may be ignored only with an intact association.
+    # A partial/malformed record cannot be silently classified as a sibling.
+    for row in records:
+        if (row.get("management_disposition") != _DISPOSED
+                and (row.get("native_status_conflict") or row.get("native_turn_identity_unknown"))):
+            names = identities(row)
+            if not names or any(row.get(key) is not None and (not isinstance(row[key], str) or row[key] not in names)
+                    for key in ("agent_id_hash", "native_agent_id_hash", "task_name_hash")):
+                raise _ManagedWaitUnknown("unattributed", "conflicting native actor identity is unavailable")
+            _wait_parent(state, row)
+
+    collisions = state.get("identity_collisions")
+    if (collisions is not None and not isinstance(collisions, list)) or state.get(_UNRECORDED_COLLISIONS):
+        raise _ManagedWaitUnknown("unattributed", "identity collision participants are unavailable")
+    for collision in collisions or []:
+        if isinstance(collision, dict) and collision.get("management_disposition") == _DISPOSED:
+            continue
+        if not isinstance(collision, dict) or collision.get("overflow"):
+            raise _ManagedWaitUnknown("unattributed", "identity collision participants are unavailable")
+        if (not isinstance(collision.get("agent_id_hash"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", collision["agent_id_hash"]) is None):
+            raise _ManagedWaitUnknown("unattributed", "identity collision actor is unavailable")
+        participants = []
+        for field, key in (("agent_id_hash", "agent_id_hash"), ("pending_handoff_id", "handoff_id")):
+            selector = collision.get(field)
+            if selector is None:
+                continue
+            matches = [row for row in records if row.get(key) == selector
+                or field == "agent_id_hash" and row.get("native_agent_id_hash") == selector]
+            # A relevant participant takes precedence over an unresolved second
+            # participant; both diagnoses refuse the wait, neither disposes it.
+            for row, scope in scoped:
+                if any(match is row for match in matches):
+                    raise _ManagedWaitUnknown(scope, "native identity collision affects this wait")
+            if len(matches) != 1:
+                raise _ManagedWaitUnknown("unattributed", "identity collision participant is not uniquely associated")
+            participants.extend(matches)
+        if not participants:
+            raise _ManagedWaitUnknown("unattributed", "identity collision participants are unavailable")
+        for participant in participants:
+            _wait_parent(state, participant)
+
+
+def _managed_wait_guard(root: Path, payload: dict[str, Any]) -> str:
+    """Deny a known managed actor's empty/uncertain wait, never infer success.
+
+    This is a pre-call check of captured exact native evidence, not a wake
+    subscription. Interruptions end an agent execution; owned external process
+    termination and product acceptance are separate, unproved facts.
+    """
+    task_id = _active_task_id(root)
+    if task_id is None:
+        return ""
+    nested = any(payload.get(key) is not None for key in ("agent_id", "agent_type", "agentType"))
+    try:
+        task_authority.check(root)
+        if not nested and active_controller_owner(root, task_id) != _session_id_hash(payload):
+            return ""  # No authority over unrelated native waits.
+        path = _lifecycle_path(root, task_id)
+        state = _load_lifecycle(path, task_id)
+        caller = _bound_child_record(state, payload) if nested else None
+        if nested and caller is None:
+            known = any(isinstance(row, dict) and row.get("agent_id_hash") == _identity_hash(payload.get("agent_id"))
+                        for row in state["children"])
+            if known or _managed_spawn_requested({"tool_input": payload}):
+                raise _ManagedWaitUnknown("caller", "exact live caller binding is unresolved")
+            return ""  # Unrelated ordinary native actor, not a managed grant.
+        if any(not isinstance(row, dict) for row in state["children"]):
+            raise _ManagedWaitUnknown("unattributed", "native dependency record is malformed")
+        if ((state["children"] or _pending_reservations(state)) and (
+                state.get("managed_hook_spec_hash") != managed_hook_spec_hash()
+                or state.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION
+                )):
+            raise _ManagedWaitUnknown("lifecycle", "native evidence protocol is unresolved")
+
+        scoped = []
+        if caller is not None:
+            scoped.append((caller, "caller"))
+            try:
+                ancestor = _wait_parent(state, caller)
+            except _ManagedWaitUnknown:
+                raise _ManagedWaitUnknown("caller", "caller ancestry is unresolved") from None
+            if ancestor is not None:
+                scoped.append((ancestor, "ancestor"))
+                if _native_execution_terminal(ancestor) or ancestor.get("management_disposition") == _DISPOSED:
+                    raise _ManagedWaitUnknown("ancestor", "parent execution no longer supports this association")
+
+        def selected(row: object) -> bool:
+            if not isinstance(row, dict) or row.get("management_disposition") == "ABANDONED_DEPENDENCY":
+                return False
+            # Legacy/unbound records cannot establish a nested dependency.
+            if row.get("depth") is None and row.get("handoff_id") is None and row.get("managed") is not True:
+                return not nested
+            parent = _wait_parent(state, row)
+            return parent is caller if nested else parent is None
+
+        rows = [row for row in state["children"] if selected(row)]
+        pending = _pending_reservations(state)
+        rows.extend(item for item in pending if selected(item))
+        # V1 selects exact thread IDs; V2 waits across the direct dependencies.
+        targets = _delegation_input(payload).get("targets")
+        if targets is not None:
+            if not isinstance(targets, list) or not all(isinstance(item, str) and item for item in targets):
+                raise _ManagedWaitUnknown("target-selection", "native wait targets are invalid")
+            hashes = {_identity_hash(item) for item in targets}
+            matches = [row for row in rows if row.get("agent_id_hash", row.get("native_agent_id_hash")) in hashes]
+            if len(matches) != len(hashes):
+                raise _ManagedWaitUnknown("target-selection", "wait target is not an exact direct dependency")
+            rows = matches
+        # No target shape exempts a wait from the identity checks: an
+        # unidentified reservation can never show that a named actor is
+        # unrelated to it, so ``_wait_identity_conflicts`` always runs.
+        records = [*state["children"], *pending]
+        _wait_identity_conflicts(state, records, scoped + [(row, "direct-dependency") for row in rows],
+                                 named_dependencies=targets is None)
+        waitable = False
+        for row in rows:
+            if _native_execution_terminal(row):
+                if row.get("native_terminal_source") not in {"list_agents", "wait_agent", "interrupt_agent", "close_agent"}:
+                    raise _ManagedWaitUnknown("direct-dependency", "terminal source is unavailable")
+                continue
+            reserved = any(row is item for item in pending)
+            if reserved and not (row.get("task_name_hash") or row.get("native_agent_id_hash")):
+                raise _ManagedWaitUnknown("direct-dependency", "reserved dispatch has no observable native identity")
+            if reserved or row.get("managed") is True and row.get("native_terminal_status") != "not_found":
+                waitable = True
+            else:
+                raise _ManagedWaitUnknown("direct-dependency", "native dependency liveness is unknown")
+        if waitable:
+            return ""
+        return _permission_deny(
+            "THALIRIS_WAIT_NO_UNFINISHED_DEPENDENCY: no unfinished direct managed agent dependency remains. "
+            "Use available results or route the interrupted work; do not wait again on ended agents. "
+            "Interruption is not success or permanent identity death; external process termination remains UNKNOWN. "
+            "New work requires a fresh authorized handoff, not reuse of the ended turn.")
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        diagnosis = (f"scope={error.scope}; {error.reason}" if isinstance(error, _ManagedWaitUnknown)
+                     else "scope=lifecycle; authority or lifecycle evidence is unreadable")
+        return _permission_deny(
+            f"THALIRIS_WAIT_DEPENDENCY_UNKNOWN: {diagnosis}. "
+            "Use one supported current native status check and resolve identity/conflict evidence before waiting; "
+            "if evidence remains unavailable, return the blocker for an explicit dependency decision instead of repeating waits. "
+            "Absence, messages, timeout and FINAL do not prove completion. No dependency was disposed.")
 
 
 def _reject_non_json_constant(value: str) -> None:
@@ -4636,6 +5644,18 @@ def _exact_standalone_controller_instructions_request(payload: dict[str, Any]) -
         elif token == "controller-instructions":
             from . import controller_instructions
             tail = tokens[index + 1:]
+            if tail and tail[0] == "--resident" and len(tail) > 1:
+                options = tail[1:]
+                if len(options) % 2:
+                    return False
+                pairs = dict(zip(options[::2], options[1::2]))
+                return (len(pairs) * 2 == len(options)
+                        and {"--offset", "--limit"} <= pairs.keys()
+                        and pairs.keys() <= {"--offset", "--limit", "--expected-sha256"}
+                        and re.fullmatch(r"[0-9]+", pairs["--offset"]) is not None
+                        and re.fullmatch(r"[0-9]+", pairs["--limit"]) is not None
+                        and 1 <= int(pairs["--limit"]) <= 16384
+                        and ("--expected-sha256" not in pairs or re.fullmatch(r"[0-9a-f]{64}", pairs["--expected-sha256"]) is not None))
             return (not tail
                     or tail == ["--resident"]
                     or (len(tail) == 2 and tail[0] == "--section"
@@ -4739,6 +5759,12 @@ def _control_state_target(payload: dict[str, Any]) -> str | None:
     capability_directory = maintenance_capability.directory().as_posix().casefold()
     if capability_directory in normalized or ".thaliris/host-maintenance" in normalized:
         return capability_directory
+    # Recorded config-capability probe results: reporting evidence a forged
+    # entry must not be able to plant.
+    from . import config_capability
+    probe_cache = config_capability.cache_directory().as_posix().casefold()
+    if probe_cache in normalized or ".thaliris/host-capability" in normalized:
+        return probe_cache
     home = _host_home_path()
     paths = [home / name for name in (runtime_identity.MANIFEST_NAME,
         host_maintenance.RECEIPT_NAME, "thaliris-host-transition.json", "thaliris-host-maintenance.lock", "AGENTS.md", "hooks.json", "config.toml",
@@ -4753,14 +5779,51 @@ def _control_state_target(payload: dict[str, Any]) -> str | None:
     return agents if agents in normalized else None
 
 
-def _obvious_write_attempt(payload: dict[str, Any]) -> bool:
+def _command_material(payload: dict[str, Any]) -> str | list[str] | None:
+    """The shell command text, or the argv list of a shell-array ``command``."""
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    command = tool_input.get("command") or tool_input.get("cmd")
+    if isinstance(command, str):
+        return command if command.strip() else None
+    if isinstance(command, list) and command:
+        return [str(item) for item in command]
+    return None
+
+
+def _obvious_write_attempt(payload: dict[str, Any], *, broad: bool = False) -> bool:
+    """Heuristic write detection; ``broad`` widens it for deny-only contexts.
+
+    The legacy pattern stays the default for every caller. ``broad=True`` also
+    recognizes the wider command families of ``write_detection`` (file moves,
+    in-place editors, Git working-tree and ref changes, package installs,
+    script one-liners, shell-array commands). Only a call site that already
+    refuses writes (a readonly, parallel-readonly or non-write role actor) may
+    pass it, because it can only make that refusal stricter. A site that could
+    refuse an authorized writer, or that observes rather than denies, must not.
+    """
     tool = payload.get("tool_name") or payload.get("tool")
     if not isinstance(tool, str):
         return False
     if _tool_basename(tool) in _CONTROLLER_MUTATION_TOOL_NAMES:
         return True
     command = _bash_command(payload)
-    return isinstance(command, str) and _OBVIOUS_WRITE.search(command) is not None
+    if isinstance(command, str) and _OBVIOUS_WRITE.search(command) is not None:
+        return True
+    if not broad:
+        return False
+    material = _command_material(payload)
+    if material is None:
+        return False
+    if isinstance(material, list):
+        if _OBVIOUS_WRITE.search(" ".join(material)) is not None:
+            return True
+    elif _context_operation(payload) in _CHILD_LEDGER_APPENDS:
+        # A standalone observe/verify call carries free text; a read-only actor
+        # must stay able to record it whatever words the text contains.
+        return False
+    return write_detection.broad_write(material)
 
 
 def _obvious_mutation_tool(tool: str) -> bool:
@@ -4851,6 +5914,21 @@ def _recovery_command_admitted(root: Path, payload: dict[str, Any], diagnostic: 
     return diagnostic.get("abandon_active_confirmation_required") is not True or abandon_active
 
 
+def _parallel_readonly_actor(root: Path, payload: dict[str, Any]) -> bool:
+    """Deny-only: this native actor was admitted as a read-only parallel dispatch."""
+    agent_hash = _identity_hash(payload.get("agent_id"))
+    task_id = _active_task_id(root)
+    if agent_hash is None or task_id is None:
+        return False
+    try:
+        ledger = _load_lifecycle(_lifecycle_path(root, task_id), task_id, verify_authority=False)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    return any(isinstance(child, dict) and child.get("agent_id_hash") == agent_hash
+               and child.get("managed") is True and child.get("parallel_readonly") is True
+               for child in ledger["children"])
+
+
 def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     """Allow reads with telemetry; block only mechanical protocol mutations."""
     _best_effort_record(_record_child_runtime_event, root, payload, "PreToolUse")
@@ -4917,7 +5995,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     if isinstance(raw_command, str) and _RAW_CORE_IDENTITY_STATE.search(raw_command):
         _best_effort_record(_record_protocol_deviation, root, payload, operation="identity-raw-core", target="thaliris-core identity", blocked=True)
         return _permission_deny(f"THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION: a {role_names} session may not run Controller-owned identity state commands.")
-    if operation in {"task-observe", "document-maintain"}:
+    if operation in _CHILD_LEDGER_APPENDS | {"document-maintain"}:
         task_id = _active_task_id(root)
         if task_id is None:
             return _permission_deny("THALIRIS_EVIDENCE_TASK_UNAVAILABLE: selected evidence operations require an active task")
@@ -4930,10 +6008,11 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: exact live role and handoff required")
         if selected_task is not None and selected_task != task_id:
             return _permission_deny("THALIRIS_EVIDENCE_TASK_CONFLICT: selected task differs from the native handoff")
-        if operation == "task-observe":
+        if operation in _CHILD_LEDGER_APPENDS:
             actor = _direct_context_option(payload, {"--agent-id-hash"})
             if actor is not None and actor != child["agent_id_hash"]:
-                return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: observation native producer differs")
+                return _permission_deny("THALIRIS_EVIDENCE_PRODUCER_CONFLICT: " + (
+                    "observation" if operation == "task-observe" else "verification") + " native producer differs")
         elif child["role"] != "curator":
             return _permission_deny("THALIRIS_CURATOR_SELECTION_REQUIRED")
         additions = []
@@ -4941,7 +6020,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             additions.append("--task-id " + task_id)
         if selected_handoff is None:
             additions.append("--handoff-id " + child["handoff_id"])
-        if operation == "task-observe" and actor is None:
+        if operation in _CHILD_LEDGER_APPENDS and actor is None:
             additions.append("--agent-id-hash " + child["agent_id_hash"])
         return _updated_command_output(payload, " ".join(additions)) if additions else ""
     if operation in _CHILD_CONTEXT_MUTATIONS:
@@ -4990,7 +6069,18 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
             blocked=False,
             notify_controller=role in roles.notice_roles(),
         )
-    if binding is not None and not binding.repo_write_allowed and _obvious_write_attempt(payload):
+    if _obvious_write_attempt(payload, broad=True) and _parallel_readonly_actor(root, payload):
+        _best_effort_record(
+            _record_protocol_deviation,
+            root,
+            payload,
+            operation="parallel-readonly-write-attempt",
+            target=normalized,
+            blocked=True,
+        )
+        return _permission_deny("THALIRIS_READONLY_ACTOR: this parallel dispatch declared no write workstream and was"
+                                " admitted read-only; repository writes need a declared write workstream")
+    if binding is not None and not binding.repo_write_allowed and _obvious_write_attempt(payload, broad=True):
         _best_effort_record(
             _record_protocol_deviation,
             root,
@@ -5437,7 +6527,7 @@ def _delegation_input(payload: dict[str, Any]) -> dict[str, Any]:
         return value
     if isinstance(payload.get("tool_input"), dict):
         return payload["tool_input"]
-    return {key: payload[key] for key in ("message", "input", "text", "agent_type", "agentType", "role", "agent_role", "task_id", "child_id", "target", "task_name", "agent_id", "id", "fork_turns", "fork_context", "isolation_reason", "fork_turns_reason", "model", "reasoning_effort", "thinking", "model_reasoning_effort") if key in payload}
+    return {key: payload[key] for key in ("message", "input", "text", "agent_type", "agentType", "role", "agent_role", "task_id", "child_id", "target", "task_name", "agent_id", "id", "fork_turns", "fork_context", "isolation_reason", "fork_turns_reason", "model", "reasoning_effort", "thinking", "model_reasoning_effort", "workstream_id", "workstream", "dispatch_workstream") if key in payload}
 
 
 def _delegation_text(tool_input: dict[str, Any]) -> object:
@@ -5446,6 +6536,34 @@ def _delegation_text(tool_input: dict[str, Any]) -> object:
         if isinstance(value, str):
             return value
     return None
+
+
+def _dispatch_workstream_id(payload: dict[str, Any]) -> str | None:
+    """Extract one explicit workstream binding from native input or handoff."""
+    tool_input = _delegation_input(payload)
+    values: list[str] = []
+    for key in ("workstream_id", "dispatch_workstream"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    value = tool_input.get("workstream")
+    if isinstance(value, dict) and isinstance(value.get("id"), str) and value["id"].strip():
+        values.append(value["id"].strip())
+    elif isinstance(value, str) and value.strip():
+        values.append(value.strip())
+    text = _delegation_text(tool_input)
+    if isinstance(text, str):
+        markers = re.findall(r"(?m)^thaliris-workstream:\s*([A-Za-z0-9_.:/-]{1,256})\s*$", text)
+        values.extend(markers)
+        json_markers = re.findall(r'(?m)^thaliris-workstream-json:\s*(\{.*\})\s*$', text)
+        for marker in json_markers:
+            try:
+                item = json.loads(marker)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip():
+                values.append(item["id"].strip())
+    return values[0] if values and len(set(values)) == 1 else None
 
 
 def _isolation_classification(tool: str, tool_input: dict[str, Any], _role: str) -> dict[str, str] | None:
@@ -5630,10 +6748,17 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
                 " the selected evidence in a new handoff and spawn a fresh named-role child with fork_turns=\"none\".")
         if normalized in {"send_message", "followup_task", "send_input"} and _active_child_communication(root, payload):
             return ""
-        if operation == "task-evidence-register":
+        if operation == "task-verify" and payload.get("readonly") is True:
+            # A bound readonly role verifies through its own exact handoff, never as the Controller.
+            return _permission_deny("THALIRIS_READONLY_ACTOR: Controller verification is unavailable to a readonly actor")
+        if operation in {"task-evidence-register", "task-observe"}:
+            if operation == "task-observe" and payload.get("readonly") is True:
+                # Readonly children have their separate exact handoff append
+                # path. That exception cannot become a Controller-local grant.
+                return _permission_deny("THALIRIS_READONLY_ACTOR: Controller local/import writes are unavailable to a readonly actor")
             # Existing session association, not an authority or bearer token.
-            # The CLI checks it only for preselection; legacy registration keeps
-            # the existing persistent-authority/reassociation behavior.
+            # CLI preselection and Controller-local facts compare the owner;
+            # legacy registration/import keeps its existing authority behavior.
             supplied = _direct_context_option(payload, {"--controller-session-id-hash"})
             session_hash = _session_id_hash(payload)
             if session_hash is None or supplied is not None and supplied != session_hash:
@@ -5985,11 +7110,11 @@ def task_abandon(
         if lifecycle_raw is not None and hashlib.sha256(lifecycle_raw).hexdigest() != lifecycle_sha256:
             raise ValueError("task-abandon lifecycle bytes changed")
         lifecycle_state = _load_lifecycle(lifecycle_path, task_id) if lifecycle_present else {}
-        pending = lifecycle_state.get("pending_authorized_spawn")
+        reservations = _pending_reservations(lifecycle_state)
         owner_hash = lifecycle_state.get("owner_session_id_hash")
         owner_provenance = "TASK_START" if owner_hash is not None else "UNKNOWN"
-        if owner_hash is None and isinstance(pending, dict) and pending.get("depth") == 1 and pending.get("parent_role") == "controller":
-            owner_hash = pending.get("session_id_hash")
+        if owner_hash is None and _pending_controller_owner(lifecycle_state) is not None:
+            owner_hash = _pending_controller_owner(lifecycle_state)
             owner_provenance = "DEPTH_ONE_PENDING_RESERVATION"
         if owner_hash is not None and (not isinstance(owner_hash, str) or re.fullmatch(r"[0-9a-f]{64}", owner_hash) is None):
             raise ValueError("invalid lifecycle Controller owner")
@@ -6004,8 +7129,9 @@ def task_abandon(
             if isinstance(candidate, str) and re.fullmatch(r"[0-9a-f]{64}", candidate):
                 fence_sources.setdefault(candidate, []).append(source)
         add_fence(owner_hash, "owner:" + owner_provenance)
-        if isinstance(pending, dict):
-            add_fence(pending.get("session_id_hash"), "pending_authorized_spawn")
+        for index, pending in enumerate(reservations):
+            add_fence(pending.get("session_id_hash"),
+                      "pending_authorized_spawn" if index == 0 else f"pending_authorized_spawns[{index - 1}]")
         for index, child in enumerate(lifecycle_state.get("children", [])):
             if isinstance(child, dict):
                 add_fence(child.get("session_id_hash"), f"children[{index}]")

@@ -244,9 +244,8 @@ def _task_preflight(root: Path) -> dict[str, object]:
         ledger = lifecycle._load_lifecycle(lifecycle_path, task_id)
         owner = ledger.get("owner_session_id_hash")
         provenance = "TASK_START" if owner is not None else "UNKNOWN"
-        pending = ledger.get("pending_authorized_spawn")
-        if owner is None and isinstance(pending, dict) and pending.get("depth") == 1 and pending.get("parent_role") == "controller":
-            owner = pending.get("session_id_hash")
+        if owner is None and lifecycle._pending_controller_owner(ledger) is not None:
+            owner = lifecycle._pending_controller_owner(ledger)
             provenance = "DEPTH_ONE_PENDING_RESERVATION"
         if owner is not None and (not isinstance(owner, str) or re.fullmatch(r"[0-9a-f]{64}", owner) is None):
             raise ValueError("invalid lifecycle Controller owner")

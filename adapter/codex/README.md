@@ -60,15 +60,47 @@ V1 fork_context=false. The default Controller work method is delegated: a long-l
 Controller keeps direction and acceptance criteria, while fresh roles perform open-ended or repeated
 investigation and stable implementation. Ordinary Controller reads, Git and diagnostics
 are legal within the task boundary; delegation follows purpose and working set rather
-than numeric permission thresholds. Explicit user choices of `controller-direct` and `single-agent` override this
+than numeric permission thresholds. Explicit user choices of `controller-direct`, `single-agent` and `adaptive` override this
 efficiency default without changing task scope, read-only role limits or file protection.
+`adaptive` adds no hook restriction beyond the default: the Controller may execute
+directly and may dispatch any registered role.
 
 Controller may authorize multiple independent child workstreams at once, including review
 of a stable candidate while implementation waits for CI. Avoid overlapping writes in one
 shared worktree; actual file conflicts need coordination, while separate worktrees support
 independent changes. There is at most one pending unbound dispatch reservation per Task ID
 to avoid ambiguous association, but multiple successfully bound children may be running
-concurrently. A reservation belongs only to its Task ID. Native capacity does not expand
+concurrently. Parallel dispatch is user-directed: a `parallel_dispatch` authority contract
+lets the owning Controller's own top-level spawns hold several reservations at once.
+Write classification follows the handoff: a dispatch writes only when it names one declared
+write workstream (`thaliris-workstream: <id>`). Read-type roles (Investigator, Reasoning
+Specialist, Reviewer and any non-writing registered role) need no workstream; without a write
+workstream the reservation and the bound child carry `parallel_readonly`, and the readonly
+guard denies their repository writes, `apply_patch` and shell writes exactly as for a
+non-writing role. They are never refused for count or overlap. An executor (Implementer,
+Focused Implementer, Curator or another registered writing role) without a write workstream
+is refused with `THALIRIS_PARALLEL_WORKSTREAM_REQUIRED`. The adapter adds no count of its
+own: a missing `budget` is uncapped, and a stated one counts live top-level writing
+dispatches. Domain disjointness is the one mechanical boundary: a write workstream whose
+declared `scope` overlaps a live write workstream (whatever its domain label), or that has no
+usable scope while another write workstream is live, is refused with
+`THALIRIS_PARALLEL_DOMAIN_OVERLAP`; scopes are compared with Core's `canonical_scope` /
+`scopes_overlap` (NFC, casefolded, `\` to `/`, separators collapsed and stripped), so
+`src/Mod` and `src/mod` overlap. Read work never conflicts. A stored contract that names
+`parallel_dispatch` but fails the current Core validation (for example cross-domain
+overlapping write scopes admitted before Core `ca46611`) refuses the owning Controller's
+top-level writing spawns with `THALIRIS_PARALLEL_CONTRACT_INVALID` (re-admit the task with
+a valid contract); read-type spawns still proceed, enforced read-only. Generic native agents
+(`worker`, or plain aliases such as `terra-implementer`) are outside managed domain
+enforcement: the Controller uses Thaliris role profiles for any parallel write it needs
+enforced. The Controller partitions the work into non-overlapping domains. A
+workstream may be reserved again once its previous dispatch is terminal or disposed. Every
+reader (close, mode switch, diagnostics, disposal, recovery, the wait guard and the degraded
+preflight) treats each reservation as pending, and SubagentStart binds only the reservation
+whose native identity matches exactly. `worktree` is not enforced. Nested spawns never use
+the contract or a workstream; the one-Scanner-per-parent and one-unbound-dispatch rules apply
+to them unchanged. Core contract validation makes `budget` and `workstreams` optional and
+refuses only overlapping write scopes, across all domains, compared canonically. A reservation belongs only to its Task ID. Native capacity does not expand
 delegation authority. Maximum managed depth is two. Ordinary repository work may use an
 exact native Agent-to-Task mapping or an active handoff with a known role. Missing noncritical
 session, turn or profile fields remain `UNKNOWN`; by themselves they do not block ordinary
@@ -105,8 +137,9 @@ through its bounded path without claiming child `Completed`; preserve possible s
 conflicts and fence late results.
 
 Core `task-close` checks that the selected task is active and that its expected revision
-and optional Task ID match, then records `DONE`; it does not inspect the candidate's product
-behavior. The Codex adapter protects residual execution and authorization risk: pending,
+and optional Task ID match, withholds while a declared check is not green unless
+`--override-reason` is recorded, then records `DONE`; it does not inspect the candidate's
+product behavior. The Codex adapter protects residual execution and authorization risk: pending,
 running, unknown or conflicting identities/statuses block closure. Exact native terminal
 evidence resolves execution without requiring complete historical handoff/Start/Stop
 records or success of the latest handoff. No issued child requires no child proof,
@@ -150,6 +183,85 @@ preselection for new work. Do not decrypt payloads or infer
 global relevance. Unmarked handoffs remain compatible, but observation persistence refuses
 missing provenance; return the fact and sources for exact association instead of storing
 unlinked evidence. See the [Native ownership and evidence acceptance plan](../../docs/delegated-ownership-native-acceptance.md).
+
+### Verification-first wiring (Core 0.6.0)
+
+Mechanism may withhold; only a model may grant. The adapter declares, runs, records,
+withholds and surfaces. It never marks a requirement satisfied, dismisses evidence or
+closes a task; every refusal below is Core's and the Controller lifts it with a recorded reason.
+
+- `task-check --role controller --base-revision N (--input FILE | --json '<object>') [--supersede]`
+  declares checks. It is Controller-only: the hook denies it to every child, and the CLI
+  refuses another role. The declaration is checkpointed like `task-judge`.
+- `task-verify --role ROLE --check ID [--base-revision N]` runs one declared check. The
+  Controller runs it as `controller`. A bound managed child runs it under its own role;
+  PreToolUse adds its exact `--task-id`, `--handoff-id` and `--agent-id-hash`, and the CLI
+  requires that exact live binding again before and after the run, recording the result as
+  producer `handoff:<id>`. Read-only roles may run it; a redirect or other visible write on
+  the same command line is still denied. Core runs the argv outside the task lock; the
+  adapter then re-checks the authority anchor, appends the result and checkpoints the anchor
+  in one locked transaction, so a ledger edit made during the run is an authority conflict.
+- `task-judge --override-reason TEXT` and `task-close --override-reason TEXT` pass the
+  reason to Core's withholding gate. A refusal is `VERIFICATION_WITHHELD` and writes nothing.
+- Requirement `kind` and `surface` travel in the existing `task-evidence-register` payload.
+- `task-status` passes the authority contract to Core, so an adaptive task shows
+  `Advisories`. It stays read-only and never records tamper; verify, judge and close do.
+- SubagentStop: after the exact child match (agent, profile, session, turn, managed) the
+  adapter gives `last_assistant_message` to Core's claim ingest for that child's registered
+  handoff, under the task lock, and checkpoints the anchor. A message without a block, or
+  no message field, leaves Core's `missing` marker; no claim is invented. A disposed or
+  identity-conflicted child, and a handoff with no evidence association, ingest nothing.
+  Terminal reconciliation (`wait_agent`, `list_agents`, `interrupt_agent`, `close_agent`)
+  ingests a `{"completed": <text>}` status only when the text holds a `thaliris-claims`
+  block. Ingest is idempotent. Any ingest or write failure becomes the bounded
+  `claim_ingest` diagnostic on the lifecycle child record and a `Claims.ingest_errors`
+  packet entry; the hook itself never fails.
+- Usage is recorded on the handoff at the same two points and at dependency disposal:
+  `model` from the child's own Stop payload, `effort` only from an explicit spawn argument,
+  `duration_ms` from the reservation time to the first observation, and `outcome`
+  (`completed` or `failed` only from an exact native terminal status, `disposed` from a
+  disposal, otherwise `unknown`). No hook payload carries tokens, cost or tool-use counts:
+  those fields stay null.
+- Adaptive tasks only: each owning-Controller PostToolUse adds `ceil(len(tool_response)/4)`
+  to Core's lane counter sidecar, which changes neither the revision nor anchored bytes.
+- The PostToolUse packet and Controller write responses carry bounded `Verification`,
+  `Claims` and `Advisories` lines. A not-green or uncovered check, a handoff without a
+  readable claim block and an advisory are shown even when no observation is open.
+
+Claim ingest and usage move the selected ledger to task-state schema 9 at the first child
+Stop, including for a task that declares no check; an older Core refuses schema 9 as newer.
+Whether a live Host delivers `last_assistant_message`, and what a terminal `completed`
+string contains, are Host facts this repository cannot establish: they remain `UNKNOWN`.
+
+### Common command errors
+
+- **`TASK_OBJECT_NOT_FOUND` from `task-get`.** `task-get` takes the exact ID of one
+  current-task object. The selected Task ID chooses the ledger; it is not an object ID.
+  When the requested ID is the selected Task ID, Core keeps the stable error code and
+  `details.id`/`details.matches` and adds a recovery hint. Use `task-status` to review the
+  selected task, `task-show` for explicit diagnostics, then retry `task-get` with the
+  current object's exact ID. A different missing ID keeps the bounded not-found response;
+  no broad object search is performed.
+- **`dispatch selection or reservation already pending`.** Read the selected task's
+  existing state before retrying registration. The owning Controller may withdraw an
+  unconsumed selection with
+  `task-evidence-register --role controller --base-revision N --json
+  '{"cancel_next_dispatch":{"reason":"..."}}'`. That operation cancels only the
+  unconsumed `next_dispatch` selection. Resolve an existing pending spawn reservation
+  through its recorded native lifecycle; do not treat it as an unconsumed selection.
+- **Missing handoff association on `task-observe`.** Supply the exact selected handoff
+  with `task-observe --role ROLE --handoff-id ID --observation-json '<JSON>'`. If that
+  handoff has no evidence association, return the observation and sources to Controller;
+  Controller registers the exact native-bound handoff association with
+  `task-evidence-register`. Do not substitute the Task ID or infer a handoff ID.
+- **Invalid `task-close --role` or guidance section `task-close`.** The supported command
+  is `task-close --base-revision N`; the Hook supplies the selected role and task binding.
+  For Controller procedure retrieval, use the exact section name
+  `controller-instructions --section completion` (or `--section task-recovery` for that
+  procedure). The available section names are listed by `controller-instructions`.
+
+For the historical cases and their evidence limits, see
+[`codex-history-errors-20261111.md`](../../docs/codex-history-errors-20261111.md).
 
 When an already discovered fact changes local conclusion, local acceptance or critical UNKNOWN,
 record it with source refs and selected provenance. This adds no search duty, global-importance
@@ -463,19 +575,31 @@ and is not a pending decision.
 Catalog provenance, content admission, receipt/recovery details, and the distinction
 between disk writes, the running process, and sessions already in progress are recorded
 in the [model-catalog maintenance report](../../docs/model-catalog-maintenance-report.md).
-Catalog compatibility is based on the selected source's model roster and content, not a
-CLI-version allowlist. Online freshness checks also match the isolated cache's whole
-`major.minor.patch` client version to the CLI version (the cache omits prerelease labels)
-and verify model identities. The opt-in runtime capture on
+### Host compatibility is capability and hook-shape based
+
+No Codex version string decides support anywhere in the adapter. A version line is
+recorded as provenance only; a missing or unparseable one is provenance `UNKNOWN`,
+never a block. Support is shown by the resolved binary's behaviour and by the hook
+shape it declares, so a new upstream or locally updated build needs no allowlist
+entry. The binary is resolved as everywhere else in the adapter:
+`THALIRIS_CODEX_EXECUTABLE`, then `codex` on `PATH`.
+
+Catalog compatibility is based on the selected source's model roster and content. Online
+freshness takes the cache key from the isolated cache's own `client_version` after the
+fetch; a parsed CLI version only corroborates it, and a contradiction stays
+`ONLINE_FRESHNESS_UNVERIFIED`. Catalog reuse stays bound to the binary's SHA-256, and a
+`.cmd`/`.ps1`/`.js` or `#!` launcher, whose bytes do not identify the real binary,
+never qualifies for reuse. The opt-in runtime capture on
 `codex-cli 0.162.0-alpha.17.2` reached a local mock with the installed CLI and observed
 catalog/request behavior; it does not prove a fresh online fetch or activation in a
 user's live process, and it records two separate native fork/resume delivery limitations.
 
 The separate `multi_agent_mode_hint_text` and optional Controller wait-guidance
-compatibility paths use the exact source-verified builds `0.162.0-alpha.17.2`,
-`0.162.0-alpha.2`, `0.162.0`, `0.162.1` and `0.165.0` as a fast path (see the
-[0.165 compatibility record](../../docs/codex-host-compatibility-20261028.md)). Other CLI builds that
-report a version undergo an isolated prompt/type capability check in a disposable
+compatibility paths have no version fast path. Every build undergoes an isolated
+prompt/type capability check, and a definitive `SUPPORTED` or `INCOMPATIBLE` result is
+cached in `~/.thaliris/host-capability/`, keyed by the binary's SHA-256, the config leaf
+and the probe's own source. A replaced binary is probed again, `UNKNOWN` is never
+cached, and a launcher script is probed each time. The check runs in a disposable
 `CODEX_HOME` and workspace, using a loopback Responses sink. It does not copy the
 current user's configuration or authentication. On Windows it resolves the
 ProgramData known folder and checks `OpenAI/Codex/config.toml` and
@@ -486,12 +610,30 @@ errors or a platform whose managed configuration cannot be proven absent block
 UNKNOWN. When clear, it passes `--disable hooks --disable plugins`; those flags
 do not disable managed hooks on their own, which is why this preflight is
 required. The probe CLI gets a closed stdin, because `exec` otherwise waits on an
-inherited pipe. The check verifies string acceptance, actual
-prompt effect and wrong-type rejection (for the mode hint, Codex reports the
-rejection through the untagged `features.multi_agent_v2` feature enum rather than
-the leaf); complete consistent evidence is required
-before planning a write. Contradictory evidence reports `CAPABILITY_INCOMPATIBLE`,
-while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`.
+inherited pipe. The sentinel and empty-string prompt effects are the positive
+evidence that the leaf is recognised. Wrong-type rejection is shown by behaviour: the
+integer run differs from the accepted runs only in that leaf and must exit non-zero
+before any Responses request, and a final repeat of the accepted run must still
+succeed. Error text is corroboration only; a failure that Codex attributes to an
+unrelated config location is not credited to the leaf. Complete consistent evidence is
+required before planning a write. Contradictory evidence reports `CAPABILITY_INCOMPATIBLE`,
+while missing or ambiguous evidence reports `VERSION_SUPPORT_UNKNOWN`, a persisted
+status name kept for receipt compatibility that now means "capability not shown".
+Either way the user's config is preserved.
+
+`doctor` reports `host_hook_shape`, and `codex-install` returns it as install-time
+evidence. The check reads the generated hook input schemas that Codex embeds in its
+binary (`codex-rs/hooks/schema/generated`) without running the binary, and confirms
+that each of the seven registered events exists and declares every input key the
+adapter reads. Observed multi-agent tool names are checked against the PostToolUse
+matcher, and a custom `features.multi_agent_v2.tool_namespace` is flagged when the
+matcher cannot select its names. The result is `COMPATIBLE`, `INCOMPATIBLE` with the
+missing items, or `UNKNOWN` when no schema is observable. It is never a runtime
+refusal. When a live hook payload lacks a key the adapter needs, the existing
+fail-closed handling is unchanged and the session's audit records a bounded
+`host_hook_shape: UNKNOWN` entry that names the event and the keys.
+The [hook-shape compatibility record](../../docs/codex-host-compatibility-20261114.md)
+lists the builds observed so far. They are evidence, not requirements.
 Native wait capabilities are separate from these configuration probes. A selected
 session's actual tool schema can establish argument limits, including a 3,600,000 ms
 schema ceiling, without certifying effective duration. CLI versions do not establish

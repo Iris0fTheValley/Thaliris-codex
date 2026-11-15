@@ -458,6 +458,9 @@ def test_invalid_ownership_record_is_not_hidden_by_optional_config_read_error(tm
     ("codex-cli 0.162.0-alpha.2", True),
     ("codex-cli 0.162.0-alpha.17.2", True),
     ("codex-cli 0.165.0", True),
+    ("codex-cli 0.167.1", True),
+    ("codex-cli 0.167.1-alpha.1", False),
+    ("codex-cli 0.167.2", False),
     ("codex-cli 0.165.0-alpha.3", False),
     ("codex-cli 0.166.0-alpha.5", False),
     ("codex-cli 0.162.2", False),
@@ -466,15 +469,18 @@ def test_invalid_ownership_record_is_not_hidden_by_optional_config_read_error(tm
     ("codex-cli 0.163.0", False),
     ("garbage", False),
 ])
-def test_version_capability_is_limited_to_source_verified_builds(monkeypatch, reported, supported):
+def test_no_version_string_decides_support(monkeypatch, reported, supported):
+    # ``supported`` records the retired allowlist; it no longer grants a write.
     from thaliris_codex import config_capability
+    monkeypatch.delenv("THALIRIS_CODEX_EXECUTABLE", raising=False)
     monkeypatch.setattr(config_capability.shutil, "which", lambda name: "controlled-fake-codex")
     monkeypatch.setattr(config_capability.subprocess, "run", lambda *args, **kwargs:
                         subprocess.CompletedProcess(args, 0, reported, ""))
     probed = []
-    monkeypatch.setattr(config_capability, "probe", lambda *args: probed.append(args) or "UNKNOWN")
-    assert guidance.capability() == ("SUPPORTED" if supported else "UNKNOWN")
-    assert probed == ([] if supported else [("controlled-fake-codex", "developer_instructions")])
+    monkeypatch.setattr(config_capability, "_probe", lambda *args: probed.append(args) or ("UNKNOWN", False))
+    assert guidance.capability() == "UNKNOWN"
+    assert probed == [("controlled-fake-codex", "developer_instructions")]
+    assert not hasattr(guidance, "_SUPPORTED_VERSIONS")
 
 
 @pytest.mark.parametrize("when,expected", [

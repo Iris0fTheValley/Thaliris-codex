@@ -52,7 +52,7 @@ def test_delegated_cognitive_ownership_is_in_resident_context_at_the_decision_po
     # second instruction copy.
     resident = codex_bootstrap.controller_guidance()
     for name in ("routing", "handoff", "durable"):
-        assert controller_instructions.render(section=name).strip() in resident
+        assert controller_instructions.render(codex_bootstrap._controller_guidance_runner(), section=name).strip() in resident
     assert prompt("controller") == ""
 
 
@@ -69,7 +69,7 @@ def test_runtime_ownership_has_one_normal_layer_per_concern():
         # Necessary normal bootstrap returns the canonical guidance; no extra get
         # or full Controller injection into each fresh native child is required.
         if name != "startup":
-            section = controller_instructions.render(section=name)
+            section = controller_instructions.render(codex_bootstrap._controller_guidance_runner(), section=name)
             assert section.strip() in resident
             assert section.strip() not in global_text
     assert "task-recover-authority" not in prompt("implementer")
@@ -104,6 +104,65 @@ def test_profile_delegation_text_matches_role_capability(execution_constraint):
 def test_controller_selects_roles_and_accounts_for_goals():
     assert not {"scanner", "executor", "astra"} & set(roles.role_choices())
     assert roles.resolve_native_profile("thaliris-focused-implementer-astra-medium").id == "focused-implementer"
+
+
+def test_substantive_frontend_work_uses_strong_semantic_routing():
+    assert roles.ROLE_MODEL_ROUTING_DEFAULTS["focused-implementer"] == (
+        "gpt-6.1-sol",
+        "high",
+    )
+    controller_policy = controller_instructions.render(section="routing")
+    concepts(
+        controller_policy,
+        (
+            "frontend work", "new UI", "layout", "component architecture",
+            "responsive behavior", "interaction", "animation", "creative SVG",
+            "visual design",
+        ),
+        ("Focused Implementer", "gpt-6.1-sol", "high"),
+        ("few files", "little code"),
+        ("genuinely trivial", "fully specified", "text", "color", "mechanical changes"),
+        ("current-task Astra authorization", "fresh isolation", "execution constraints"),
+        ("frozen constraint", "report the conflict", "silently downgrading"),
+        ("capacity pressure", "never lowers this minimum", "Astra opt-in", "frozen constraints"),
+        ("Generated role profiles remain model-free"),
+    )
+    shared_policy = Path("docs/thaliris-routing-protocol.md").read_text(encoding="utf-8")
+    concepts(
+        shared_policy,
+        (
+            "frontend work", "new UI", "layout", "component architecture",
+            "responsive behavior", "interaction", "animation", "creative SVG",
+            "visual design",
+        ),
+        ("strong executor", "diff", "code", "small"),
+        ("genuinely trivial", "fully specified", "text", "color", "mechanical edits"),
+        ("not", "Core", "keyword", "diff-size", "classifier"),
+    )
+
+
+def test_controller_workflows_reuse_evidence_and_reconcile_only_decision_changes():
+    controller_policy = controller_instructions.render()
+    concepts(
+        controller_policy,
+        ("full resident guidance", "opt-in chunked retrieval", "contiguous slices", "exact END marker", "one slice alone is not proof"),
+        ("Controller-local observations", "imported child history", "independent review", "execution mode", "permissions"),
+        ("exact Controller-local fact surface", "do not infer its flags or payload", "historical child-import flow"),
+        ("only the selected ledger", "schema 7 to 8", "normal CAS/checkpoint", "New Core reads both", "STATE_SCHEMA_INCOMPATIBLE", "one-way compatibility", "not live-task migration or Host installation"),
+        ("Active Work", "Pending Results", "hard constraints", "current evidence", "UNKNOWNs", "precise next event"),
+        ("Git HEAD", "environment", "relevant change", "decision-changing uncertainty", "time/call quota", "parallel persistent-memory workflow"),
+        ("after user/model steering", "turn interruption", "one exact current status snapshot", "interrupted", "ended", "no longer needed"),
+        ("not_found", "does not prove termination", "terminal status/result once", "capacity-limited native view", "missed wake", "prompt wording alone cannot establish or fix"),
+        ("artifact path", "provenance", "current bytes", "remaining requested delivery", "local work does not imply hosting", "file://", "supported preview", "network permissions"),
+    )
+    shared_policy = Path("docs/thaliris-routing-protocol.md").read_text(encoding="utf-8")
+    concepts(
+        shared_policy,
+        ("exact source and lockfile", "package identity", "normal dependency path", "--no-deps", "not a universal gate"),
+        ("EADDRINUSE", "EBUSY", "resource ownership and health", "unknown owner", "unknown lock"),
+        ("truncated CI output", "ready result paired with exit 1", "structured terminal/health reconciliation", "do not poll"),
+        ("ASSOCIATION_UNKNOWN", "authorized source work or tests", "native exec/write_stdin", "managed guards"),
+    )
 
 
 def test_generated_sources_equal_derived_outputs():

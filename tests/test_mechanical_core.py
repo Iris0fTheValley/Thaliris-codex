@@ -108,8 +108,13 @@ def test_core_mechanically_accepts_opaque_actor_and_provenance(tmp_path: Path) -
 
 
 def test_core_source_has_no_controller_role_contract() -> None:
+    # Mirrors Core's own contract test (Core O3, ebeaaf9): Core carries the
+    # mechanical ``controller-local`` provenance label but no Controller
+    # session identity or ownership authorization; those stay in the adapter.
     source = Path(core.__file__).read_text(encoding="utf-8").lower()
-    assert "controller" not in source
+    assert "controller-local" in source
+    assert "controller_session_id_hash" not in source
+    assert "active_controller_owner" not in source
 
 
 def test_adapter_retains_controller_authorization() -> None:
@@ -1063,7 +1068,8 @@ def test_only_current_or_compatible_prior_task_state_schema_is_accepted(tmp_path
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid task state schema"):
         core.task_show(root)
-    state["schema_version"] = core._STATE_SCHEMA_VERSION + 1
+    # One above the newest schema Core accepts (Core 0.6.0 accepts 9).
+    state["schema_version"] = max(core._SUPPORTED_SCHEMAS) + 1
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid task state schema"):
         core.task_show(root)

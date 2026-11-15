@@ -102,22 +102,39 @@ def reuse_contract(source: str, evidence: dict) -> dict | None:
             "roster_sha256": digest(json.dumps(roster, sort_keys=True).encode())}
 
 
+def _executable() -> str | None:
+    from .config_capability import resolve_executable
+    return resolve_executable()
+
+
+def _version_provenance(executable: str) -> str:
+    """Record the reported version line; an absent or odd line is UNKNOWN, not a block."""
+    result = subprocess.run([executable, "--version"], capture_output=True, timeout=10, check=False)
+    version = result.stdout.decode("utf-8", "replace").strip()
+    if result.returncode or not version or len(version) > 200 or "\n" in version:
+        return "UNKNOWN"
+    return version
+
+
 def current_cli_identity() -> dict | None:
-    """Observe direct executable bytes; launcher scripts cannot prove a binary."""
-    executable = shutil.which("codex")
+    """Observe direct executable bytes; launcher scripts cannot prove a binary.
+
+    The binary SHA-256 is the identity. The version line is provenance only.
+    """
+    from .config_capability import LAUNCHER_SUFFIXES
+    executable = _executable()
     if executable is None:
         return None
     path = Path(executable)
-    if path.suffix.lower() in {".cmd", ".bat", ".ps1", ".sh", ".py", ".js"}:
+    if path.suffix.lower() in LAUNCHER_SUFFIXES:
         return None
     try:
         binary = path.read_bytes()
         if binary.startswith(b"#!"):
             return None
         identity = digest(binary)
-        result = subprocess.run([executable, "--version"], capture_output=True, timeout=10, check=False)
-        version = result.stdout.decode("utf-8", "replace").strip()
-        if result.returncode or cache_client_version(version) is None or digest(path.read_bytes()) != identity:
+        version = _version_provenance(executable)
+        if digest(path.read_bytes()) != identity:
             return None
         return {"cli_version": version, "cli_sha256": identity}
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -291,23 +308,22 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
     """Export from the CLI, never this installation's patched catalog.
 
     Some CLI releases swallow refresh errors. A newly created isolated cache,
-    consistent with stdout and the CLI's whole-version cache key, is required
-    as network evidence.
+    consistent with stdout, is required as network evidence. Its own
+    ``client_version`` is the cache key; a parsed CLI version only corroborates
+    it, and an absent or unparseable version line is provenance UNKNOWN.
     No cache and no original managed catalog enters the disposable CODEX_HOME.
     Provider/auth config is preserved; unsupported credential stores stay unknown.
     """
     from .host_maintenance import safe
-    executable = shutil.which("codex")
+    executable = _executable()
     if executable is None:
         raise ValueError("VERSION_SUPPORT_UNKNOWN")
     try:
-        version = subprocess.run([executable, "--version"], capture_output=True, timeout=10, check=False)
+        cli_version = _version_provenance(executable)
     except (OSError, subprocess.SubprocessError) as exc:
+        # The CLI cannot even start; nothing below could run either.
         raise ValueError("VERSION_SUPPORT_UNKNOWN") from exc
-    cli_version = version.stdout.decode("utf-8", "replace").strip()
-    cache_version = cache_client_version(cli_version)
-    if version.returncode != 0 or cache_version is None:
-        raise ValueError("VERSION_SUPPORT_UNKNOWN")
+    reported_cache_version = cache_client_version(cli_version)
     if source not in {"online", "bundled"}:
         raise ValueError("unsupported model catalog source")
     raw, config = read(home)
@@ -364,8 +380,14 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
             if not isinstance(cache, dict) or not isinstance(cache.get("fetched_at"), str):
                 raise ValueError("ONLINE_FRESHNESS_UNVERIFIED")
             fetched = datetime.fromisoformat(cache.get("fetched_at", "").replace("Z", "+00:00"))
+            # The isolated home started empty, so only this CLI process wrote
+            # the cache; its own client_version is the key. A parsed CLI
+            # version that disagrees with it is contradictory evidence.
+            client_version = cache.get("client_version")
             if (fetched.tzinfo is None or fetched < started or fetched > datetime.now(timezone.utc)
-                    or cache.get("client_version") != cache_version or not isinstance(cache.get("identity"), str)
+                    or not isinstance(client_version, str) or not client_version.strip()
+                    or (reported_cache_version is not None and client_version != reported_cache_version)
+                    or not isinstance(cache.get("identity"), str)
                     or not cache["identity"] or not isinstance(cache.get("models"), list) or not cache["models"]):
                 raise ValueError("ONLINE_FRESHNESS_UNVERIFIED")
             # Models manager fills omitted instruction fields from the binary;

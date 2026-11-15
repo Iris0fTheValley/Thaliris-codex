@@ -828,6 +828,11 @@ def _finish_install(home, transition):
         "controller_wait_guidance_compatibility": wait_guidance,
         "native_model_catalog_compatibility": catalog_result,
         "catalog_goal_met": catalog_result["status"] == "MANAGED",
+        # Install-time evidence only; an UNKNOWN shape never blocks installation.
+        "host_hook_shape": adapter.host_hook_shape(home),
+        # The one binary whose fresh probe decided the optional config leaves;
+        # other Host binaries reading the same config.toml stay UNKNOWN.
+        "config_capability_probe": _install_probe_report(),
         "host_integration_ready": "YES" if complete else "NO", "global_instruction_ready": "YES",
         "host_role_catalog_status": lifecycle.HOST_ROLE_CATALOG_UNKNOWN, "host_session_load_status": "UNKNOWN",
         "installed_runtime_identity": digest(runtime), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI,
@@ -838,6 +843,14 @@ def _finish_install(home, transition):
         "recovery_action": None if ready else "Replay the original codex-install --maintenance-contract FILE",
         "install_status": "RESTART_CODEX_ONCE" if complete and changed_files else "HOST_INTEGRATION_UNCHANGED" if complete else "INSTALL_INCOMPLETE",
         "session_restart_required": bool(ready and changed_files), "host_setup_requires_session_start": bool(changed_files)}
+
+
+def _install_probe_report() -> dict:
+    from . import config_capability
+    try:
+        return config_capability.install_probe_report()
+    except (OSError, ValueError, TypeError):
+        return {"probed_binary": "UNKNOWN", "other_host_binaries": "UNKNOWN"}
 
 
 def uninstall(home: Path, filename) -> dict:

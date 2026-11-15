@@ -668,6 +668,24 @@ def _turn_params(start_result: dict[str, Any], *, name: str) -> dict[str, Any]:
     return {"threadId": thread_id, "id": thread_id}
 
 
+def _catalog_instruction_text(developers: list[str], template: str) -> tuple[str, int, str]:
+    """Check actual developer delivery, including initial unwrapped base text.
+
+    Newer hosts render the selected first-turn model directly as base
+    instructions; a model selected in thread/start need not create a switch
+    fragment. Keep the template evidence check independent of that wrapper.
+    """
+    lines = [line.strip() for line in template.splitlines()
+             if len(line.strip()) >= 44 and "{{" not in line and "}}" not in line]
+    _expect(bool(lines), "selected model catalog template has no stable rendered-text evidence")
+    matches = [(sum(line in text for line in lines), text) for text in developers]
+    count, text = max(matches, key=lambda item: item[0], default=(0, ""))
+    _expect(count >= min(3, len(lines)), "developer message did not carry the selected catalog template")
+    form = ("model_switch" if "<model_switch>" in text else
+            "model_instructions" if "<model_instructions>" in text else "base_instructions")
+    return text, count, form
+
+
 def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
     executable, cli_version = _find_codex()
     with tempfile.TemporaryDirectory(prefix="thaliris-model-catalog-runtime-") as scratch_text:
@@ -779,14 +797,9 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
             _expect(any(ROOT_DEVELOPER_SENTINEL in text for text in root_developers), "Controller developer instructions were not present in the actual Responses request")
             _expect(AGENTS_SENTINEL in _request_text(root_body), "project AGENTS.md was absent from the actual Controller request")
             _expect(any("THALIRIS CONTROLLER GUIDANCE END sha256=" in text and "## Thaliris owning Controller" in text for text in root_developers), "rendered bootstrap guidance was not present in the actual Controller request")
-            _expect(any("<model_switch>" in text for text in root_developers), "native model-switch developer message was absent")
-            switched = next(text for text in root_developers if "<model_switch>" in text)
-            _expect((model_catalog_config.TARGET in switched) is not patched_catalog_enabled, "model-switch template did not reflect the selected baseline or patched catalog")
             target_template = patched_catalog["models"][[m.get("slug") for m in patched_catalog["models"]].index("gpt-6.1-sol")]["model_messages"]["instructions_template"]
-            stable_template_lines = [line.strip() for line in target_template.splitlines() if len(line.strip()) >= 44 and "{{" not in line and "}}" not in line]
-            _expect(bool(stable_template_lines), "selected model catalog template has no stable rendered-text evidence")
-            matched_template_lines = sum(line in switched for line in stable_template_lines)
-            _expect(matched_template_lines >= min(3, len(stable_template_lines)), "model-switch developer message did not carry the selected catalog template")
+            switched, matched_template_lines, delivery_form = _catalog_instruction_text(root_developers, target_template)
+            _expect((model_catalog_config.TARGET in switched) is not patched_catalog_enabled, "selected instruction template did not reflect the baseline or patched catalog")
 
             implementer_request = _select_request(first_requests, IMPLEMENTER_PROMPT, exclude=(ROOT_IMPLEMENTER_CALL,))
             reviewer_request = _select_request(first_requests, REVIEWER_PROMPT, exclude=(ROOT_REVIEWER_CALL,))
@@ -916,6 +929,7 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
                 "catalog_models": len(original_catalog["models"]),
                 "catalog_patched_templates": patch_status.get("patched_templates"),
                 "model_catalog_json_loaded": True,
+                "catalog_instruction_delivery": delivery_form,
                 "local_responses_requests": len(all_requests),
                 "denied_background_requests": len(outbound_deny_proxy.destinations),
                 "external_model_requests": 0,

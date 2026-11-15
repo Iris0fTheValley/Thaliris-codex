@@ -36,7 +36,8 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset:
             return {"ok": False, "status": "TASK_AUTHORITY_CONFLICT", "task_id": anchor["task_id"],
                     "authority_sha256": task_authority.digest(task_authority.path(root)),
                     "recovery_action": "task-recover-authority --expected-authority-sha256 <authority_sha256> --reason <reason>"}
-    out = task_status(root, evidence_offset=evidence_offset, view=view, since_revision=since_revision)
+    out = task_status(root, evidence_offset=evidence_offset, view=view, since_revision=since_revision,
+                      contract=anchor["contract"] if anchor is not None else None)
     identity_summary = project_identity.summary(root)
     if identity_summary is not None:
         out["Project Identity"] = identity_summary
@@ -57,23 +58,29 @@ def _controller_evidence_output(root: Path, args: argparse.Namespace, out: dict)
     The evidence is the Core compact summary: totals plus a bounded list of
     open items (paged by ``next_offset``), not the full Evidence Continuity
     page. A write response that already carries it, and a revision conflict
-    whose ``changes_since`` embeds it, are not given a second copy.
+    whose ``changes_since`` embeds it, are not given a second copy. A task that
+    uses declared checks, typed claims or adaptive mode also gets the same
+    bounded ``Verification``/``Claims``/``Advisories`` lines as the hook packet.
     """
     if args.command not in {
         "task-update", "task-artifact", "task-promote", "task-evidence-register",
         "task-judge", "task-close", "task-mode", "task-dispose-dependency",
-        "task-observe", "document-maintain", *project_identity.MUTATIONS,
+        "task-observe", "task-check", "task-verify", "document-maintain", *project_identity.MUTATIONS,
     } or getattr(args, "role", "controller") != "controller":
-        return out
-    if "evidence" in out or out.get("code") == TASK_REVISION_CONFLICT:
         return out
     try:
         state = core._load_state(root)
-        if state.get("evidence_continuity"):
-            return {**out, "evidence": core.evidence_summary(state)}
     except (ValueError, OSError, RuntimeError):
-        return {**out, "evidence": {"status": "UNKNOWN"}}
-    return out
+        return out if "evidence" in out or out.get("code") == TASK_REVISION_CONFLICT else {**out, "evidence": {"status": "UNKNOWN"}}
+    if "evidence" not in out and out.get("code") != TASK_REVISION_CONFLICT and state.get("evidence_continuity"):
+        out = {**out, "evidence": core.evidence_summary(state)}
+    try:
+        anchor = task_authority.read(root)
+        lines = lifecycle.verification_lines(root, state, anchor["contract"] if anchor is not None else None)
+    except (ValueError, OSError, RuntimeError, KeyError, TypeError):
+        # An unreadable standing is surfaced, never treated as green.
+        lines = {"Verification": {"status": "UNKNOWN"}} if state.get("checks") else {}
+    return {**out, **{key: value for key, value in lines.items() if key not in out}}
 
 
 @contextlib.contextmanager
@@ -147,6 +154,8 @@ _INPUT_HELP = {
     "task-update": "append mechanical ledger records with strict revision CAS",
     "task-evidence-register": "register requirements and handoffs with strict revision CAS",
     "task-judge": 'record one judgment object, or an atomic ordered batch {"judgments":[...]} in one revision',
+    "task-check": ('Controller-only: declare one check {"id","requirement_refs","command":[argv],"cwd","timeout_s","files":[...]} '
+                   'or an atomic batch {"checks":[...]}; Core runs the argv without a shell'),
 }
 
 
@@ -169,6 +178,9 @@ def _parser() -> argparse.ArgumentParser:
     controller_selection = controller_help.add_mutually_exclusive_group()
     controller_selection.add_argument("--section", choices=controller_instructions.SECTIONS)
     controller_selection.add_argument("--resident", action="store_true", help="retrieve complete normal Controller guidance")
+    controller_help.add_argument("--offset", type=int, help="opt-in resident recovery offset in Unicode code points")
+    controller_help.add_argument("--limit", type=int, help="resident recovery size in Unicode code points (1-16384)")
+    controller_help.add_argument("--expected-sha256", help="pin resident recovery to the canonical body digest")
     q = sub.add_parser("init")
     q.add_argument(
         "--accept-managed-instruction-sha256",
@@ -265,7 +277,7 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--human-instruction", required=True)
     q.add_argument("--base-revision", type=int, required=True)
     q.add_argument("--expected-authority-sha256", required=True)
-    for name in ("task-update", "task-evidence-register", "task-judge", "document-maintain"):
+    for name in ("task-update", "task-evidence-register", "task-judge", "task-check", "document-maintain"):
         q = sub.add_parser(name, help=_INPUT_HELP.get(name))
         q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
         q.add_argument("--base-revision", required=True, type=int)
@@ -277,17 +289,30 @@ def _parser() -> argparse.ArgumentParser:
             source.add_argument("--json", help="one inline JSON object (single-quoted literal or utf8-base64:...)")
         if name == "task-evidence-register":
             q.add_argument("--controller-session-id-hash", help=argparse.SUPPRESS)
+        if name == "task-judge":
+            q.add_argument("--override-reason", help="recorded reason for judging satisfied while a declared check is not green")
+        if name == "task-check":
+            q.add_argument("--supersede", action="store_true",
+                           help="re-declare an existing check id, accepting its current command and file content")
         if name == "document-maintain":
             q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
             q.add_argument("--handoff-id")
-    q = sub.add_parser("task-observe", help="append own selected local observation without task revision CAS")
+    q = sub.add_parser("task-observe", help="append selected handoff evidence, or Controller local facts with payload base_revision CAS")
     q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
     q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
     q.add_argument("--handoff-id")
     q.add_argument("--agent-id-hash")
+    q.add_argument("--controller-session-id-hash", help=argparse.SUPPRESS)
     observation = q.add_mutually_exclusive_group(required=True)
     observation.add_argument("--input")
     observation.add_argument("--observation-json", help="one inline JSON observation; useful to readonly native roles")
+    q = sub.add_parser("task-verify", help="run one declared check and record its result (Controller, or a bound child as its handoff producer)")
+    q.add_argument("--role", required=True, choices=codex_adapter.role_choices())
+    q.add_argument("--check", required=True, help="declared check id")
+    q.add_argument("--base-revision", type=int, help="optional strict revision CAS, enforced before the run and at the append")
+    q.add_argument("--task-id", help="exact task selection supplied by the native handoff")
+    q.add_argument("--handoff-id")
+    q.add_argument("--agent-id-hash")
     sub.add_parser("task-show")
     q = sub.add_parser("task-status", help="bounded Controller routing packet (compact by default)")
     q.add_argument("--view", choices=("compact", "full"), default="compact",
@@ -310,6 +335,7 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--supersedes", action="append", default=[])
     q = sub.add_parser("task-close")
     q.add_argument("--base-revision", required=True, type=int)
+    q.add_argument("--override-reason", help="recorded reason for closing while a declared check is not green")
     q = sub.add_parser(
         "task-promote",
         help="persist Controller-selected durable records",
@@ -411,18 +437,25 @@ def main(argv: list[str] | None = None) -> int:
             from .execution_observation import guide
             _write_utf8_line(json.dumps(guide(include_source=args.tool_source), ensure_ascii=False))
             return 0
-        command_task_id = getattr(args, "task_id", None) if args.command in {"task-abandon", "task-observe", "document-maintain"} else None
+        command_task_id = getattr(args, "task_id", None) if args.command in {"task-abandon", "task-observe", "task-verify", "document-maintain"} else None
         if args.selected_task_id and command_task_id and args.selected_task_id != command_task_id:
             raise ValueError("conflicting selected task IDs")
         selected = args.selected_task_id or command_task_id
         if selected is None and args.session_id:
             selected = lifecycle._associated_task(root, {"session_id": args.session_id})
         core.select_task(root, selected)
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state", "task-evidence-register", "task-observe", "task-judge", "document-maintain", *project_identity.MUTATIONS} and selected is None:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state", "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain", *project_identity.MUTATIONS} and selected is None:
             raise ValueError("explicit --task-id or associated --session-id required for managed control")
         if args.command == "controller-instructions":
             from . import controller_instructions
             runner = controller_instructions.runner_command(codex_adapter._codex_home() / lifecycle.HOST_RUN_SCRIPT_NAME)
+            chunked = args.offset is not None or args.limit is not None or args.expected_sha256 is not None
+            if chunked:
+                if not args.resident or args.offset is None or args.limit is None:
+                    raise ValueError("resident recovery requires --resident --offset N --limit N")
+                _write_utf8_line(json.dumps(controller_instructions.resident_chunk(
+                    runner, offset=args.offset, limit=args.limit, expected_sha256=args.expected_sha256), ensure_ascii=False))
+                return 0
             if args.resident:
                 delivery = controller_instructions.guidance_delivery_fields(runner)
                 _write_utf8_line(json.dumps({
@@ -439,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         from . import host_transition
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
             raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")
-        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-evidence-register", "task-observe", "task-judge", "document-maintain", *project_identity.MUTATIONS}:
+        if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain", *project_identity.MUTATIONS}:
             task_authority.check(root)
         if args.command == "audit-hook":
             stage = "receive"
@@ -564,8 +597,16 @@ def main(argv: list[str] | None = None) -> int:
                 out = codex_adapter.task_evidence_register(root, args.role, args.base_revision, source, args.controller_session_id_hash)
         elif args.command == "task-judge":
             with _inline_input(args.json, args.input) as source:
-                out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, source, compact_evidence=True)
-        elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json)
+                out = core.task_judge(root, codex_adapter.controller_actor(args.role), args.base_revision, source,
+                                      compact_evidence=True, override_reason=args.override_reason)
+        elif args.command == "task-check":
+            with _inline_input(args.json, args.input) as source:
+                out = core.task_check(root, codex_adapter.controller_actor(args.role), args.base_revision, source,
+                                      supersede=args.supersede)
+        elif args.command == "task-verify":
+            out = codex_adapter.task_verify(root, args.role, args.check, args.handoff_id, args.agent_id_hash,
+                                            base_revision=args.base_revision)
+        elif args.command == "task-observe": out = codex_adapter.task_observe(root, args.role, args.handoff_id, args.agent_id_hash, args.input, args.observation_json, controller_session_id_hash=args.controller_session_id_hash)
         elif args.command == "document-maintain": out = codex_adapter.document_maintain(root, args.role, args.base_revision, args.input, args.handoff_id)
         elif args.command == "identity-status": out = identity.identity_status(root, session_key=_identity_session_key(root, args))
         elif args.command == "identity-note":
@@ -588,12 +629,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "task-get": out = task_get(root, args.id)
         elif args.command == "artifact-get": out = artifact_get(root, args.id)
         elif args.command == "task-artifact": out = task_artifact(root, args.base_revision, args.id, args.path, args.summary, producer=(codex_adapter.semantic_role(args.producer_role) if getattr(args, "producer_role", None) else None), registered_by=codex_adapter.controller_actor(args.role), evidence_refs=args.source_ref or None, supersedes=args.supersedes or None)
-        elif args.command == "task-close": out = codex_adapter.task_close(root, args.base_revision)
+        elif args.command == "task-close": out = codex_adapter.task_close(root, args.base_revision, override_reason=args.override_reason)
         elif args.command == "task-promote": out = task_promote(root, codex_adapter.controller_actor(args.role), args.base_revision, args.input)
         elif args.command == "rollback": out = rollback(root, args.backup)
         elif args.command == "uninstall": out = codex_adapter.uninstall(root)
         else: out = {"ok": True, "version": __version__}
-        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-judge", *project_identity.MUTATIONS}:
+        if out.get("ok") and args.command in {"task-update", "task-artifact", "task-promote", "task-judge", "task-check", *project_identity.MUTATIONS}:
             task_authority.checkpoint(root)
         if args.command == "task-close" and out.get("ok"):
             line = project_identity.offer(root, _identity_session_key(root, args))

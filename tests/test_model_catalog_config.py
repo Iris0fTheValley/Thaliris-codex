@@ -854,12 +854,87 @@ def test_cli_identity_requires_stable_binary_and_version(tmp_path, monkeypatch):
     assert catalog.current_cli_identity() is None
 
 
+@pytest.mark.parametrize("reported,returncode", [
+    (b"codex 2.0 preview\n", 0), (b"", 0), (b"codex-cli 0.162.2\n", 3), (b"line one\nline two\n", 0),
+])
+def test_unparseable_version_is_provenance_unknown_not_a_block(tmp_path, monkeypatch, reported, returncode):
+    exe = tmp_path / "codex.exe"
+    exe.write_bytes(b"binary one")
+    monkeypatch.delenv("THALIRIS_CODEX_EXECUTABLE", raising=False)
+    monkeypatch.setattr(catalog.shutil, "which", lambda _name: str(exe))
+    monkeypatch.setattr(catalog.subprocess, "run",
+                        lambda args, **kwargs: subprocess.CompletedProcess(args, returncode, reported, b""))
+    identity = catalog.current_cli_identity()
+    expected = reported.decode().strip() if returncode == 0 and reported.strip() and b"\nline" not in reported else "UNKNOWN"
+    assert identity == {"cli_version": expected, "cli_sha256": catalog.digest(b"binary one")}
+    # Reuse stays bound to the binary bytes, never to the version line.
+    assert catalog.reuse_contract("online", identity)["cli_sha256"] == catalog.digest(b"binary one")
+
+
+def test_cli_identity_honors_the_adapter_executable_override(tmp_path, monkeypatch):
+    selected = tmp_path / "selected" / "codex.exe"
+    selected.parent.mkdir()
+    selected.write_bytes(b"selected binary")
+    monkeypatch.setattr(catalog.shutil, "which", lambda name: str(tmp_path / "other.exe") if name == "codex" else None)
+    monkeypatch.setenv("THALIRIS_CODEX_EXECUTABLE", str(selected))
+    monkeypatch.setattr(catalog.subprocess, "run",
+                        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, b"codex-cli 0.169.0\n", b""))
+    assert catalog.current_cli_identity() == {"cli_version": "codex-cli 0.169.0",
+                                              "cli_sha256": catalog.digest(b"selected binary")}
+
+
+@pytest.mark.parametrize("cli_version,client_version,fresh", [
+    ("codex 2.0 preview", "0.171.0", True),   # unparseable line: the cache's own key decides
+    ("", "0.171.0", True),                    # missing line
+    ("codex-cli 0.171.0-alpha.5", "0.171.0", True),
+    ("codex-cli 0.171.0-alpha.5", "0.170.0", False),  # parsed version contradicts the cache
+    ("codex 2.0 preview", "", False),         # the cache carries no key at all
+    ("codex 2.0 preview", None, False),
+])
+def test_online_cache_key_comes_from_the_isolated_cache(tmp_path, monkeypatch, cli_version, client_version, fresh):
+    home = tmp_path / "home"
+    home.mkdir()
+    exe = tmp_path / "codex.exe"
+    exe.write_bytes(b"new CLI")
+    monkeypatch.delenv("THALIRIS_CODEX_EXECUTABLE", raising=False)
+    monkeypatch.setattr(catalog.shutil, "which", lambda _name: str(exe))
+
+    def run(args, **kwargs):
+        if args[-1] == "--version":
+            return subprocess.CompletedProcess(args, 0, (cli_version + "\n").encode(), b"")
+        isolated = catalog.Path(kwargs["env"]["CODEX_HOME"])
+        cache = {"fetched_at": datetime.now(timezone.utc).isoformat(), "identity": "provider-auth-opaque",
+                 "models": json.loads(upstream())["models"]}
+        if client_version is not None:
+            cache["client_version"] = client_version
+        (isolated / "models_cache.json").write_text(json.dumps(cache))
+        return subprocess.CompletedProcess(args, 0, upstream(), b"")
+
+    monkeypatch.setattr(catalog.subprocess, "run", run)
+    if not fresh:
+        with pytest.raises(ValueError, match="ONLINE_FRESHNESS_UNVERIFIED"):
+            catalog.export_upstream(home, source="online")
+        return
+    raw, evidence = catalog.export_upstream(home, source="online")
+    assert raw == upstream()
+    assert evidence["online_freshness"] == "VERIFIED"
+    assert evidence["cli_version"] == (cli_version or "UNKNOWN")
+    assert evidence["cli_sha256"] == catalog.digest(b"new CLI")
+
+
 def test_committed_reuse_rechecks_cli_identity_on_replay(tmp_path, monkeypatch, pinned_test_thaliris):
     exe, _ = pinned_test_thaliris
     home = tmp_path / "home"
     monkeypatch.setenv("CODEX_HOME", str(home))
     complete_supply(monkeypatch)
-    assert adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))["ok"]
+    installed = adapter.codex_install(maintenance_contract=intent(tmp_path, home, exe))
+    assert installed["ok"]
+    # Hook-shape evidence is reported at install time; UNKNOWN never blocks
+    # (conftest models no Host binary for this report).
+    assert installed["host_hook_shape"]["status"] == "UNKNOWN"
+    assert installed["host_hook_shape"]["runtime_refusal"] == "NEVER"
+    # c-F5: the report names the probed binary and leaves other Host binaries UNKNOWN.
+    assert installed["config_capability_probe"]["other_host_binaries"] == "UNKNOWN"
     before = (home / catalog.NAME).read_bytes()
     trust = adapter._install_host_hook_trust
     monkeypatch.setattr(adapter, "_install_host_hook_trust", lambda *_args: (_ for _ in ()).throw(ValueError("temporary trust failure")))

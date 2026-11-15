@@ -182,6 +182,16 @@ _SHARED_INSTRUCTIONS = (
     "major discoveries or necessary upper-level decisions. "
     "Return Conclusion, Key findings, Decision-changing unknowns, Contradictions if any, "
     "Verification performed and optional repo-relative Artifact refs. "
+    "When your handoff names declared checks, run each with task-verify --role <your role> --check <id> "
+    "and repair what it reports within your assignment; the adapter supplies your handoff identity and "
+    "Core runs the declared command. A green check grants nothing; requirement judgment stays with the Controller. "
+    "End FINAL with exactly one typed claim block as its last lines, at most 5 claims, adverse ones first:\n"
+    "```thaliris-claims\n"
+    '{"claims":[{"requirement":"R1","polarity":"supports|contradicts|unknown","text":"<=300 chars",'
+    '"evidence":"<check id or path:line>","basis":"check|read|inference"}]}\n'
+    "```\n"
+    "Use the requirement refs your handoff gives and write the body none when you have no claim. "
+    "The block indexes your report; it does not replace it. "
 )
 
 _EXECUTOR_INSTRUCTIONS = (

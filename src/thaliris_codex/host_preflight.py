@@ -21,8 +21,12 @@ from .runtime_identity import WINDOWS_LAUNCHER_BINDING
 NAME = "thaliris-preflight.ps1"
 
 
-def degraded_source() -> str:
-    """Small inline policy also survives a damaged preflight/trampoline."""
+def degraded_source(previous: bool = False) -> str:
+    """Small inline policy also survives a damaged preflight/trampoline.
+
+    ``previous`` renders the exact 0.5.4 policy for installed-byte recognition;
+    the current policy also classifies every parallel reservation as managed.
+    """
     source = r'''
 function Present($path) {
   try { $null=[IO.File]::GetAttributes($path); return $true }
@@ -87,6 +91,7 @@ function ManagedTarget($h) {
     if ($v.task_id -cne $a.task_id) { return $false }
     foreach ($child in $v.children) { if ($child.managed -eq $true -and ($child.task_name_hash -ceq $hash -or ($null -eq $child.task_name_hash -and $child.agent_id_hash -ceq $hash))) { return $true } }
     if ($v.pending_authorized_spawn.task_name_hash -ceq $hash -or $v.pending_authorized_spawn.native_agent_id_hash -ceq $hash) { return $true }
+    #PARALLEL_RESERVATIONS
   } catch {}
   return $false
 }
@@ -120,12 +125,15 @@ function Degraded($detail,$code='THALIRIS_RUNTIME_DRIFT') {
   @{hookSpecificOutput=$o}|ConvertTo-Json -Depth 32 -Compress|Write-Output
 }
 '''
+    source = source.replace("    #PARALLEL_RESERVATIONS\n", "" if previous else
+        "    foreach ($item in @($v.pending_authorized_spawns)) { if ($null -ne $item -and ($item.task_name_hash -ceq $hash"
+        " -or $item.native_agent_id_hash -ceq $hash)) { return $true } }\n")
     for old, new in (("$inputJson", "$j"), ("$command", "$c"), ("$control", "$d"), ("$detail", "$e"), ("$path", "$x"), ("FreshUnmanaged", "Fresh"), ("Present", "Exists"), ("Unlinked", "Safe"), ("ManagedTarget", "Target"), ("Fenced", "Fence"), ("IdentityHash", "Hash"), ("$association", "$q"), ("$session", "$s"), ("$target", "$t"), ("$managed", "$m"), ("$agent", "$g"), ("$hash", "$b")):
         source = source.replace(old, new)
     return "\n".join(line.strip() for line in source.splitlines() if line.strip() and not line.lstrip().startswith("#"))
 
 
-def _platform_source() -> str:
+def _platform_source(previous: bool = False) -> str:
     return (r'''$ErrorActionPreference='Stop'
 function HashBytes($bytes) {
   $sha=[Security.Cryptography.SHA256]::Create()
@@ -140,7 +148,7 @@ function SafePath($path) {
     if ($item -is [IO.FileInfo]) { $item=$item.Directory } else { $item=$item.Parent }
   }
 }
-''' + degraded_source() + r'''
+''' + degraded_source(previous) + r'''
 function AssertRuntime($bytes,$exe,$identity) {
   if ($identity -cnotmatch '^[0-9a-f]{64}$' -or (HashBytes $bytes) -cne $identity) { throw 'runtime manifest identity mismatch' }
   $m=[Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json
@@ -361,7 +369,7 @@ def recovery_source(previous: bool = False, pin: bool = False) -> str:
     The caller sets $cause; with ``pin`` also $expected, its Hook script pin. ``previous`` renders the exact 0.5.4 literal for recognition.
     """
     if previous:
-        return _strip(_platform_source() + r'''
+        return _strip(_platform_source(previous=True) + r'''
 try {
   $hostHome=[IO.Path]::GetDirectoryName($env:THALIRIS_INSTALL_MANIFEST)
   $journal=Join-Path $hostHome 'thaliris-host-transition.json'

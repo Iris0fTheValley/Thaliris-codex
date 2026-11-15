@@ -1,0 +1,25 @@
+{
+  "source": "https://github.com/openai/codex/tree/rust-v0.169.0/codex-rs/hooks/schema/generated",
+  "fetched_with": "gh api repos/openai/codex/contents/codex-rs/hooks/schema/generated?ref=rust-v0.169.0 (read-only source JSON, no binaries)",
+  "note": "Blob SHAs are unchanged from rust-v0.165.0 to rust-v0.169.0. These pins are evidence, not a version requirement.",
+  "git_blob_sha1": {
+    "post-tool-use.command.input.schema.json": "f92af1dd3249ddf3511ef707c4310329e5b85c80",
+    "pre-tool-use.command.input.schema.json": "48dd4c571010a664e40cb174123c3bc746f12e34",
+    "session-start.command.input.schema.json": "70eb76ec923c321b95d225812e16d4e7f52a9cc2",
+    "stop.command.input.schema.json": "dbd4a3f648071bee1af24758e9596e11ab78c782",
+    "subagent-start.command.input.schema.json": "2f6edd60387aee5af5573e3683702d94773e2dd1",
+    "subagent-stop.command.input.schema.json": "19646db1d2b18d2017eaa39056326bbfa66a814c",
+    "user-prompt-submit.command.input.schema.json": "6a10a9f75c19720b0863d11d7d7d80f190e8eacd"
+  },
+  "multi_agent_v2_hook_tool_names": {
+    "derivation": "V2 tool specs in codex-rs/core/src/tools/handlers/multi_agents_spec.rs, default tool_namespace 'collaboration' (codex-rs/core/src/config/mod.rs:279), hook name = namespace + name (flat_tool_name, codex-rs/core/src/tools/mod.rs:50; function_hook_tool_name, codex-rs/core/src/tools/registry.rs:1134)",
+    "names": [
+      "collaborationspawn_agent",
+      "collaborationsend_message",
+      "collaborationfollowup_task",
+      "collaborationwait_agent",
+      "collaborationlist_agents",
+      "collaborationinterrupt_agent"
+    ]
+  }
+}

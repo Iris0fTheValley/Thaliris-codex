@@ -96,13 +96,17 @@ writes; uninstall preserves edited profiles. Unrelated profiles are preserved.
 
 ### Native multi-agent mode hint compatibility
 
-This narrow compatibility edit uses the source-verified Codex CLI builds
-`0.162.0-alpha.17.2`, `0.162.0-alpha.2`, `0.162.0`, and `0.162.1` as an exact
-fast path, rather than treating a version family as sufficient evidence. Other
-CLI builds with a successful version response undergo an isolated capability
+This narrow compatibility edit is decided by capability, never by a version
+string or version family. Every Codex CLI build (resolved through
+`THALIRIS_CODEX_EXECUTABLE`, then `PATH`) undergoes an isolated capability
 check: a disposable `CODEX_HOME` and workspace configure the candidate field,
 execute finite synthetic tasks against a loopback Responses sink, verify its developer
-prompt effect, and confirm that the field rejects an integer. It does not copy
+prompt effect for a sentinel and for the empty string, and confirm by behaviour
+that the field rejects an integer (non-zero exit before any request, followed by a
+successful repeat of the accepted run; error text only corroborates). A definitive
+`SUPPORTED` or `INCOMPATIBLE` result is cached in `~/.thaliris/host-capability/`
+for that exact binary SHA-256, field and probe source, so a replaced binary is
+probed again; `UNKNOWN` is never cached. It does not copy
 current-user configuration or authentication. On Windows it resolves ProgramData
 with `SHGetKnownFolderPath(FOLDERID_ProgramData)` and checks
 `OpenAI/Codex/config.toml` and `requirements.toml`; on Linux it checks
@@ -113,7 +117,10 @@ remain `VERSION_SUPPORT_UNKNOWN`. When the local system layers are proven absent
 the probe passes `--disable hooks --disable plugins`; those flags do not disable
 managed hooks on their own, which is why the system-layer preflight runs first. A contradictory captured
 effect reports `CAPABILITY_INCOMPATIBLE`; incomplete or ambiguous evidence reports
-`VERSION_SUPPORT_UNKNOWN`, and neither status authorizes a write. The alpha
+`VERSION_SUPPORT_UNKNOWN` (a persisted status name kept for receipt
+compatibility; it means the capability was not shown), and neither status
+authorizes a write. The source records below are historical evidence for the
+leaf's semantics, not a requirement on the running build. The alpha
 `0.162.0-alpha.17.2` and stable `0.162.0`/`0.162.1` sources agree that the schema declares the field as a string,
 the native mode resolver recognizes `Some("")`, and the instruction renderer
 returns no text for an empty custom value. The alpha revision's native regression
@@ -167,8 +174,8 @@ The field writer rereads bytes immediately before atomic replacement, but this
 does not provide compare-and-swap protection against an external editor racing
 that final check.
 
-For these four source-verified 0.162 CLI builds, or another build that passes the
-isolated capability check, the existing install/upgrade path can add a concise,
+For a build that passes the isolated capability check for this field, the
+existing install/upgrade path can add a concise,
 role-neutral root-level `developer_instructions` value when that user-config
 field is absent. It asks agents to continue necessary independent work, prefer
 meaningful notifications over repeated polling, preserve UNKNOWN when completion
@@ -416,11 +423,14 @@ contract 保留证据并停止。trust 未完成会明确报告，用户配置�
 
 ### 原生 multi-agent mode hint 兼容
 
-此字段级兼容修改将已通过源码核实的 Codex CLI 四个精确版本
-`0.162.0-alpha.17.2`、`0.162.0-alpha.2`、`0.162.0` 和 `0.162.1` 作为快速路径，
-而非仅凭整个版本系列判定兼容。其他成功报告版本的 CLI 会经过隔离能力检查：在临时
-`CODEX_HOME` 和工作区中配置目标字段，向本机 loopback Responses sink 执行一次有限任务，
-验证 developer prompt 效果，并确认字段拒绝整数。它不复制当前用户配置或认证信息；
+此字段级兼容修改只按能力判定，从不依据版本字符串或版本系列。每个 Codex CLI
+（依次通过 `THALIRIS_CODEX_EXECUTABLE`、`PATH` 解析）都会经过隔离能力检查：在临时
+`CODEX_HOME` 和工作区中配置目标字段，向本机 loopback Responses sink 执行有限任务，
+验证 sentinel 与空字符串的 developer prompt 效果，并按行为确认字段拒绝整数（在任何请求前
+以非零退出，随后重复已接受的运行仍成功；错误文本只作佐证）。确定的 `SUPPORTED` 或
+`INCOMPATIBLE` 结果按该二进制的 SHA-256、字段和探测源码缓存在
+`~/.thaliris/host-capability/`；二进制被替换后重新探测，`UNKNOWN` 从不缓存。
+它不复制当前用户配置或认证信息；
 Windows 通过 `SHGetKnownFolderPath(FOLDERID_ProgramData)` 检查系统级
 `OpenAI/Codex/config.toml` 与 `requirements.toml`，Linux 检查
 `/etc/codex/config.toml`、`requirements.toml` 和 `managed_config.toml`。
@@ -428,7 +438,9 @@ Windows 通过 `SHGetKnownFolderPath(FOLDERID_ProgramData)` 检查系统级
 preferences 无法证明缺席，因此也保持该状态。确认系统层缺失后，探测传入
 `--disable hooks --disable plugins`；这两个 flag 本身不能禁用 managed hooks，所以必须先检查系统层。
 捕获到矛盾效果时报告 `CAPABILITY_INCOMPATIBLE`；证据不完整或含糊时报告
-`VERSION_SUPPORT_UNKNOWN`；两种状态都不授权写入。检查会向本机 loopback sink 发送有限的合成任务。
+`VERSION_SUPPORT_UNKNOWN`（为兼容既有 receipt 保留的状态名，含义是能力未被证明）；
+两种状态都不授权写入。检查会向本机 loopback sink 发送有限的合成任务。以下源码记录是该字段语义的
+历史证据，不是对当前运行版本的要求。
 alpha `0.162.0-alpha.17.2` 与 stable
 `0.162.0`/`0.162.1` 源码均显示 schema 将字段定义为字符串，
 原生 mode resolver 识别 `Some("")`，指令 renderer 对空 custom 值返回无提示。alpha revision
@@ -472,7 +484,7 @@ executor 使用原 operation 和同一 contract 重放。安装中断时，journ
 报告 `APPLY_OUTCOME_UNKNOWN_PRESERVED`，不会再次插入。
 字段写入在原子替换前会重读 bytes；这不能防止外部编辑器在最终检查期间并发写入。
 
-上述四个源码核实过的 0.162 CLI 版本，或通过隔离能力检查的其他版本，其既有安装/升级流程可在用户配置缺少该字段时写入简短、角色中立的根级
+对于通过该字段隔离能力检查的版本，既有安装/升级流程可在用户配置缺少该字段时写入简短、角色中立的根级
 `developer_instructions`。它要求先继续必要的独立工作、优先使用有意义的通知而非重复轮询、
 在完成证据不足时保留 UNKNOWN，并遵循角色和选定 handoff。已有空值或自定义用户值会保留。
 

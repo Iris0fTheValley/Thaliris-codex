@@ -120,6 +120,39 @@ def delivered_resident(runner: str) -> str:
     )
 
 
+def resident_chunk(runner: str, *, offset: int, limit: int,
+                   expected_sha256: str | None = None) -> dict[str, object]:
+    """Read a code-point slice of the exact framed delivery, without ACK state.
+
+    Pin every continuation to the canonical-body digest. The framing and body
+    are rendered once, so a Unicode boundary never splits an encoded character.
+    A final slice exposes END but is not proof that prior slices were received.
+    """
+    from thaliris.errors import ThalirisError
+    digest, byte_count, content = resident_digest(runner)
+    if expected_sha256 is not None and expected_sha256 != digest:
+        raise ThalirisError("CONTROLLER_GUIDANCE_CHANGED", "Controller guidance digest differs",
+                            recovery="restart recovery at offset 0; do not combine different renders",
+                            details={"controller_guidance_sha256": digest})
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 16384:
+        raise ValueError("resident chunks require offset >= 0 and limit between 1 and 16384 Unicode code points")
+    if offset and expected_sha256 is None:
+        raise ValueError("resident continuation requires --expected-sha256 from its first chunk")
+    delivery = ("<!-- THALIRIS CONTROLLER GUIDANCE BEGIN -->\n" + content + "\n"
+                + f"<!-- THALIRIS CONTROLLER GUIDANCE END sha256={digest} utf8_bytes={byte_count} -->\n")
+    if offset >= len(delivery):
+        raise ValueError("resident offset must precede the end of the framed delivery")
+    end = min(offset + limit, len(delivery))
+    return {"ok": True, "controller_guidance_sha256": digest,
+            "controller_guidance_utf8_bytes": byte_count,
+            "delivery_sha256": hashlib.sha256(delivery.encode("utf-8")).hexdigest(),
+            "delivery_utf8_bytes": len(delivery.encode("utf-8")),
+            "delivery_code_points": len(delivery), "offset_unit": "unicode-code-points",
+            "offset": offset, "end_offset": end,
+            "next_offset": end if end < len(delivery) else None,
+            "complete_acknowledgement": False, "content": delivery[offset:end]}
+
+
 def guidance_delivery_fields(runner: str, acknowledged_sha256: str | None = None) -> dict[str, object]:
     """Include current guidance unless its exact complete digest was acknowledged.
 
