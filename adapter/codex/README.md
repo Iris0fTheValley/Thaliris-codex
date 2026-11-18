@@ -597,6 +597,31 @@ Online/source failures preserve the existing generation before transition writes
 user-owned catalog may be preserved while other authorized Host work proceeds, with
 `catalog_goal_met: false` and manual follow-up. Changes use the existing version journal.
 
+The managed catalog replaces the CLI's bundled catalog, so without a refresh new
+upstream models stay invisible after a Codex CLI upgrade (`spawn_agent` then reports an
+unknown model). `catalog_refresh` keeps that one surface current. Only the owning
+Controller's `SessionStart` (the same deny-only actor gate as project-loss recovery:
+no child, readonly or fenced actor) or the explicit Controller-only
+`codex-model-catalog-refresh` command triggers it; the PreToolUse guard refuses the
+command for children, readonly and fenced actors, and it must run from the pinned
+installed runtime. It re-exports from the source kind the install recorded (bundled
+offline, or online when the install chose online; never a downgrade), patches with
+exactly `patch_catalog`, and writes only `thaliris-model-catalog.json` and the receipt's
+`native_model_catalog` entry. `config.toml`, profiles, hooks and the runtime manifest
+stay byte-identical, so runtime identity is unchanged and `status` keeps reporting
+`MATCH`. Writes happen under the shared Host maintenance lock, never during a pending
+transition, after a compare-and-swap of the manifest, receipt, config and catalog
+bytes; the catalog is written before the receipt, and an interruption between them
+leaves exactly the planned bytes, which the next explicit refresh re-exports, recognizes
+and completes. SessionStart skips the export when the CLI reports the recorded version
+line and the transformation contract is unchanged (hashing a several-hundred-megabyte
+binary each session is avoided; this skip never certifies reuse, which stays bound to the
+binary's SHA-256), and limits the export to 20 seconds. Any unsafe or failed case writes
+nothing: SessionStart records the result on stderr, and `codex-bootstrap` reports
+`model_catalog` with `MODEL_CATALOG_STALE`, the reason and the exact command. Ordinary
+work is never blocked. A running Codex process may keep its loaded catalog until a new
+session.
+
 An install contract may explicitly bind project-loss recovery to a selected project
 root and optional source root. At a real Host `SessionStart`, the validated pinned
 runtime restores only the exact owned `model_catalog_json` field to its prior absent

@@ -16,7 +16,7 @@ Generated from `thaliris_codex.roles.ROLE_REGISTRY`. Role prompts are canonical 
 
 Controller-only exceptional native profiles (same stable role IDs; defaults above remain unchanged):
 
-- `thaliris-reasoning-specialist-astra-medium` → `reasoning-specialist`: `gpt-6-astra`, `medium`; `thaliris-reasoning-specialist-astra-medium.toml`.
-- `thaliris-reasoning-specialist-xhigh` → `reasoning-specialist`: `gpt-6-astra`, `xhigh`; `thaliris-reasoning-specialist-xhigh.toml`.
-- `thaliris-focused-implementer-astra-medium` → `focused-implementer`: `gpt-6-astra`, `medium`; `thaliris-focused-implementer-astra-medium.toml`.
-- `thaliris-focused-implementer-xhigh` → `focused-implementer`: `gpt-6-astra`, `xhigh`; `thaliris-focused-implementer-xhigh.toml`.
+- `thaliris-reasoning-specialist-astra-medium` → `reasoning-specialist`: `gpt-6.2-astra`, `medium`; `thaliris-reasoning-specialist-astra-medium.toml`.
+- `thaliris-reasoning-specialist-xhigh` → `reasoning-specialist`: `gpt-6.2-astra`, `xhigh`; `thaliris-reasoning-specialist-xhigh.toml`.
+- `thaliris-focused-implementer-astra-medium` → `focused-implementer`: `gpt-6.2-astra`, `medium`; `thaliris-focused-implementer-astra-medium.toml`.
+- `thaliris-focused-implementer-xhigh` → `focused-implementer`: `gpt-6.2-astra`, `xhigh`; `thaliris-focused-implementer-xhigh.toml`.

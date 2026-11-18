@@ -326,6 +326,18 @@ before the Host generation is written. A user-edited catalog can be reported as
 `USER_CHANGED_PRESERVED` while other authorized Host changes proceed, but
 `catalog_goal_met` stays false and manual follow-up is required.
 
+When the Codex CLI changes, the receipt-owned catalog is refreshed without a new
+maintenance contract: the owning Controller's `SessionStart` (or the explicit
+Controller-only `codex-model-catalog-refresh` command, run by the pinned installed
+runtime) re-exports from the recorded source kind, patches with `patch_catalog`, and
+replaces only the catalog file and the receipt's `native_model_catalog` entry under the
+Host maintenance lock. It acts under the recorded install instruction that made the
+catalog receipt-owned; it never writes `config.toml` or another surface, never runs
+during a pending transition, and is refused for children, readonly and fenced actors.
+A removed or edited field, changed catalog bytes, an incompatible template, an
+unavailable source or a concurrent change writes nothing and is reported as
+`MODEL_CATALOG_STALE` with the exact command; ordinary work continues.
+
 `codex-maintenance-plan codex-install` proposes the `--root` location as
 `catalog_recovery_project_root` by default. `--catalog-recovery-project-root`
 selects another absolute project path, and `--catalog-recovery-source-root` can

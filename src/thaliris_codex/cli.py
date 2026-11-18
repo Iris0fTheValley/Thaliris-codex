@@ -217,6 +217,7 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--execution-constraint", choices=roles.EXECUTION_CONSTRAINTS)
     plan.add_argument("--catalog-recovery-project-root", type=Path, help="propose SessionStart catalog restoration after loss of this project's activation marker; defaults to --root")
     plan.add_argument("--catalog-recovery-source-root", type=Path, help="also propose restoration when this explicitly selected source directory disappears")
+    sub.add_parser("codex-model-catalog-refresh", help="Controller-only: refresh the receipt-owned model catalog from the current Codex CLI (catalog file and its receipt entry only)")
     q = sub.add_parser("codex-bootstrap", help="perform one-shot project-external Codex bootstrap")
     q.add_argument("--hook-attestation", help=argparse.SUPPRESS)
     q.add_argument("--controller-guidance-sha256", help="omit exact guidance already present in the current context")
@@ -566,6 +567,9 @@ def main(argv: list[str] | None = None) -> int:
             out = {"ok": True, "maintenance_contract": intent,
                 "ownership_review_snapshot": snapshot, "ownership_approved": False,
                 "host_actor_assurance": "UNKNOWN", "project_files_touched": []}
+        elif args.command == "codex-model-catalog-refresh":
+            from . import catalog_refresh
+            out = catalog_refresh.explicit(codex_adapter._codex_home())
         elif args.command == "codex-bootstrap":
             try:
                 if args.controller_guidance_sha256 is None:

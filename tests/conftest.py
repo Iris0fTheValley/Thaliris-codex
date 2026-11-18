@@ -49,7 +49,7 @@ def pinned_test_thaliris(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from thaliris_codex import codex_adapter, codex_app_server, lifecycle, mode_hint_config, wait_guidance_config, model_catalog_config
     from tests.model_catalog_fixtures import observed_catalog, SUPPORTED_CLI_VERSION
 
-    def supported_catalog_export(_home, *, source="online"):
+    def supported_catalog_export(_home, *, source="online", **_kwargs):
         return observed_catalog(source), {"kind": source, "cli_version": SUPPORTED_CLI_VERSION}
 
     monkeypatch.setattr(model_catalog_config, "export_upstream", supported_catalog_export)

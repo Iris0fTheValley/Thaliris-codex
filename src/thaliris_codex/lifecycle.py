@@ -126,7 +126,7 @@ _COMMAND_SEPARATOR = re.compile(r"(?:\r?\n|&&|\|\||\||&|;)")
 _CONTEXT_OPERATIONS = frozenset({
     "controller-instructions",
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
-    "init", "codex-bootstrap", "codex-install", "codex-uninstall", "codex-maintenance-plan", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
+    "init", "codex-bootstrap", "codex-install", "codex-uninstall", "codex-maintenance-plan", "codex-model-catalog-refresh", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
     "task-status", "task-get", "artifact-get", "catalog", "document-get",
     "task-artifact", "task-close", "task-promote", "rollback", "version",
@@ -152,10 +152,12 @@ _CHILD_CONTEXT_READS = frozenset({
     "memory-status", "milestone-check", "task-get", "artifact-get", "catalog",
     "document-get", "identity-status", "identity-get", "identity-trace",
 })
+# Controller-only refresh of the receipt-owned model catalog (catalog_refresh).
+_CATALOG_REFRESH_OPERATION = "codex-model-catalog-refresh"
 _CHILD_CONTEXT_MUTATIONS = frozenset({
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
-    "rollback", "init", "uninstall", "codex-uninstall",
+    "rollback", "init", "uninstall", "codex-uninstall", "codex-model-catalog-refresh",
     "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain",
     "identity-amend", "identity-challenge", "identity-relate",
     "identity-note", "identity-suggest",
@@ -1822,7 +1824,7 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 if _context_operation(payload) == "task-recover-authority":
                     if _controller_actor_assurance(payload) == "CHILD":
                         return _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
-                elif _managed_control_dependency(payload, root) and _context_operation(payload) not in {"codex-install", "codex-uninstall", "controller-instructions"}:
+                elif _managed_control_dependency(payload, root) and _context_operation(payload) not in {"codex-install", "codex-uninstall", _CATALOG_REFRESH_OPERATION, "controller-instructions"}:
                     try:
                         task_authority.check(root)
                     except task_authority.ExecutionConstraintUnsatisfied as exc:
@@ -3427,7 +3429,7 @@ def _reserve_managed_spawn(
         return _permission_deny('THALIRIS_ISOLATION_REQUIRED: use fork_turns="none" (V2) or fork_context=false (V1).')
     nested = payload.get("agent_id") is not None or payload.get("agent_type") is not None
     overrides = {key: tool_input[key] for key in ("model", "reasoning_effort", "thinking", "model_reasoning_effort") if tool_input.get(key) is not None}
-    if nested and tool_input.get("model") == "gpt-6-astra":
+    if nested and roles.is_astra_model(tool_input.get("model")):
         return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: explicit Astra selection is Controller-only and requires the current task's human opt-in.")
     authority = task_authority.check(root)
     if authority is not None and authority["contract"].get("execution_constraint") == "luna-only":
@@ -5497,7 +5499,7 @@ def _compound_host_maintenance_attempt(payload: dict[str, Any], *, shell_dialect
         candidate_input.pop("cmd", None)
         candidate_input["command"] = segment
         candidate["tool_input"] = candidate_input
-        if _context_operation(candidate) in {"codex-install", "codex-uninstall"}:
+        if _context_operation(candidate) in {"codex-install", "codex-uninstall", _CATALOG_REFRESH_OPERATION}:
             return True
     return False
 
@@ -6199,7 +6201,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     binding = roles.get_codex_binding(role)
     role_names = _native_role_names()
     if normalized in _DELEGATION_TOOL_NAMES:
-        if normalized == "spawn_agent" and _delegation_input(payload).get("model") == "gpt-6-astra":
+        if normalized == "spawn_agent" and roles.is_astra_model(_delegation_input(payload).get("model")):
             return _permission_deny("THALIRIS_ROLE_SESSION_DELEGATION: explicit Astra selection is Controller-only and requires the current task's human opt-in.")
         if normalized == "spawn_agent" and native_agent_type is None and not _managed_spawn_requested(payload):
             # An ordinary native child may use native delegation; this never
@@ -6886,6 +6888,13 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     if operation in {"codex-install", "codex-uninstall"}:
         if _controller_actor_assurance(payload) == "CHILD" or not _trusted_host_maintenance_route(payload):
             return _permission_deny("THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED: exact Host operation and approved immutable identity are required.")
+        return ""
+    if operation == _CATALOG_REFRESH_OPERATION:
+        # Refreshes only the receipt-owned catalog under the recorded install
+        # instruction. A delegated, readonly or fenced actor never triggers it.
+        if (_controller_actor_assurance(payload) == "CHILD" or payload.get("readonly") is True
+                or payload.get("fenced") is True):
+            return _permission_deny("THALIRIS_CATALOG_REFRESH_ACTOR_DENIED: the model catalog refresh is Controller-only.")
         return ""
     state_status, _task_id = managed_task_state(root)
     operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None

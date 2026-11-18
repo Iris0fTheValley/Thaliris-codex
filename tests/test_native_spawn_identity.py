@@ -150,7 +150,7 @@ def test_invalid_edge_cannot_publish_routing_observation(monkeypatch):
     ({"agent_type": "thaliris-implementer", "model": "gpt-6.1-sol"},
         {"model": "gpt-6.1-sol", "reasoningEffort": "medium"}, ("MATCH", "UNKNOWN")),
     ({"agent_type": "thaliris-focused-implementer"},
-        {"model": "gpt-6.1-sol", "reasoningEffort": "high"}, ("MATCH", "MATCH")),
+        {"model": "gpt-6.2-sol", "reasoningEffort": "high"}, ("MATCH", "MATCH")),
 ])
 def test_routing_observations_preserve_inherited_effort_and_fixed_profile_bindings(monkeypatch, selection, fields, expected):
     reader = NativeReader([{"data": [activity(**fields)]}])

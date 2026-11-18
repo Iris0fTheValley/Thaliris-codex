@@ -108,7 +108,7 @@ def test_controller_selects_roles_and_accounts_for_goals():
 
 def test_substantive_frontend_work_uses_strong_semantic_routing():
     assert roles.ROLE_MODEL_ROUTING_DEFAULTS["focused-implementer"] == (
-        "gpt-6.1-sol",
+        "gpt-6.2-sol",
         "high",
     )
     controller_policy = controller_instructions.render(section="routing")
@@ -119,7 +119,7 @@ def test_substantive_frontend_work_uses_strong_semantic_routing():
             "responsive behavior", "interaction", "animation", "creative SVG",
             "visual design",
         ),
-        ("Focused Implementer", "gpt-6.1-sol", "high"),
+        ("Focused Implementer", "gpt-6.2-sol", "high"),
         ("few files", "little code"),
         ("genuinely trivial", "fully specified", "text", "color", "mechanical changes"),
         ("current-task Astra authorization", "fresh isolation", "execution constraints"),

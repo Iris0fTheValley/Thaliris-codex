@@ -112,12 +112,12 @@ Controller 必须同时具备以下能力，每一项都很重要：
 
 | 角色 | 需要的能力 | GPT（Codex） |
 | --- | --- | --- |
-| Controller | 上述六项；整合原始目标、验收标准与证据，判定产品验收 | gpt-6.1-sol（high 或以上）；用户明确选用时可用 gpt-6-astra |
+| Controller | 上述六项；整合原始目标、验收标准与证据，判定产品验收 | gpt-6.2-sol（high 或以上）；用户明确选用时可用 gpt-6.2-astra |
 | Investigator | 在选定范围内广泛、准确地收集事实与来源，说明已覆盖与未覆盖范围 | gpt-6-luna（max） |
 | Implementer | 在已确定的方向内实现、验证并修复普通缺陷，直到确定性收敛 | gpt-6-luna（max） |
-| Focused Implementer | 对耦合的不变量持续推理，吸收运行反馈直到语义收敛 | gpt-6.1-sol（high）；用户明确选用时可用 gpt-6-astra |
-| Reviewer | 独立挑战已收敛的候选，跨边界寻找反证，不被作者的框架带偏 | gpt-6.1-sol（high） |
-| Reasoning Specialist | 质疑问题框架、因果模型和决策依据 | gpt-6.1-sol（high）；用户明确选用时可用 gpt-6-astra |
+| Focused Implementer | 对耦合的不变量持续推理，吸收运行反馈直到语义收敛 | gpt-6.2-sol（high）；用户明确选用时可用 gpt-6.2-astra |
+| Reviewer | 独立挑战已收敛的候选，跨边界寻找反证，不被作者的框架带偏 | gpt-6.2-sol（high） |
+| Reasoning Specialist | 质疑问题框架、因果模型和决策依据 | gpt-6.2-sol（high）；用户明确选用时可用 gpt-6.2-astra |
 | Curator | 依据选定材料精确整理长期知识与 INDEX | gpt-6-luna（max） |
 | Verifier（Codex 兼容角色） | 只读检查验收证据、修改边界与同步 | gpt-6-luna（max） |
 
@@ -217,7 +217,7 @@ Thaliris-codex 将共享语义接入 Codex 原生 Agent、角色 profile、Hooks
 | 角色 | 默认模型 | 默认 effort |
 | --- | --- | --- |
 | Investigator、Implementer、Curator、Verifier | gpt-6-luna | max |
-| Reasoning Specialist、Focused Implementer、Reviewer | gpt-6.1-sol | high |
+| Reasoning Specialist、Focused Implementer、Reviewer | gpt-6.2-sol | high |
 
 角色与执行模型分离。Fresh Child 是通过选择性 Handoff 创建的新原生角色会话：Codex V2 使用 fork_turns=none，V1 使用 fork_context=false；只传递当前工作所需的事实、约束、来源和验收，不传父级对话历史。已完成调查的来源仍可重新打开，子角色沿用其选定范围，不替 Controller 作架构或全局验收决定。
 
