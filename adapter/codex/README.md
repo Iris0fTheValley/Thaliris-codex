@@ -158,7 +158,16 @@ For new work, Controller preselects the next top-level managed dispatch in that 
 registration operation (or after requirements are already registered):
 `"next_dispatch":{"role":"investigator","expected_agent_type":"thaliris-investigator","candidate":"C1","requirement_refs":["R1"]}`.
 The existing task lock and authority protect this one selection. The Hook supplies the
-Controller's existing session association. A matching owning Controller reservation
+Controller's existing session association, for a standalone runner call or for one literal
+piped into exactly one runner call (`'<json>' | & '<runner>' ... --input -`; Bash needs
+`echo`/`printf`). Any other compound form is refused by name, never injected. An absent
+association fails with `THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED` (hooks inactive or
+awaiting trust, or an unrecognized call shape; the owner is unchanged), a present but wrong
+or fenced one with `THALIRIS_CONTROLLER_NOT_OWNER`. `doctor` (`host_hook_trust`) and
+`task-status` report whether `config.toml` hook trust still matches the installed
+Thaliris entries in `hooks.json`, using the trust record the installer writes
+(`thaliris-hook-trust.json`); without that record the comparison is UNKNOWN because the
+Host's trust hash is opaque. A matching owning Controller reservation
 consumes it once and registers the newly generated exact handoff
 before Native execution, including opaque Host messages. A wrong profile/role/owner or
 conflicting readable marker refuses without consuming it; nested children inherit their
@@ -526,6 +535,45 @@ Ordinary closure owns broader regression/build/docs/generated sync, installation
 Git after Focused semantic convergence. Installation/smoke exposing a semantic defect
 requires a new Controller decision about reopening the core candidate. This source
 change has no live Host activation or compression benchmark claim.
+
+### Upgrade continuity of ACTIVE tasks
+
+An adapter upgrade, regenerated role profiles or a model-routing change does not strand
+an ACTIVE task. Code identity is unchanged: the installed runtime manifest, preflight,
+hook command pins, short-lived Hook attestations, the project security-bytes anchor and
+the anchored lifecycle digest are still checked exactly. Task state is read forward:
+
+- **Ledger version.** `_load_lifecycle` migrates any ledger from
+  `MIN_READABLE_LIFECYCLE_STATE_VERSION` up to `LIFECYCLE_STATE_VERSION` in memory
+  through `_LIFECYCLE_MIGRATIONS`; the next checked write persists it and refreshes the
+  anchored digest. A ledger written by a newer adapter is refused with
+  `LIFECYCLE_STATE_NEWER_THAN_ADAPTER` (upgrade the adapter) and left unchanged.
+- **Protocol stamps.** Ledger and runtime stamps record `adapter_protocol_version` and,
+  as provenance only, `managed_hook_spec_hash`. A stamp is compatible when its protocol
+  is in `SUPPORTED_ADAPTER_PROTOCOLS`; a matcher or tool-list edit changes the hash but
+  not compatibility. Only a protocol outside the range yields `lifecycle-protocol-conflict`,
+  refuses waits on that evidence and blocks `task-close`; `task-abandon` stays available.
+- **Execution constraints.** A constrained task (`luna-only`) is checked semantically on
+  every check from the installed bytes: each ordinary role profile, resolved the way the
+  adapter routes it (profile file, then user/project config), must satisfy the policy in
+  `roles.EXECUTION_CONSTRAINT_POLICIES`, and no config `[agents.*]` entry, project
+  profile or same-name Host profile may shadow it. The anchor keeps only a semantic
+  summary as provenance; older anchors carrying byte snapshots still load. A violation
+  raises `ExecutionConstraintUnsatisfied`: managed control is refused while
+  `task-abandon`, `task-close` and `task-dispose-dependency` remain available, and
+  recovery re-derives the summary.
+- **Renames.** `roles.ROLE_ID_ALIASES`, `NATIVE_PROFILE_ALIASES` and
+  `EXECUTION_CONSTRAINT_ALIASES` are append-only rename tables. A persisted reservation
+  whose role is unknown even after aliasing is marked `role_resolution: UNKNOWN`: it stays
+  visible and disposable but can never bind (fail closed for that dispatch only). An
+  unknown frozen constraint refuses managed control but not close-out.
+- **Ownership.** Install and admission recognize Thaliris-owned profiles first by the
+  installation receipt (`thaliris-ownership.json`, path and SHA-256 written), so a release
+  that changes rendered text needs no new historical hash entry; the historical tables
+  remain only for receipt-less legacy installations. Unknown user bytes are preserved.
+- **Anchor fields.** Adapter fields absent from an older anchor (`fenced_sessions`,
+  `fenced_agents`, `lifecycle_sha256`) read as their empty/`ABSENT` defaults; an absent
+  lifecycle digest still refuses a ledger the anchor never recorded.
 
 ## Host-wide model-catalog maintenance
 

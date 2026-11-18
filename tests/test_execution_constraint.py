@@ -120,8 +120,10 @@ def test_external_anchor_freezes_execution_profiles(constrained):
     root, home = constrained
     anchor = task_authority.check(root)
     assert anchor["execution_profiles"]["home"] == str(home)
+    # Default profiles leave the frozen luna-only policy (Sol/inherited models):
+    # the semantic check, not a byte comparison, refuses them.
     install_profiles(home, None)
-    with pytest.raises(ValueError, match="CONSTRAINT_MISMATCH"):
+    with pytest.raises(task_authority.ExecutionConstraintUnsatisfied, match="CONSTRAINT_MISMATCH"):
         task_authority.check(root)
 
 
@@ -275,7 +277,11 @@ def test_constrained_contract_anchors_current_config_without_session_receipt(tmp
     result = codex_adapter.task_start(root, "goal", None, None, authority_contract=str(contract))
     assert result["ok"]
     assert result["managed_readiness"]["HOST_INSTRUCTION_ACTIVE"] == "UNKNOWN"
-    assert task_authority.check(root)["execution_profiles"]["files"][str(config)] == task_authority.digest(config)
+    # The anchor keeps the semantic summary as provenance, never config bytes:
+    # later config edits are judged by the policy, not by this snapshot.
+    anchored = task_authority.check(root)["execution_profiles"]
+    assert anchored["status"] == "SATISFIED" and anchored["constraint"] == "luna-only"
+    assert "files" not in anchored
 
 
 def test_legacy_optional_proof_is_bound_to_exact_contract_digest(constrained):

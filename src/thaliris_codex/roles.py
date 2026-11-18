@@ -9,6 +9,7 @@ from __future__ import annotations
 from .execution_observation import INSTRUCTIONS as _EXECUTION_OBSERVATION_INSTRUCTIONS
 
 from dataclasses import dataclass, replace
+import re
 
 
 @dataclass(frozen=True)
@@ -648,6 +649,71 @@ def native_profile_names() -> frozenset[str]:
 
 
 EXECUTION_CONSTRAINTS = ("luna-only",)
+
+# Rename tables for identities persisted in ACTIVE task state (ledger
+# reservations, children, frozen contracts). Append-only: map each retired
+# name to its current name and never reuse a retired name for something else.
+# These are not spawn-time conveniences such as RoleBinding.native_aliases;
+# they only keep state written before a rename resolvable after it.
+ROLE_ID_ALIASES: dict[str, str] = {}
+NATIVE_PROFILE_ALIASES: dict[str, str] = {}
+EXECUTION_CONSTRAINT_ALIASES: dict[str, str] = {}
+
+
+def _follow_alias(table: dict[str, str], value: object) -> object:
+    seen: set[str] = set()
+    while isinstance(value, str) and value in table and value not in seen:
+        seen.add(value)
+        value = table[value]
+    return value
+
+
+def canonical_role_id(value: object) -> str | None:
+    """Current stable role id for a persisted (possibly renamed) one, else None."""
+    value = _follow_alias(ROLE_ID_ALIASES, value)
+    return value if isinstance(value, str) and value in role_choices() else None
+
+
+def canonical_native_profile(value: object) -> str | None:
+    """Current native profile name for a persisted (possibly renamed) one, else None."""
+    value = _follow_alias(NATIVE_PROFILE_ALIASES, value)
+    return value if isinstance(value, str) and value in native_agent_roles() else None
+
+
+def canonical_execution_constraint(value: object) -> str | None:
+    """Current constraint name for a frozen (possibly renamed) one, else None."""
+    value = _follow_alias(EXECUTION_CONSTRAINT_ALIASES, value)
+    return value if isinstance(value, str) and value in EXECUTION_CONSTRAINTS else None
+
+
+@dataclass(frozen=True)
+class ExecutionConstraintPolicy:
+    """Semantic meaning of a frozen execution constraint.
+
+    A constrained task is checked against this policy on the installed
+    configuration, never against the bytes some release rendered: regenerated
+    profiles that keep the policy pass, an edit that leaves it fails.
+    """
+    model_family: str
+    efforts: frozenset[str]
+
+    def allows_model(self, model: object) -> bool:
+        return isinstance(model, str) and re.fullmatch(r"gpt-\d+(?:\.\d+)*-" + re.escape(self.model_family), model) is not None
+
+    def allows(self, model: object, effort: object) -> bool:
+        return self.allows_model(model) and isinstance(effort, str) and effort in self.efforts
+
+
+EXECUTION_CONSTRAINT_POLICIES: dict[str, ExecutionConstraintPolicy] = {
+    "luna-only": ExecutionConstraintPolicy(model_family="luna", efforts=frozenset({"high", "xhigh", "max"})),
+}
+
+
+def execution_constraint_policy(constraint: str) -> ExecutionConstraintPolicy:
+    canonical = canonical_execution_constraint(constraint)
+    if canonical is None:
+        raise ValueError("UNSUPPORTED_EXECUTION_CONSTRAINT")
+    return EXECUTION_CONSTRAINT_POLICIES[canonical]
 
 # Controller routing defaults are deliberately separate from native profile
 # model fields. Codex applies a selected role's configured model after the

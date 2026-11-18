@@ -171,6 +171,16 @@ receipts establish Host ownership independently of candidate rendering; unknown 
 are preserved until exact specific human approval. Preserved role documentation is
 manual follow-up, not project admission authority. Disk setup is not native activation.
 
+Upgrades keep ACTIVE tasks working: older ledger versions migrate forward on the next
+checked write, stamps stay compatible across the supported adapter protocol range (a
+hook matcher or tool-list edit is provenance only), regenerated profiles are judged by
+the frozen constraint's policy, renamed roles resolve through rename tables, and the
+installation receipt recognizes previously written Thaliris bytes. Only a ledger from a
+newer adapter (upgrade the adapter), a protocol outside the supported range, an unknown
+role or constraint, or a real policy violation is refused, and only for the affected
+control; abandon and close-out remain available. Code identity is still the installed
+manifest.
+
 Host maintenance during another ACTIVE project uses a separate checkout and Codex
 session. Only exact identity-checked Host codex-install/codex-uninstall invocations with an explicit --maintenance-contract
 cross that boundary; source changes use managed roles. Self-uninstall reports any inert
@@ -269,7 +279,8 @@ Unverifiable target definitions or conflicting same-name outcomes are denied as
 UNKNOWN without rewriting profiles; managed dispatch also remains unreserved.
 Model-only selection keeps the Native configured/default effort. This disk compatibility check cannot
 prove the running Host loaded those definitions. The frozen `luna-only`
-constraint remains fixed to its Luna/xhigh role profiles and forbids per-spawn
+constraint is a policy, not frozen bytes: every ordinary role profile must resolve
+to a Luna-family model at high/xhigh/max effort, and it forbids per-spawn
 overrides. Model choice does not change role responsibilities or permissions. This
 path depends on the Host applying the hook's `updatedInput`. A trusted isolated
 Native run on `codex-cli 0.162.0-alpha.17.2` verified managed role contexts,
@@ -305,7 +316,9 @@ for their own delegation. This restriction does not mechanically prove current-t
 human opt-in; preserve that decision in the selected handoff.
 The dedicated luna-only installation requires `execution_constraint: luna-only`
 in the authority contract; it retains semantic roles, restricts ordinary profiles
-to Luna/xhigh, and forbids Astra. Children cannot alter the frozen constraint.
+to the Luna family, and forbids Astra. Children cannot alter the frozen constraint.
+An edit that leaves the policy refuses managed control until the installation
+satisfies it again; task-abandon, task-close and dependency disposal stay available.
 
 Controller owns the full user requirements and global acceptance; children receive only
 selected local goals, acceptance, facts and source pointers. Carry opaque related requirement
@@ -494,7 +507,12 @@ with no handoff or native actor. Example `fact.json` after reading current task-
 Replace the revision, candidate, registered requirement and source with exact current
 facts. The Hook supplies the Controller session association; a manually copied
 `--controller-session-id-hash` does not authenticate an actor or bypass known child,
-readonly or fence rules. Adapter output assigns `producer:controller`,
+readonly or fence rules. Run the runner as one standalone command; stdin input may come
+only from one literal piped into it (`'<json>' | & '<runner>' ... --input -`).
+`THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED` means the Hook attached no identity (hooks
+inactive or awaiting trust after a restart/reinstall, or an unrecognized call shape):
+the owner is unchanged; restart Codex once or approve the hooks, then retry standalone.
+Only `THALIRIS_CONTROLLER_NOT_OWNER` is a real wrong-owner or fenced refusal. Adapter output assigns `producer:controller`,
 `provenance:controller-local`, `handoff_id:null` and no native execution fields. This
 records facts in all execution modes without granting execution rights, delegated
 working-set ownership or independent-review status. First local write requires the

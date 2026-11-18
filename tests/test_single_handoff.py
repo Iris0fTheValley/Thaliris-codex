@@ -3588,24 +3588,28 @@ def test_subagent_start_identity_collision_preserves_reservation(tmp_path: Path)
     assert state["identity_collisions"][-1]["pending_handoff_id"] == state["pending_authorized_spawn"]["handoff_id"]
 
 
-def test_only_current_lifecycle_schema_is_accepted(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("offset", "code"), [(-1, "LIFECYCLE_STATE_UNMIGRATABLE"), (1, "LIFECYCLE_STATE_NEWER_THAN_ADAPTER")])
+def test_only_migratable_lifecycle_schemas_are_accepted(tmp_path: Path, offset: int, code: str) -> None:
+    # Versions older than the migration chain, or newer than this code, are
+    # refused by name and left untouched; readable older versions migrate
+    # (tests/test_upgrade_continuity.py).
     root = repo(tmp_path)
     started = _owned_task_start(root, "current lifecycle", None, None)
     path = root / ".context" / "audit" / "lifecycle" / f"{lifecycle_module._task_key(started['task_id'])}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    version = (lifecycle_module.MIN_READABLE_LIFECYCLE_STATE_VERSION - 1 if offset < 0
+               else lifecycle_module.LIFECYCLE_STATE_VERSION + 1)
     path.write_text(json.dumps({
-        "version": lifecycle_module.LIFECYCLE_STATE_VERSION - 1,
+        "version": version,
         "task_id_hash": lifecycle_module._task_key(started["task_id"]),
         "children": [],
         "pending_authorized_spawn": None,
         "sequence": 0,
     }), encoding="utf-8")
-    try:
-        lifecycle_module._load_lifecycle(path, started["task_id"])
-    except ValueError as exc:
-        assert "invalid lifecycle runtime state" in str(exc)
-    else:
-        raise AssertionError("old lifecycle schema was accepted")
+    before = path.read_bytes()
+    with pytest.raises(lifecycle_module.LifecycleVersionUnsupported, match=code):
+        lifecycle_module._load_lifecycle(path, started["task_id"], verify_authority=False)
+    assert path.read_bytes() == before
 
 
 def test_exact_role_keyed_historical_profiles_migrate_without_claiming_edits(tmp_path: Path) -> None:

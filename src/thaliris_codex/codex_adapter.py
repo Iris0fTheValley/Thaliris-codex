@@ -707,13 +707,48 @@ def _agent_profile(name: str, role: str, model: str | None, effort: str | None) 
     ).encode("utf-8")
 
 
-def _agent_profile_state(value: bytes, name: str, execution_constraint: str | None = None) -> str:
+def receipt_owned_profiles(home: Path) -> dict[str, str]:
+    """Profile filename -> SHA-256 the authorized installer recorded writing.
+
+    The install receipt (``thaliris-ownership.json``) is the primary owner
+    record: bytes equal to its entry are Thaliris-generated whatever release
+    rendered them, so a new release needs no historical hash entry. The
+    receipt must bind the installed runtime manifest exactly; an absent,
+    unreadable or mismatched receipt yields no ownership (fail closed to the
+    legacy tables, then to user-owned).
+    """
+    from . import host_maintenance
+    receipt = home / host_maintenance.RECEIPT_NAME
+    manifest = home / runtime_identity.MANIFEST_NAME
+    try:
+        if any(runtime_identity._is_link(path) for path in (home, receipt, manifest)) or not receipt.is_file():
+            return {}
+        installed = manifest.read_bytes() if manifest.is_file() else None
+        record = host_maintenance.validate_ownership(receipt.read_bytes(), installed, {})
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {}
+    return {name.removeprefix("agents/"): sha for name, sha in record.get("owned_bytes", {}).items()
+            if isinstance(name, str) and name.startswith("agents/") and isinstance(sha, str)}
+
+
+def _agent_profile_state(value: bytes, name: str, execution_constraint: str | None = None, *,
+                         home: Path | None = None, owned: dict[str, str] | None = None) -> str:
+    """Classify profile bytes: current render, Thaliris-owned legacy, or user.
+
+    With a Host ``home`` (or its precomputed ``owned`` receipt map), receipt
+    ownership is consulted before the historical tables, which remain only as
+    the fallback for receipt-less legacy installations.
+    """
     profile = roles.agent_profiles(execution_constraint).get(name)
     if profile is None:
         return "user"
     expected = _agent_profile(name.removesuffix(".toml"), profile[2], profile[0], profile[1])
     if value == expected:
         return "current"
+    if owned is None and home is not None:
+        owned = receipt_owned_profiles(home)
+    if owned and owned.get(name) == hashlib.sha256(value).hexdigest():
+        return "legacy"
     hashes = _KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(name, frozenset())
     binding = roles.get_codex_binding(profile[2])
     if binding is not None and binding.profile_filename == name:
@@ -727,25 +762,74 @@ def _host_profile_definition_present(codex_home: Path | None = None) -> str:
     agents = home / "agents"
     if home.is_symlink() or agents.is_symlink() or not agents.is_dir():
         return "NO"
+    owned = receipt_owned_profiles(home)
+
+    def generated(name: str, constraint: str | None) -> bool:
+        raw = (agents / name).read_bytes()
+        # Current render, or the exact bytes the authorized installer wrote
+        # (receipt): a release that changes rendered text keeps its
+        # previously installed definitions recognized.
+        return (_agent_profile_state(raw, name, constraint) == "current"
+                or owned.get(name) == hashlib.sha256(raw).hexdigest())
     try:
         return "YES" if any(all(
             not (agents / name).is_symlink()
             and (agents / name).is_file()
-            and _agent_profile_state((agents / name).read_bytes(), name, constraint) == "current"
+            and generated(name, constraint)
             for name in roles.agent_profiles(constraint)
         ) for constraint in (None, *roles.EXECUTION_CONSTRAINTS)) else "NO"
     except OSError:
         return "UNKNOWN"
 
 
-def execution_profile_snapshot(root: Path, constraint: str | None) -> dict:
-    """Validate the installed binding, without claiming a loaded Host catalog.
+EXECUTION_SEMANTICS_FORMAT = "thaliris-execution-constraint-semantics-v1"
 
-    The external task anchor retains these exact public configuration bytes.
-    A child cannot switch policy through mutable installation/project files.
-    Actual native execution still requires Host rollout evidence.
+
+def _execution_configs(root: Path, home: Path) -> list[tuple[Path, dict]]:
+    """Parse the user and project Codex configs that can affect a role binding."""
+    parsed = []
+    for config in (home / "config.toml", root / ".codex" / "config.toml"):
+        if not config.exists():
+            continue
+        runtime_identity._safe_file(config)
+        try:
+            value = tomllib.loads(config.read_text(encoding="utf-8"))
+        except (UnicodeError, tomllib.TOMLDecodeError):
+            raise ValueError("EXECUTION_PROFILE_CONFIG_UNREADABLE") from None
+        agents_table = value.get("agents", {})
+        # An explicitly configured native role can override file discovery.
+        if isinstance(agents_table, dict) and any(isinstance(entry, dict) for entry in agents_table.values()):
+            raise ValueError("EXECUTION_PROFILE_CONFIG_SHADOW")
+        parsed.append((config, value))
+    return parsed
+
+
+def _config_binding(configs: list[tuple[Path, dict]], key: str) -> object:
+    """Resolve a top-level model setting as Codex layers user then project config."""
+    resolved = None
+    for _, value in configs:
+        profile = value.get("profile")
+        profiles = value.get("profiles")
+        if isinstance(profile, str) and isinstance(profiles, dict) and isinstance(profiles.get(profile), dict) \
+                and key in profiles[profile]:
+            resolved = profiles[profile][key]
+        elif key in value:
+            resolved = value[key]
+    return resolved
+
+
+def execution_profile_semantics(root: Path, constraint: str) -> dict:
+    """Check that the installed configuration satisfies a frozen constraint.
+
+    Computed from the installed bytes on every call; neither the bytes a
+    release rendered nor an anchored snapshot is compared. Regenerated
+    profiles that keep the policy pass; an edit that leaves it is refused.
+    Every ordinary role profile is resolved the way the adapter would route
+    it (constrained tasks disable PreToolUse routing and per-spawn overrides,
+    so the profile file, then config, is the whole routing path). Actual
+    native execution still requires Host rollout evidence.
     """
-    from . import task_authority
+    policy = roles.execution_constraint_policy(constraint)
     home = _codex_home()
     agents = home / "agents"
     if any(runtime_identity._is_link(path) for path in (home, *home.parents, agents)):
@@ -753,25 +837,110 @@ def execution_profile_snapshot(root: Path, constraint: str | None) -> dict:
     project_agents = root / ".codex" / "agents"
     if project_agents.exists() and (project_agents.is_symlink() or any(project_agents.glob("*.toml"))):
         raise ValueError("EXECUTION_PROFILE_PROJECT_SHADOW")
-    snapshot = {"home": str(home), "files": {}}
+    configs = _execution_configs(root, home)
+    bindings: dict[str, dict[str, object]] = {}
+    constrained_names: dict[str, str] = {}
+    for binding in roles.iter_codex_bindings():
+        if not binding.generated_profile or binding.profile_filename is None or binding.native_profile is None:
+            continue
+        target = agents / binding.profile_filename
+        try:
+            runtime_identity._safe_file(target)
+            profile = tomllib.loads(target.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError):
+            raise ValueError("EXECUTION_PROFILE_CONSTRAINT_MISMATCH") from None
+        if profile.get("name") != binding.native_profile:
+            raise ValueError("EXECUTION_PROFILE_CONSTRAINT_MISMATCH")
+        model = profile["model"] if "model" in profile else _config_binding(configs, "model")
+        effort = (profile["model_reasoning_effort"] if "model_reasoning_effort" in profile
+                  else _config_binding(configs, "model_reasoning_effort"))
+        if not policy.allows(model, effort):
+            raise ValueError("EXECUTION_PROFILE_CONSTRAINT_MISMATCH")
+        bindings[binding.role_id] = {"profile": binding.profile_filename, "native_profile": binding.native_profile,
+                                     "model": model, "reasoning_effort": effort}
+        constrained_names[binding.native_profile] = binding.profile_filename
+    # Another Host profile that claims a constrained native name could shadow
+    # the checked file. Unparseable user files cannot define a role and stay
+    # untouched; bounded so a large directory cannot stall every check.
+    for index, other in enumerate(sorted(agents.glob("*.toml"))):
+        if index >= 256:
+            raise ValueError("EXECUTION_PROFILE_UNBOUNDED_DIRECTORY")
+        if other.name in constrained_names.values():
+            continue
+        try:
+            claimed = tomllib.loads(other.read_text(encoding="utf-8")).get("name")
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+            continue
+        if isinstance(claimed, str) and claimed in constrained_names:
+            raise ValueError("EXECUTION_PROFILE_SHADOW")
+    return {"format": EXECUTION_SEMANTICS_FORMAT, "constraint": roles.canonical_execution_constraint(constraint),
+            "status": "SATISFIED", "home": str(home), "model_family": policy.model_family,
+            "efforts": sorted(policy.efforts), "roles": bindings}
+
+
+def execution_profile_snapshot(root: Path, constraint: str | None) -> dict:
+    """Validate the installed binding at task start, without claiming a loaded Host catalog.
+
+    A constrained task is admitted by its policy (``execution_profile_semantics``);
+    an unconstrained start on a constrained-looking installation still needs the
+    exact default render. The returned digests serve only the task-start
+    comparison with what the current Host session observed at its start; the
+    task anchor keeps the semantic summary, never these bytes.
+    """
+    from . import task_authority
+    home = _codex_home()
+    agents = home / "agents"
+    if any(runtime_identity._is_link(path) for path in (home, *home.parents, agents)):
+        raise ValueError("EXECUTION_PROFILE_UNSAFE_PATH")
+    snapshot: dict = {"home": str(home), "files": {}}
+    if constraint is not None:
+        snapshot["semantics"] = execution_profile_semantics(root, constraint)
+    else:
+        project_agents = root / ".codex" / "agents"
+        if project_agents.exists() and (project_agents.is_symlink() or any(project_agents.glob("*.toml"))):
+            raise ValueError("EXECUTION_PROFILE_PROJECT_SHADOW")
+        _execution_configs(root, home)
     for config in (home / "config.toml", root / ".codex" / "config.toml"):
-        if config.exists():
-            runtime_identity._safe_file(config)
-            value = tomllib.loads(config.read_text(encoding="utf-8"))
-            # An explicitly configured native role can override file discovery.
-            if any(isinstance(entry, dict) for entry in value.get("agents", {}).values()):
-                raise ValueError("EXECUTION_PROFILE_CONFIG_SHADOW")
         snapshot["files"][str(config)] = task_authority.digest(config)
-    for name, (model, effort, role) in roles.agent_profiles(constraint).items():
+    for name, (model, effort, role) in roles.agent_profiles(roles.canonical_execution_constraint(constraint) if constraint else None).items():
         target = agents / name
         runtime_identity._safe_file(target)
-        if target.read_bytes() != _agent_profile(name.removesuffix(".toml"), role, model, effort):
+        if constraint is None and target.read_bytes() != _agent_profile(name.removesuffix(".toml"), role, model, effort):
             raise ValueError("EXECUTION_PROFILE_CONSTRAINT_MISMATCH")
         snapshot["files"][str(target)] = task_authority.digest(target)
     return snapshot
 
 
+def _receipt_execution_constraint(home: Path) -> tuple[bool, str | None]:
+    """(known, constraint) from a valid receipt that owns every installed profile."""
+    from . import host_maintenance
+    receipt = home / host_maintenance.RECEIPT_NAME
+    try:
+        if runtime_identity._is_link(receipt) or not receipt.is_file():
+            return False, None
+        recorded = json.loads(receipt.read_bytes()).get("execution_constraint")
+    except (OSError, ValueError, AttributeError):
+        return False, None
+    owned = receipt_owned_profiles(home)
+    if not owned or (recorded is not None and roles.canonical_execution_constraint(recorded) is None):
+        return False, None
+    constraint = roles.canonical_execution_constraint(recorded) if recorded is not None else None
+    agents = home / "agents"
+    for name in roles.agent_profiles(constraint):
+        try:
+            raw = (agents / name).read_bytes()
+        except OSError:
+            return False, None
+        if (_agent_profile_state(raw, name, constraint) != "current"
+                and owned.get(name) != hashlib.sha256(raw).hexdigest()):
+            return False, None
+    return True, constraint
+
+
 def _installed_execution_constraint() -> str | None:
+    known, constraint = _receipt_execution_constraint(_codex_home())
+    if known:
+        return constraint
     agents = _codex_home() / "agents"
     profiles = roles.agent_profiles("luna-only")
     defaults = roles.agent_profiles()
@@ -2200,6 +2369,130 @@ def bootstrap_check(root: Path, *, codex_home: Path | None = None) -> dict[str, 
     return {"ok": True, **facts, "definition_recovery_status": definition_recovery_status, **_controller_bridge(), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI, "executable_adapter_protocol_version": lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION, "session_restart_required": False}
 
 
+HOOK_TRUST_RECORD_NAME = "thaliris-hook-trust.json"
+HOOK_TRUST_RECORD_FORMAT = "thaliris-hook-trust-record-v1"
+_HOOK_TRUST_RECOVERY = ("restart Codex once, or approve the Thaliris hooks when Codex asks, then run the "
+                        "runner as one standalone command")
+
+
+def managed_hook_fingerprint(home: Path) -> str | None:
+    """SHA-256 of the Thaliris handler entries in the Host hooks.json, or None."""
+    path = home / "hooks.json"
+    try:
+        if runtime_identity._is_link(path) or not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return None
+    entries = []
+    for event in lifecycle.HOOK_EVENTS:
+        for entry in hooks.get(event) or []:
+            handlers = entry.get("hooks") if isinstance(entry, dict) else None
+            for handler in handlers if isinstance(handlers, list) else []:
+                if lifecycle._host_hook_command_is_managed(handler, event, home):
+                    entries.append({"event": event, "matcher": entry.get("matcher"), "handler": handler})
+    if not entries:
+        return None
+    return hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def write_hook_trust_record(home: Path, trusted_hashes: dict[str, str]) -> None:
+    """Remember what the installer trusted, so later diagnostics can compare.
+
+    The Host's trust hash is an opaque token; this record pairs the exact
+    token written to config.toml with the Thaliris handler entries it covered.
+    """
+    fingerprint = managed_hook_fingerprint(home)
+    if fingerprint is None or not trusted_hashes:
+        return
+    record = {"format": HOOK_TRUST_RECORD_FORMAT, "handlers_sha256": fingerprint,
+              "trusted_hashes": dict(sorted(trusted_hashes.items()))}
+    core._atomic_write(home / HOOK_TRUST_RECORD_NAME, (json.dumps(record, sort_keys=True) + "\n").encode("utf-8"))
+
+
+def remove_hook_trust_record(home: Path) -> None:
+    path = home / HOOK_TRUST_RECORD_NAME
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(record, dict) and record.get("format") == HOOK_TRUST_RECORD_FORMAT and not runtime_identity._is_link(path):
+        path.unlink()
+
+
+def host_hook_trust_state(codex_home: Path | None = None) -> dict[str, str]:
+    """Whether config.toml hook trust still matches the installed Thaliris hooks.
+
+    A mismatch means the Host may run with the Thaliris hooks disabled (for
+    example after a restart restored different hooks.json bytes): then no
+    PreToolUse hook attaches the Controller identity to runner calls.
+    """
+    home = _codex_home(codex_home)
+    fingerprint = managed_hook_fingerprint(home)
+    if fingerprint is None:
+        return {"status": "NOT_REGISTERED", "matches_installed_hooks": "NO",
+                "reason": "hooks.json has no Thaliris handlers", "recovery": "reinstall with codex-install"}
+    try:
+        record = json.loads((home / HOOK_TRUST_RECORD_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if not isinstance(record, dict) or record.get("format") != HOOK_TRUST_RECORD_FORMAT \
+            or not isinstance(record.get("trusted_hashes"), dict):
+        return {"status": "UNKNOWN", "matches_installed_hooks": "UNKNOWN",
+                "reason": "no trust record from an install by this adapter; the Host trust hash is opaque",
+                "recovery": _HOOK_TRUST_RECOVERY}
+    if record.get("handlers_sha256") != fingerprint:
+        return {"status": "HOOKS_CHANGED_SINCE_TRUST", "matches_installed_hooks": "NO",
+                "reason": "the Thaliris entries in hooks.json differ from the ones whose trust was recorded; "
+                          "the Host may keep them disabled until trust is re-recorded",
+                "recovery": _HOOK_TRUST_RECOVERY}
+    try:
+        config = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        config = {}
+    state = config.get("hooks", {}).get("state", {}) if isinstance(config.get("hooks"), dict) else {}
+    state = state if isinstance(state, dict) else {}
+    for key, trusted in record["trusted_hashes"].items():
+        entry = state.get(key)
+        if not isinstance(entry, dict) or entry.get("trusted_hash") != trusted or entry.get("enabled") is False:
+            return {"status": "TRUST_CHANGED_OR_DISABLED", "matches_installed_hooks": "NO",
+                    "reason": "config.toml no longer carries the recorded trust for every Thaliris hook",
+                    "recovery": _HOOK_TRUST_RECOVERY}
+    return {"status": "MATCH", "matches_installed_hooks": "YES",
+            "reason": "config.toml trust matches the installed Thaliris hooks (disk only; Host load is UNKNOWN)",
+            "recovery": "NONE"}
+
+
+def require_controller_owner(root: Path, task_id: str, controller_session_id_hash: str | None, purpose: str) -> str:
+    """Refuse a Controller-only write with a stable, cause-specific code.
+
+    An absent hash means the Hook never attached the identity (hooks inactive
+    or awaiting trust, or a call shape the Hook cannot recognize); it says
+    nothing about the ledger owner. A present but wrong or fenced hash is a
+    real ownership refusal.
+    """
+    if controller_session_id_hash is None:
+        raise core.ThalirisError(
+            "THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED",
+            f"{purpose}: the Thaliris PreToolUse hook did not attach the Controller identity",
+            recovery=("likely causes: the Thaliris hooks are inactive or awaiting trust after a Codex restart or "
+                      "reinstall, or the call shape is one the hook cannot recognize; "
+                      f"{_HOOK_TRUST_RECOVERY} ({lifecycle.STANDALONE_RUNNER_FORM}). "
+                      "The ledger owner is unchanged; do not re-associate or abandon the task for this"),
+            details={"controller_session_id_hash": "ABSENT", "host_hook_trust": host_hook_trust_state()})
+    owner = lifecycle.active_controller_owner(root, task_id)
+    if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
+        raise core.ThalirisError(
+            "THALIRIS_CONTROLLER_NOT_OWNER", f"{purpose} requires an unfenced owning Controller",
+            recovery="run it from the owning Controller session; a copied or fenced session hash is not current",
+            details={"controller_session_id_hash": "PRESENT",
+                     "owner": "ABSENT" if owner is None else "FENCED" if lifecycle._session_fenced(root, owner) else "DIFFERENT"})
+    return owner
+
+
 def task_evidence_register(root: Path, role: str, base_revision: int, input_file: str,
                            controller_session_id_hash: str | None = None) -> dict:
     """Extend ordinary registration with one Controller-selected next dispatch."""
@@ -2236,9 +2529,7 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
             # The withdrawn selection stays as history; nothing was dispatched.
             if task_authority.check(root) is None:
                 raise ValueError("dispatch selection cancellation requires current task authority")
-            owner = lifecycle.active_controller_owner(root, task_id)
-            if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
-                raise ValueError("dispatch selection cancellation requires the unfenced owning Controller")
+            require_controller_owner(root, task_id, controller_session_id_hash, "dispatch selection cancellation")
             cancelled = ledger.get("next_evidence_dispatch")
             if cancelled is None:
                 raise ValueError("no unconsumed dispatch selection to cancel")
@@ -2259,9 +2550,7 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
             if cancelled is not None:
                 response["cancelled_next_dispatch"] = {key: cancelled[key] for key in ("role", "expected_agent_type", "candidate", "requirement_refs")}
             return response
-        owner = lifecycle.active_controller_owner(root, task_id)
-        if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
-            raise ValueError("dispatch selection requires an unfenced owning Controller")
+        owner = require_controller_owner(root, task_id, controller_session_id_hash, "dispatch selection")
         reservations = lifecycle._pending_reservations(ledger)
         if ledger.get("next_evidence_dispatch") is not None or reservations:
             reserved = bool(reservations)
@@ -2396,11 +2685,9 @@ def _task_observe_locked(root: Path, role: str, handoff_id: str | None, agent_id
     task = core._load_state(root, active=True)
     if actor == "controller" and handoff_id is None:
         anchor = task_authority.check(root)
-        owner = lifecycle.active_controller_owner(root, task["task_id"])
-        if (anchor is None or anchor["task_id"] != task["task_id"] or owner is None
-                or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner)
-                or agent_id_hash is not None):
+        if anchor is None or anchor["task_id"] != task["task_id"] or agent_id_hash is not None:
             raise ValueError("Controller local observation requires the unfenced owning Controller and current task authority")
+        require_controller_owner(root, task["task_id"], controller_session_id_hash, "Controller local observation")
         if {"provenance", "handoff_id", "native_actor", "submitted_by", "producer", "task_id"} & body.keys():
             raise ValueError("Controller local observation provenance is assigned by the adapter; omit handoff and native identity fields")
         revision = body.pop("base_revision", None)
@@ -2565,7 +2852,9 @@ def task_verify(root: Path, role: str, check_id: str, handoff_id: str | None = N
 
 def task_close(root: Path, base_revision: int, *, override_reason: str | None = None) -> dict[str, object]:
     from . import task_authority
-    task_authority.check(core._repo_root(root))
+    # Closing dispatches nothing, so an unsatisfied frozen execution
+    # constraint does not block it; every integrity check still runs.
+    task_authority.check(core._repo_root(root), enforce_execution_constraint=False)
     state = core.task_show(root)["state"]
     task_id = str(state["task_id"])
     diagnostic = lifecycle.native_execution_diagnostic(core._repo_root(root))
@@ -2599,6 +2888,7 @@ def doctor(root: Path) -> dict[str, object]:
     root = core._repo_root(root)
     result = report(root)
     home = _codex_home()
+    result["host_hook_trust"] = host_hook_trust_state(home)
     manifest = home / runtime_identity.MANIFEST_NAME
     runtime_drift = (runtime_identity.diagnose_manifest(manifest.read_bytes())
                      if manifest.is_file() and not manifest.is_symlink()
@@ -2619,12 +2909,13 @@ def doctor(root: Path) -> dict[str, object]:
             raise
         execution_constraint = "incoherent"
     expected_constraint = execution_constraint if execution_constraint in roles.EXECUTION_CONSTRAINTS else None
+    owned_profiles = receipt_owned_profiles(home)
     for name, (model, effort, role) in roles.agent_profiles(expected_constraint).items():
         path = home / "agents" / name
         actual = path.read_bytes() if path.is_file() and not path.is_symlink() else None
         expected = _agent_profile(name.removesuffix(".toml"), role, model, effort)
         profiles.append({"surface": "profile", "path": name,
-                         "ownership": _agent_profile_state(actual, name, expected_constraint) if actual is not None else "missing",
+                         "ownership": _agent_profile_state(actual, name, expected_constraint, owned=owned_profiles) if actual is not None else "missing",
                          "expected": hashlib.sha256(expected).hexdigest(),
                          "actual": hashlib.sha256(actual).hexdigest() if actual is not None else "UNKNOWN"})
     result["drift_evidence"] = {"installed_runtime": runtime_drift, "hook_definitions": definitions,
@@ -2732,10 +3023,10 @@ def doctor(root: Path) -> dict[str, object]:
                       for field in ("model", "reasoningEffort")}
     for path in (root / ".context" / "audit" / "lifecycle").glob("*.json"):
         try:
-            lifecycle_state = json.loads(path.read_text(encoding="utf-8"))
+            lifecycle_state = lifecycle._read_lifecycle_document(path)
         except (OSError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(lifecycle_state, dict) or lifecycle_state.get("version") != lifecycle.LIFECYCLE_STATE_VERSION or lifecycle_state.get("managed_hook_spec_hash") != expected or lifecycle_state.get("adapter_protocol_version") != lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION:
+        if not lifecycle.lifecycle_stamp_compatible(lifecycle_state):
             continue
         for observation in lifecycle_state.get("native_routing_observations", []):
             routing = observation.get("routing") if isinstance(observation, dict) else None
