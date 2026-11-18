@@ -26,9 +26,16 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset:
                  view: str = "compact", since_revision: int | None = None) -> dict[str, object]:
     """Attach the one-shot lifecycle notice at the Codex CLI boundary."""
     anchor = task_authority.read(root)
+    constraint_status = None
     if anchor is not None:
         try:
-            task_authority.check(root)
+            try:
+                task_authority.check(root)
+            except task_authority.ExecutionConstraintUnsatisfied as exc:
+                # Integrity holds; only the installation leaves the constraint.
+                task_authority.check(root, enforce_execution_constraint=False)
+                constraint_status = {"status": "UNSATISFIED", "reason": str(exc)[:256],
+                                     "managed_control": "REFUSED", "available": ["task-abandon", "task-close"]}
             conflict = False
         except (ValueError, OSError):
             conflict = True
@@ -45,6 +52,8 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset:
         out["Task Authority"] = {"status": anchor["status"], "provenance": anchor["provenance"],
                                  "execution_mode": anchor["contract"]["execution_mode"],
                                  "host_actor_assurance": "UNKNOWN", "authority_sha256": task_authority.digest(task_authority.path(root))}
+        if constraint_status is not None:
+            out["Task Authority"]["execution_constraint"] = constraint_status
     if not suppress_protocol_notice:
         notice = lifecycle.consume_protocol_deviation_notice(root, str(out["Task"]["id"]))
         if notice is not None:
@@ -473,7 +482,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command not in {"codex-install", "codex-uninstall", "codex-maintenance-plan", "audit-hook", "version"} and host_transition.pending(codex_adapter._codex_home()):
             raise ValueError("HOST_TRANSITION_PENDING: replay the original standalone maintenance contract")
         if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain", *project_identity.MUTATIONS}:
-            task_authority.check(root)
+            # Close-out dispatches nothing: an unmet frozen execution
+            # constraint does not block it; every integrity check still runs.
+            task_authority.check(root, enforce_execution_constraint=args.command not in {"task-close", "task-dispose-dependency"})
         if args.command == "audit-hook":
             stage = "receive"
             try:

@@ -23,6 +23,12 @@ from . import roles, runtime_identity, host_preflight, task_authority, diagnosti
 HOOK_COMMAND_PREFIX = "thaliris audit-hook"
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop")
 CODEX_ADAPTER_PROTOCOL_VERSION = 9
+# Protocol versions whose ledger and runtime stamps this code interprets. A
+# protocol bump that keeps earlier records interpretable extends this range
+# instead of stranding ACTIVE tasks; only a stamp outside it is a conflict.
+# The managed hook spec hash is provenance only and never decides this.
+MIN_COMPATIBLE_ADAPTER_PROTOCOL_VERSION = 9
+SUPPORTED_ADAPTER_PROTOCOLS = range(MIN_COMPATIBLE_ADAPTER_PROTOCOL_VERSION, CODEX_ADAPTER_PROTOCOL_VERSION + 1)
 # This literal travels in installed command bytes. An old Host registration
 # invoking a newer executable cannot manufacture the current hook ABI.
 MANAGED_HOOK_ABI = "thaliris-hook-abi-10"
@@ -33,6 +39,13 @@ PROJECT_ACTIVATION_MARKER = ".codex\\thaliris.json"
 # Private adapter lifecycle state. This is deliberately separate from Core
 # state/schema and records only bounded native child provenance.
 LIFECYCLE_STATE_VERSION = 12
+# Oldest ledger version this code can migrate forward. Each entry of
+# _LIFECYCLE_MIGRATIONS maps version N to a pure in-memory step producing
+# version N + 1; the next checked write persists the result and refreshes the
+# anchored lifecycle digest through the normal capture path. Only a version
+# newer than LIFECYCLE_STATE_VERSION (written by a newer adapter) is refused.
+MIN_READABLE_LIFECYCLE_STATE_VERSION = 12
+_LIFECYCLE_MIGRATIONS: dict[int, Any] = {}
 MANAGED_HOOKS_DESCRIPTION = "Thaliris managed lifecycle hooks"
 MAX_RAW_RECORDS = 64
 THALIRIS_EXECUTABLE_ENV = "THALIRIS_EXECUTABLE"
@@ -151,6 +164,12 @@ _CHILD_CONTEXT_MUTATIONS = frozenset({
 # write no repository file of the child's choosing, so a readonly role keeps
 # them: an observation, and the result of a Controller-declared check.
 _CHILD_LEDGER_APPENDS = frozenset({"task-observe", "task-verify"})
+# Close-out and read operations that stay available when a frozen execution
+# constraint is unsatisfied or unknown: none dispatches native work under it.
+_CONSTRAINT_EXEMPT_OPERATIONS = frozenset({
+    "task-abandon", "task-close", "task-dispose-dependency", "task-status", "task-show", "task-get", "artifact-get",
+    "controller-instructions", "version", "doctor", "catalog", "document-get",
+})
 _RAW_CORE_IDENTITY_STATE = re.compile(r"(?i)thaliris[-_]?(?:core)?[^|;&]*identity-(?:offer|note|suggest)(?![-\w])")
 _CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]+(?:task-authority|host-capability)|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
@@ -198,6 +217,70 @@ def managed_hook_spec_hash() -> str:
                         handler["command"] = f"{HOOK_COMMAND_PREFIX} {event} --managed-hook-abi {MANAGED_HOOK_ABI}"
     encoded = json.dumps(logical, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def adapter_protocol_compatible(value: object) -> bool:
+    """True when a recorded protocol stamp is one this code interprets."""
+    return type(value) is int and value in SUPPORTED_ADAPTER_PROTOCOLS
+
+
+def lifecycle_stamp_compatible(state: object) -> bool:
+    """Protocol-range compatibility of a ledger/runtime stamp.
+
+    ``managed_hook_spec_hash`` stays in the stamp as provenance: a routine
+    matcher or tool-list edit changes it without changing what the recorded
+    native evidence means, so it never decides compatibility.
+    """
+    return isinstance(state, dict) and adapter_protocol_compatible(state.get("adapter_protocol_version"))
+
+
+class LifecycleVersionUnsupported(ValueError):
+    """A ledger version this code cannot migrate (normally a newer adapter's)."""
+
+
+def migrate_lifecycle_state(value: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a ledger forward in memory; persistence is the next checked write."""
+    version = value.get("version")
+    if type(version) is not int:
+        raise ValueError("invalid lifecycle runtime state")
+    if version > LIFECYCLE_STATE_VERSION:
+        raise LifecycleVersionUnsupported(
+            f"LIFECYCLE_STATE_NEWER_THAN_ADAPTER: lifecycle state version {version} was written by a newer "
+            f"Thaliris adapter; this adapter reads versions {MIN_READABLE_LIFECYCLE_STATE_VERSION} through "
+            f"{LIFECYCLE_STATE_VERSION}. Upgrade the adapter; the ledger is preserved unchanged.")
+    if version < MIN_READABLE_LIFECYCLE_STATE_VERSION:
+        raise LifecycleVersionUnsupported(
+            f"LIFECYCLE_STATE_UNMIGRATABLE: lifecycle state version {version} predates the oldest version "
+            f"this adapter migrates ({MIN_READABLE_LIFECYCLE_STATE_VERSION}); the ledger is preserved unchanged.")
+    while version < LIFECYCLE_STATE_VERSION:
+        step = _LIFECYCLE_MIGRATIONS.get(version)
+        if step is None:
+            raise LifecycleVersionUnsupported(
+                f"LIFECYCLE_STATE_UNMIGRATABLE: no migration from lifecycle state version {version}; "
+                "the ledger is preserved unchanged.")
+        value = step(dict(value))
+        if not isinstance(value, dict):
+            raise ValueError("invalid lifecycle runtime state")
+        version += 1
+        value["version"] = version
+    return value
+
+
+def _raw_lifecycle_version(path: Path) -> object:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "UNKNOWN"
+    version = value.get("version") if isinstance(value, dict) else None
+    return version if type(version) is int else "UNKNOWN"
+
+
+def _read_lifecycle_document(path: Path) -> dict[str, Any]:
+    """Read and migrate a ledger without the authority check (diagnostic readers)."""
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("invalid lifecycle runtime state")
+    return migrate_lifecycle_state(value)
 
 
 def _managed_handler(event: str) -> dict[str, Any]:
@@ -1740,7 +1823,14 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                     if _controller_actor_assurance(payload) == "CHILD":
                         return _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
                 elif _managed_control_dependency(payload, root) and _context_operation(payload) not in {"codex-install", "codex-uninstall", "controller-instructions"}:
-                    task_authority.check(root)
+                    try:
+                        task_authority.check(root)
+                    except task_authority.ExecutionConstraintUnsatisfied as exc:
+                        # Integrity is still checked; only close-out that
+                        # dispatches nothing passes an unmet constraint.
+                        if _context_operation(payload) not in _CONSTRAINT_EXEMPT_OPERATIONS:
+                            return _permission_deny(f"THALIRIS_EXECUTION_CONSTRAINT_UNSATISFIED: {str(exc)[:160]}; restore an installation that satisfies the frozen constraint, or task-abandon / task-close")
+                        task_authority.check(root, enforce_execution_constraint=False)
             except (OSError, ValueError, KeyError, TypeError):
                 return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: preserve the external authority and task evidence; a Controller must resolve this conflict.")
         if event == "PreToolUse" and _offline_administration_requested(payload):
@@ -2557,8 +2647,54 @@ _RESERVATION_FIELDS = frozenset({
     "role", "expected_agent_type", "session_id_hash", "authorized_sequence", "task_name_hash", "handoff_id",
     "task_revision", "producer", "payload_hash", "created_at_ns", "parent_agent_id_hash", "parent_role",
     "parent_turn_id_hash", "depth", "root_handoff_id", "spawn_tool_use_id_hash"})
-_RESERVATION_OPTIONAL_FIELDS = frozenset({"spawn_turn_id_hash", "workstream_id", "parallel_readonly"})
+_RESERVATION_OPTIONAL_FIELDS = frozenset({"spawn_turn_id_hash", "workstream_id", "parallel_readonly", "role_resolution"})
 _RESERVATION_IDENTITY_FIELDS = frozenset({"native_agent_id_hash", "native_identity_source"})
+# A persisted role or native profile that is unknown to this code even after
+# the rename tables. The record stays visible and disposable; it can never
+# bind or authorize a dispatch (fail closed for that record only).
+_ROLE_UNRESOLVED = "UNKNOWN"
+
+
+def _bounded_name(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and len(value) <= 256
+
+
+def _resolve_persisted_role(record: dict[str, Any], role_key: str, type_key: str) -> None:
+    """Map renamed roles/profiles to current ones in memory, or mark UNKNOWN."""
+    record.pop("role_resolution", None)
+    role = roles.canonical_role_id(record.get(role_key))
+    agent_type = roles.canonical_native_profile(record.get(type_key))
+    if role in set(_native_agent_roles().values()) and agent_type is not None:
+        record[role_key], record[type_key] = role, agent_type
+    else:
+        record["role_resolution"] = _ROLE_UNRESOLVED
+
+
+def _resolve_persisted_identities(value: dict[str, Any]) -> None:
+    """Keep state written before a role/profile rename loadable after it."""
+    many = value.get("pending_authorized_spawns")
+    for record in [value.get("pending_authorized_spawn"), *(many if isinstance(many, list) else [])]:
+        if isinstance(record, dict):
+            _resolve_persisted_role(record, "role", "expected_agent_type")
+            if record.get("depth") == 2:
+                parent = roles.canonical_role_id(record.get("parent_role"))
+                if parent is not None:
+                    record["parent_role"] = parent
+                else:
+                    record["role_resolution"] = _ROLE_UNRESOLVED
+    selection = value.get("next_evidence_dispatch")
+    if isinstance(selection, dict):
+        _resolve_persisted_role(selection, "role", "expected_agent_type")
+    for child in value.get("children", []):
+        if not isinstance(child, dict):
+            continue
+        for key in ("role", "parent_role"):
+            current = roles.canonical_role_id(child.get(key))
+            if current is not None:
+                child[key] = current
+        agent_type = roles.canonical_native_profile(child.get("agent_type"))
+        if agent_type is not None:
+            child["agent_type"] = agent_type
 
 
 def _valid_pending_reservation(pending: object) -> bool:
@@ -2568,9 +2704,12 @@ def _valid_pending_reservation(pending: object) -> bool:
     keys = set(pending) - _RESERVATION_IDENTITY_FIELDS
     if not _RESERVATION_FIELDS <= keys or keys - _RESERVATION_FIELDS - _RESERVATION_OPTIONAL_FIELDS:
         return False
+    unresolved = pending.get("role_resolution") == _ROLE_UNRESOLVED
     return not (
-        pending.get("role") not in set(_native_agent_roles().values())
-        or pending.get("expected_agent_type") not in _native_agent_roles()
+        ("role_resolution" in pending and not unresolved)
+        or not unresolved and pending.get("role") not in set(_native_agent_roles().values())
+        or not unresolved and pending.get("expected_agent_type") not in _native_agent_roles()
+        or unresolved and not (_bounded_name(pending.get("role")) and _bounded_name(pending.get("expected_agent_type")))
         or not isinstance(pending.get("session_id_hash"), str)
         or type(pending.get("authorized_sequence")) is not int
         or not isinstance(pending.get("handoff_id"), str)
@@ -2587,7 +2726,9 @@ def _valid_pending_reservation(pending: object) -> bool:
         or ("workstream_id" in pending and (not isinstance(pending["workstream_id"], str)
             or not pending["workstream_id"].strip() or len(pending["workstream_id"]) > 256))
         or ("parallel_readonly" in pending and pending["parallel_readonly"] is not True)
-        or not _valid_parent_metadata(pending)
+        or not (_valid_parent_metadata(pending) if not unresolved
+                else _valid_parent_metadata({**pending, "role": "investigator", "parent_role": "implementer"}
+                                            if pending.get("depth") == 2 and _bounded_name(pending.get("parent_role")) else pending))
     )
 
 
@@ -2598,17 +2739,25 @@ def _load_lifecycle(path: Path, task_id: str, *, verify_authority: bool = True) 
     if not path.is_file():
         return {"version": LIFECYCLE_STATE_VERSION, "task_id_hash": _task_key(task_id), "children": [], "pending_authorized_spawn": None, "pending_authorized_spawns": [], "sequence": 0}
     value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION or value.get("task_id_hash") != _task_key(task_id) or not isinstance(value.get("children"), list):
+    if not isinstance(value, dict):
         raise ValueError("invalid lifecycle runtime state")
+    # Older readable versions migrate forward in memory; only a newer (or
+    # unmigratable) version is refused, with the ledger left untouched.
+    value = migrate_lifecycle_state(value)
+    if value.get("task_id_hash") != _task_key(task_id) or not isinstance(value.get("children"), list):
+        raise ValueError("invalid lifecycle runtime state")
+    _resolve_persisted_identities(value)
     owner = value.get("owner_session_id_hash")
     if owner is not None and (not isinstance(owner, str) or re.fullmatch(r"[0-9a-f]{64}", owner) is None):
         raise ValueError("invalid lifecycle Controller owner")
     selection = value.get("next_evidence_dispatch")
     if selection is not None and (
             not isinstance(selection, dict)
-            or set(selection) - {"role", "expected_agent_type", "candidate", "requirement_refs", "durable_paths", "owner_session_id_hash"}
+            or set(selection) - {"role", "expected_agent_type", "candidate", "requirement_refs", "durable_paths", "owner_session_id_hash", "role_resolution"}
             or not {"role", "expected_agent_type", "candidate", "requirement_refs", "owner_session_id_hash"} <= set(selection)
-            or _native_agent_roles().get(selection.get("expected_agent_type")) != selection.get("role")
+            or (_native_agent_roles().get(selection.get("expected_agent_type")) != selection.get("role")
+                if selection.get("role_resolution") != _ROLE_UNRESOLVED
+                else not (_bounded_name(selection.get("role")) and _bounded_name(selection.get("expected_agent_type"))))
             or selection.get("owner_session_id_hash") != owner):
         raise ValueError("invalid lifecycle evidence selection")
     pending = value.get("pending_authorized_spawn")
@@ -2816,7 +2965,10 @@ def _native_spawn_agent_type(payload: dict[str, Any]) -> str | None:
     """Accept one exact supported native profile, never a first-match alias."""
     tool_input = _delegation_input(payload)
     supplied = [tool_input[key] for key in ("agent_type", "agentType") if key in tool_input]
-    if not supplied or any(not isinstance(value, str) or value not in _native_agent_roles() for value in supplied):
+    # Only the append-only rename table maps a retired profile name; spawn
+    # conveniences such as RoleBinding.native_aliases are never accepted here.
+    supplied = [roles.canonical_native_profile(value) for value in supplied]
+    if not supplied or any(value is None for value in supplied):
         return None
     return supplied[0] if all(value == supplied[0] for value in supplied) else None
 
@@ -3603,7 +3755,8 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
     if (handoff_id is None) == (conflict_id is None):
         raise ValueError("TASK_DEPENDENCY_DISPOSITION_REQUIRED: select exactly one --handoff-id or --conflict-id")
     with task_authority._lock(root):
-        task_authority.check(root)
+        # Disposal dispatches nothing; an unmet constraint does not block it.
+        task_authority.check(root, enforce_execution_constraint=False)
         state = core._load_state(root, active=True)
         if state["task_id"] != task_id:
             raise ValueError("task revision conflict")
@@ -3795,15 +3948,17 @@ def _record_subagent_start(root: Path, payload: dict[str, Any]) -> bool:
         constrained_model_status = None
         observed_model = payload.get("model")
         if authority is not None and authority["contract"].get("execution_constraint") == "luna-only":
-            binding = roles.get_codex_binding(role)
-            expected_model = roles.agent_profiles("luna-only")[binding.profile_filename][0]
+            # The policy, not one release's rendered model id, decides: a
+            # regenerated profile on a newer model of the same family matches.
+            policy = roles.execution_constraint_policy("luna-only")
             constrained_model_status = (
                 "MISSING" if not isinstance(observed_model, str) or not observed_model
-                else "MATCH" if observed_model == expected_model
+                else "MATCH" if policy.allows_model(observed_model)
                 else "MISMATCH"
             )
         authorized = (
             isinstance(pending, dict)
+            and pending.get("role_resolution") is None
             and pending.get("role") == role
             and pending.get("expected_agent_type") == native_agent_type
             and pending.get("session_id_hash") == session_id_hash
@@ -4535,17 +4690,21 @@ def native_execution_diagnostic(root: Path) -> dict[str, Any]:
         add("active-task-unavailable")
         return report()
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = _read_lifecycle_document(path)
     except FileNotFoundError:
         anchor = task_authority.read(root)
         if not (isinstance(anchor, dict) and anchor.get("lifecycle_sha256") == "ABSENT"
                 and not anchor.get("lifecycle_snapshot")):
             add("lifecycle-missing-without-absent-anchor")
         return report()
+    except LifecycleVersionUnsupported as exc:
+        add("lifecycle-version-unsupported", version=_raw_lifecycle_version(path), detail=str(exc)[:512],
+            next_step="upgrade the adapter to one that reads this ledger version; task-abandon archives it unchanged")
+        return report()
     except (OSError, ValueError):
         add("lifecycle-unreadable")
         return report()
-    if (not isinstance(value, dict) or value.get("version") != LIFECYCLE_STATE_VERSION
+    if (not isinstance(value, dict)
             or value.get("task_id_hash") != _task_key(task_id)
             or not isinstance(value.get("children"), list)):
         add("lifecycle-schema-or-task-conflict")
@@ -4593,9 +4752,9 @@ def native_execution_diagnostic(root: Path) -> dict[str, Any]:
                 for disposition in dispositions):
                 add("abandoned-child-unfenced-or-unrecorded", handoff_id=child.get("handoff_id"), native_execution="UNKNOWN")
     children = [child for child in value["children"] if not isinstance(child, dict) or child.get("management_disposition") != "ABANDONED_DEPENDENCY"]
-    if children and (value.get("managed_hook_spec_hash") != managed_hook_spec_hash()
-            or value.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION):
-        add("lifecycle-protocol-conflict")
+    if children and not lifecycle_stamp_compatible(value):
+        add("lifecycle-protocol-conflict", adapter_protocol_version=value.get("adapter_protocol_version"),
+            supported_adapter_protocols=[SUPPORTED_ADAPTER_PROTOCOLS.start, SUPPORTED_ADAPTER_PROTOCOLS.stop - 1])
     identities: set[str] = set()
     for index, child in enumerate(value["children"]):
         if isinstance(child, dict) and child.get("management_disposition") == "ABANDONED_DEPENDENCY":
@@ -4637,7 +4796,7 @@ def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None
     if task_id is None:
         return False
     try:
-        value = json.loads(_lifecycle_path(root, task_id).read_text(encoding="utf-8"))
+        value = _read_lifecycle_document(_lifecycle_path(root, task_id))
     except (OSError, ValueError, json.JSONDecodeError):
         return False
     def selected(record: object) -> bool:
@@ -4654,9 +4813,7 @@ def managed_dependency_pending(root: Path, parent_payload: dict[str, Any] | None
         )
     return (
         isinstance(value, dict)
-        and value.get("version") == LIFECYCLE_STATE_VERSION
-        and value.get("managed_hook_spec_hash") == managed_hook_spec_hash()
-        and value.get("adapter_protocol_version") == CODEX_ADAPTER_PROTOCOL_VERSION
+        and lifecycle_stamp_compatible(value)
         and (
             any(selected(item) for item in _pending_reservations(value))
             or any(
@@ -4798,10 +4955,7 @@ def _managed_wait_guard(root: Path, payload: dict[str, Any]) -> str:
             return ""  # Unrelated ordinary native actor, not a managed grant.
         if any(not isinstance(row, dict) for row in state["children"]):
             raise _ManagedWaitUnknown("unattributed", "native dependency record is malformed")
-        if ((state["children"] or _pending_reservations(state)) and (
-                state.get("managed_hook_spec_hash") != managed_hook_spec_hash()
-                or state.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION
-                )):
+        if (state["children"] or _pending_reservations(state)) and not lifecycle_stamp_compatible(state):
             raise _ManagedWaitUnknown("lifecycle", "native evidence protocol is unresolved")
 
         scoped = []
@@ -6213,8 +6367,7 @@ def new_role_profile_files(root: Path, session_hash: str) -> list[str] | None:
         return None
     if (
         not isinstance(runtime, dict) or runtime.get("session_id_hash") != session_hash
-        or runtime.get("managed_hook_spec_hash") != managed_hook_spec_hash()
-        or runtime.get("adapter_protocol_version") != CODEX_ADAPTER_PROTOCOL_VERSION
+        or not lifecycle_stamp_compatible(runtime)
         or type(runtime.get("session_start_monotonic_ns")) is not int
     ):
         return None
@@ -6312,7 +6465,7 @@ def _issue_task_start_attestation(root: Path, payload: dict[str, Any], managed_h
 
 
 def _issue_task_abandon_attestation(root: Path, payload: dict[str, Any], managed_hook_abi: str | None = None) -> str:
-    if _controller_actor_assurance(payload) != "CONTROLLER" and not (_controller_actor_assurance(payload) == "UNKNOWN" and task_authority.check(root) is not None):
+    if _controller_actor_assurance(payload) != "CONTROLLER" and not (_controller_actor_assurance(payload) == "UNKNOWN" and task_authority.check(root, enforce_execution_constraint=False) is not None):
         return _permission_deny("THALIRIS_CONTROLLER_ACTOR_UNKNOWN")
     session_hash = _session_id_hash(payload)
     if session_hash is None or managed_hook_abi != MANAGED_HOOK_ABI:
@@ -6438,7 +6591,7 @@ def consume_task_start_attestation(root: Path, token: str | None, controller_bri
 
 def consume_task_abandon_attestation(root: Path, token: str | None) -> tuple[str, str]:
     """Consume one hook-issued recovery proof and return session and proof hashes."""
-    if _controller_actor_assurance({}) != "CONTROLLER" and task_authority.check(root) is None:
+    if _controller_actor_assurance({}) != "CONTROLLER" and task_authority.check(root, enforce_execution_constraint=False) is None:
         raise ValueError("THALIRIS_CONTROLLER_ACTOR_UNKNOWN")
     error = ValueError("MANAGED_CURRENT_SESSION_NOT_ATTESTED")
     match = re.fullmatch(r"v1\.([0-9a-f]{64})\.([A-Za-z0-9_-]{16,128})", token or "")
@@ -6656,7 +6809,18 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
         return "" if _controller_actor_assurance(payload) == "UNKNOWN" else _permission_deny("THALIRIS_CHILD_AUTHORITY_MUTATION")
 
     try:
-        anchor = task_authority.check(root)
+        try:
+            anchor = task_authority.check(root)
+        except task_authority.ExecutionConstraintUnsatisfied as exc:
+            # The installation no longer meets the frozen constraint (or the
+            # constraint is unknown to this code). Managed control stays
+            # refused; close-out that dispatches nothing remains available.
+            if operation not in _CONSTRAINT_EXEMPT_OPERATIONS:
+                # Any native delegation would run outside the frozen policy.
+                if _managed_control_dependency(payload, root) or normalized in _DELEGATION_TOOL_NAMES:
+                    return _permission_deny(f"THALIRIS_EXECUTION_CONSTRAINT_UNSATISFIED: {str(exc)[:160]}; restore an installation that satisfies the frozen constraint, or task-abandon / task-close")
+                return ""
+            anchor = task_authority.check(root, enforce_execution_constraint=False)
     except (OSError, ValueError, KeyError, TypeError):
         if _managed_control_dependency(payload, root):
             return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: selected task evidence changed; preserve it and resolve before managed control")

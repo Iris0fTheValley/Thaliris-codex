@@ -368,6 +368,22 @@ native role availability, native loaded instructions and managed scheduling
 readiness remain separate observations. Disk profile equality and 7/7 trusted
 enabled Host handlers do not prove native catalog or current-session activation.
 
+### Upgrades and ACTIVE tasks
+
+Installing a newer adapter, regenerating role profiles or changing model routing keeps
+ACTIVE tasks usable; no task needs its start-time hashes, manifests or `lifecycle.py`/
+`roles.py` bytes to stay identical. Older lifecycle ledgers migrate forward, stamps are
+compatible across the supported adapter protocol range, a constrained task is judged by
+its policy on the installed configuration (regenerated Luna profiles and unrelated
+`config.toml` edits pass; switching a role to a non-Luna model is refused), renamed
+roles and constraints resolve through append-only alias tables, and the install receipt
+recognizes previously written Thaliris profile bytes even after the rendered text
+changes. Refusals are limited to data newer than the installed code (upgrade the
+adapter), a protocol outside the supported range, an unknown role or constraint, and a
+real constraint violation; `task-abandon` and `task-close` remain available. The
+installed runtime manifest, preflight and Hook pins are still verified exactly, and a
+Host still needs a restart to load new hook or profile bytes.
+
 ## 中文说明
 
 Host 安装、升级、卸载使用独立的维护意图文件，绑定真实用户要求、准确操作、
@@ -506,6 +522,19 @@ Host generation rollback。写入器在原子替换前重读 bytes，但仍无�
 TOML 片段完整时会恢复之前迁移的 `enabled` 布尔值。用户修改和后来发生的结构变化会被
 保留并报告。安装与卸载 contract 仍须满足上文的可信 runtime、candidate、executor、
 当前安装身份及明确人类意图要求。
+
+### 升级与进行中的任务
+
+升级 adapter、重新生成角色 profile 或调整模型路由后，ACTIVE 任务继续可用，不再要求
+哈希、安装清单或 `lifecycle.py`/`roles.py` 与任务开始时完全一致。旧版本 lifecycle ledger
+会向前迁移；stamp 只要协议版本在支持范围内即兼容（hook matcher 或工具列表的修改只是
+来源记录）；受约束任务按策略检查已安装配置（仍为 Luna 的重新生成 profile、无关的
+`config.toml` 修改都可通过，把角色改成非 Luna 模型则被拒绝）；改名的角色与约束通过只增
+不删的别名表解析；安装 receipt 在渲染文本变化后仍识别此前写入的 Thaliris profile。
+只有比当前代码更新的数据（请升级 adapter）、超出支持范围的协议、未知角色或约束，以及
+真实违反约束的情况会被拒绝，且 `task-abandon` 与 `task-close` 仍可使用。已安装 runtime
+manifest、preflight 与 Hook 固定仍按原样精确校验；新的 hook 或 profile 字节仍需重启 Host
+才会加载。
 
 ### Host 全局模型目录的保留与恢复
 
