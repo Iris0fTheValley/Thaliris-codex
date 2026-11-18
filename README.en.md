@@ -112,12 +112,12 @@ Capabilities each role needs, and recommended models:
 
 | Role | Capabilities needed | GPT (Codex) |
 | --- | --- | --- |
-| Controller | All six above; integrates the original objective, acceptance criteria and evidence to decide product acceptance | gpt-6.1-sol (high or above); gpt-6-astra when the user explicitly selects it |
+| Controller | All six above; integrates the original objective, acceptance criteria and evidence to decide product acceptance | gpt-6.2-sol (high or above); gpt-6.2-astra when the user explicitly selects it |
 | Investigator | Gathers facts and sources broadly and accurately within the selected scope, stating covered and uncovered scope | gpt-6-luna (max) |
 | Implementer | Implements, verifies and repairs ordinary defects within an accepted direction until deterministic convergence | gpt-6-luna (max) |
-| Focused Implementer | Sustained reasoning over coupled invariants, absorbing runtime feedback until semantic convergence | gpt-6.1-sol (high); gpt-6-astra when the user explicitly selects it |
-| Reviewer | Independently challenges a converged candidate and seeks cross-boundary counterevidence without adopting the author's framing | gpt-6.1-sol (high) |
-| Reasoning Specialist | Challenges the problem framing, causal model and decision basis | gpt-6.1-sol (high); gpt-6-astra when the user explicitly selects it |
+| Focused Implementer | Sustained reasoning over coupled invariants, absorbing runtime feedback until semantic convergence | gpt-6.2-sol (high); gpt-6.2-astra when the user explicitly selects it |
+| Reviewer | Independently challenges a converged candidate and seeks cross-boundary counterevidence without adopting the author's framing | gpt-6.2-sol (high) |
+| Reasoning Specialist | Challenges the problem framing, causal model and decision basis | gpt-6.2-sol (high); gpt-6.2-astra when the user explicitly selects it |
 | Curator | Maintains selected durable knowledge and INDEX entries precisely from supplied material | gpt-6-luna (max) |
 | Verifier (Codex compatibility role) | Read-only check of acceptance evidence, modification boundaries and synchronization | gpt-6-luna (max) |
 
@@ -217,7 +217,7 @@ Default model and effort routing for ordinary roles is shown below. During manag
 | Role | Default model | Default effort |
 | --- | --- | --- |
 | Investigator, Implementer, Curator, Verifier | gpt-6-luna | max |
-| Reasoning Specialist, Focused Implementer, Reviewer | gpt-6.1-sol | high |
+| Reasoning Specialist, Focused Implementer, Reviewer | gpt-6.2-sol | high |
 
 A role is separate from its execution model. A Fresh Child is a new native role session created with a selective Handoff: Codex V2 uses fork_turns=none and V1 uses fork_context=false. It receives only the facts, constraints, sources and acceptance needed for its work, not the parent's conversation history. Relevant originals can still be reopened, and children stay within their selected scope rather than making architecture or product-acceptance decisions for the Controller.
 

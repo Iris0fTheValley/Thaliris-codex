@@ -15,6 +15,10 @@ def hypothetical_controller_contract(monkeypatch):
     original = lifecycle._controller_actor_assurance
     monkeypatch.setattr(lifecycle, "_controller_actor_assurance", lambda payload:
                         "CONTROLLER" if original(payload) == "UNKNOWN" else original(payload))
+    # The read-only catalog freshness report would otherwise describe whichever
+    # Host this test runs on; it is covered by tests/test_catalog_refresh.py.
+    from thaliris_codex import catalog_refresh
+    monkeypatch.setattr(catalog_refresh, "state", lambda _home: {"ok": True, "status": catalog_refresh.NOT_MANAGED})
 
 
 def test_zero_state_rejects_obsolete_executable_protocol_signal(monkeypatch, tmp_path: Path):

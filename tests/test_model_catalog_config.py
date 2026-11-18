@@ -767,7 +767,7 @@ def test_reuse_contract_changes_require_real_export(tmp_path, monkeypatch, chang
             raise OSError("source not available")
         monkeypatch.setattr(catalog.inspect, "getsource", unavailable)
     calls = []
-    def export(home, *, source):
+    def export(home, *, source, **_kwargs):
         calls.append(source)
         raise ValueError("offline")
     monkeypatch.setattr(catalog, "export_upstream", export)

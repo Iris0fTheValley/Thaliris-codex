@@ -181,9 +181,9 @@ def recover(home: Path, identity: str):
 
 
 def _session_start_recovery(home, identity, payload):
-    """Deny uncertain restoration without blocking the native receiver.
+    """Deny uncertain restoration or refresh without blocking the native receiver.
 
-    These checks select recovery only. Their failure must not skip ordinary
+    These checks select recovery and the automatic catalog refresh only. Their failure must not skip ordinary
     project discovery or replace the original SessionStart result.
     """
     from . import lifecycle, task_authority
@@ -199,11 +199,20 @@ def _session_start_recovery(home, identity, payload):
                 lifecycle._session_fenced(actor_root, session_hash) or
                 lifecycle._abandoned_child_fenced(actor_root, payload)):
             denied = True
-        return ({"ok": True, "changed": False, "status": "ACTOR_RECOVERY_DENIED"}
-                if denied else recover(home, identity))
     except (OSError, ValueError, RuntimeError, TypeError, KeyError) as exc:
         return {"ok": False, "changed": False, "status": "CATALOG_RECOVERY_FAILED",
-                "assurance": "UNKNOWN", "diagnostic": str(exc)}
+                "assurance": "UNKNOWN", "diagnostic": str(exc),
+                "model_catalog_refresh": {"ok": False, "changed": False, "status": "ACTOR_REFRESH_DENIED"}}
+    if denied:
+        return {"ok": True, "changed": False, "status": "ACTOR_RECOVERY_DENIED",
+                "model_catalog_refresh": {"ok": True, "changed": False, "status": "ACTOR_REFRESH_DENIED"}}
+    result = recover(home, identity)
+    # The same actor gate selects the automatic catalog refresh. It writes only
+    # the receipt-owned catalog and its receipt entry, and degrades to a
+    # MODEL_CATALOG_STALE diagnostic instead of affecting the native result.
+    from . import catalog_refresh
+    result["model_catalog_refresh"] = catalog_refresh.refresh(home, identity, automatic=True)
+    return result
 
 
 def main():

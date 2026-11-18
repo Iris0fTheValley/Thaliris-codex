@@ -72,9 +72,9 @@ def test_registry_is_authoritative_for_native_profiles_and_mechanical_facts() ->
         "investigator": ("gpt-6-luna", "max"),
         "implementer": ("gpt-6-luna", "max"),
         "curator": ("gpt-6-luna", "max"),
-        "reviewer": ("gpt-6.1-sol", "high"),
-        "focused-implementer": ("gpt-6.1-sol", "high"),
-        "reasoning-specialist": ("gpt-6.1-sol", "high"),
+        "reviewer": ("gpt-6.2-sol", "high"),
+        "focused-implementer": ("gpt-6.2-sol", "high"),
+        "reasoning-specialist": ("gpt-6.2-sol", "high"),
         "verifier": ("gpt-6-luna", "max"),
     }
     assert not set(roles.ROLE_MODEL_ROUTING_DEFAULTS) & {"controller"}
@@ -90,9 +90,9 @@ def test_registry_is_authoritative_for_native_profiles_and_mechanical_facts() ->
     }
     for definition in native:
         if definition.astra_medium_native_profile:
-            expected_profiles[definition.astra_medium_native_profile + ".toml"] = ("gpt-6-astra", "medium", definition.id)
+            expected_profiles[definition.astra_medium_native_profile + ".toml"] = ("gpt-6.2-astra", "medium", definition.id)
         if definition.exceptional_native_profile:
-            expected_profiles[definition.exceptional_native_profile + ".toml"] = ("gpt-6-astra", "xhigh", definition.id)
+            expected_profiles[definition.exceptional_native_profile + ".toml"] = ("gpt-6.2-astra", "xhigh", definition.id)
     assert roles.agent_profiles() == expected_profiles
     assert roles.notice_roles() == {"curator", "reasoning-specialist", "verifier", "reviewer"}
 
@@ -118,11 +118,11 @@ def test_ordinary_profiles_inherit_selection_and_static_astra_profiles_stay_fixe
     for role in ("focused-implementer", "reasoning-specialist"):
         for effort, suffix in (("medium", "astra-medium"), ("xhigh", "xhigh")):
             name = f"thaliris-{role}-{suffix}.toml"
-            assert roles.agent_profiles()[name] == ("gpt-6-astra", effort, role)
+            assert roles.agent_profiles()[name] == ("gpt-6.2-astra", effort, role)
             assert codex_adapter._KNOWN_GENERATED_AGENT_PROFILE_HASHES.get(name, frozenset())
     for name, (model, effort, role) in roles.agent_profiles("luna-only").items():
         value = tomllib.loads(codex_adapter._agent_profile(name[:-5], role, model, effort).decode())
-        expected = ("gpt-6-astra", effort) if "astra-medium" in name or name.endswith("-xhigh.toml") else ("gpt-6-luna", "xhigh")
+        expected = ("gpt-6.2-astra", effort) if "astra-medium" in name or name.endswith("-xhigh.toml") else ("gpt-6-luna", "xhigh")
         assert (value["model"], value["model_reasoning_effort"]) == expected
 
 

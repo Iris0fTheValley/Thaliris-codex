@@ -640,7 +640,7 @@ def test_top_level_fallback_explicit_luna_max_pair_is_authorized(active, role):
 def test_controller_selects_static_exceptional_profile(active, role):
     profile = f"thaliris-{role}-xhigh"
     assert roles.resolve_native_profile(profile).id == role
-    assert roles.agent_profiles()[profile + ".toml"] == ("gpt-6-astra", "xhigh", role)
+    assert roles.agent_profiles()[profile + ".toml"] == ("gpt-6.2-astra", "xhigh", role)
     request = spawn(role=role, use_route_defaults=False)
     request["tool_input"]["agent_type"] = profile
     assert lifecycle.handle_hook(active, "PreToolUse", request) == ""

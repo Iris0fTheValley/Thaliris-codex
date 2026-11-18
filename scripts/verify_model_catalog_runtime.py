@@ -757,7 +757,7 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
             })
             root_thread = _turn_params(started, name="Controller")
             try:
-                server.start_turn(root_thread["threadId"], ROOT_PROMPT, model="gpt-6.1-sol", effort="high")
+                server.start_turn(root_thread["threadId"], ROOT_PROMPT, model="gpt-6.2-sol", effort="high")
             except VerificationError as exc:
                 if not mock.snapshot() and "connection failure" in str(exc).lower():
                     provider = started.get("modelProvider")
@@ -767,7 +767,7 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
                         "mock_base_url": loaded_base_url,
                         "wire_api": (loaded_provider or {}).get("wireApi", (loaded_provider or {}).get("wire_api")),
                         "catalog_loaded": isinstance(loaded_catalog, str) and Path(loaded_catalog).resolve() == catalog_path.resolve(),
-                        "turn_selection": {"model": "gpt-6.1-sol", "effort": "high"},
+                        "turn_selection": {"model": "gpt-6.2-sol", "effort": "high"},
                         "expected_responses_path": "/responses",
                         "captured_json_requests": len(mock.snapshot()),
                     }
@@ -792,12 +792,12 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
             root_request = _select_request(first_requests, ROOT_PROMPT, exclude=(ROOT_IMPLEMENTER_CALL,))
             root_body = root_request.body
             root_developers = _developer_texts(root_body)
-            _expect(root_body.get("model") == "gpt-6.1-sol", "Controller model-switch request used the wrong selected model")
+            _expect(root_body.get("model") == "gpt-6.2-sol", "Controller model-switch request used the wrong selected model")
             _expect((root_body.get("reasoning") or {}).get("effort") == "high", "Controller model-switch request lost the selected effort")
             _expect(any(ROOT_DEVELOPER_SENTINEL in text for text in root_developers), "Controller developer instructions were not present in the actual Responses request")
             _expect(AGENTS_SENTINEL in _request_text(root_body), "project AGENTS.md was absent from the actual Controller request")
             _expect(any("THALIRIS CONTROLLER GUIDANCE END sha256=" in text and "## Thaliris owning Controller" in text for text in root_developers), "rendered bootstrap guidance was not present in the actual Controller request")
-            target_template = patched_catalog["models"][[m.get("slug") for m in patched_catalog["models"]].index("gpt-6.1-sol")]["model_messages"]["instructions_template"]
+            target_template = patched_catalog["models"][[m.get("slug") for m in patched_catalog["models"]].index("gpt-6.2-sol")]["model_messages"]["instructions_template"]
             switched, matched_template_lines, delivery_form = _catalog_instruction_text(root_developers, target_template)
             _expect((model_catalog_config.TARGET in switched) is not patched_catalog_enabled, "selected instruction template did not reflect the baseline or patched catalog")
 
@@ -835,7 +835,7 @@ def run_verification(*, patched_catalog_enabled: bool = True) -> dict[str, Any]:
             # Fork a persisted thread with an explicit developer override.
             # The installed runtime cannot fork a thread with no rollout yet.
             override_source = server.request("thread/start", {
-                "model": "gpt-6.1-sol",
+                "model": "gpt-6.2-sol",
                 "modelProvider": "mock_provider",
                 "cwd": str(project),
                 "sandbox": "read-only",

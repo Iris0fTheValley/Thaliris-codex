@@ -698,7 +698,7 @@ class ExecutionConstraintPolicy:
     efforts: frozenset[str]
 
     def allows_model(self, model: object) -> bool:
-        return isinstance(model, str) and re.fullmatch(r"gpt-\d+(?:\.\d+)*-" + re.escape(self.model_family), model) is not None
+        return is_model_family(model, self.model_family)
 
     def allows(self, model: object, effort: object) -> bool:
         return self.allows_model(model) and isinstance(effort, str) and effort in self.efforts
@@ -707,6 +707,30 @@ class ExecutionConstraintPolicy:
 EXECUTION_CONSTRAINT_POLICIES: dict[str, ExecutionConstraintPolicy] = {
     "luna-only": ExecutionConstraintPolicy(model_family="luna", efforts=frozenset({"high", "xhigh", "max"})),
 }
+
+
+# One model family name in the upstream ``gpt-<major>[.<minor>]-<family>`` slug
+# shape. Family tests compare meaning, never one release's literal slug.
+_MODEL_FAMILY_SLUG = r"gpt-\d+(?:\.\d+)*-"
+
+
+def is_model_family(model: object, family: str) -> bool:
+    return isinstance(model, str) and re.fullmatch(_MODEL_FAMILY_SLUG + re.escape(family), model) is not None
+
+
+def is_astra_model(model: object) -> bool:
+    """Any Astra release (gpt-6-astra, gpt-6.2-astra, gpt-7-astra, ...).
+
+    Astra remains an explicit, current-task human opt-in that only the
+    Controller may select; a new Astra release cannot bypass that by slug.
+    """
+    return is_model_family(model, "astra")
+
+
+# Default Astra release behind the Controller-only exceptional profiles.
+ASTRA_DEFAULT_MODEL = "gpt-6.2-astra"
+# Default sol release for the high-reasoning roles and the frontend minimum.
+SOL_DEFAULT_MODEL = "gpt-6.2-sol"
 
 
 def execution_constraint_policy(constraint: str) -> ExecutionConstraintPolicy:
@@ -724,9 +748,9 @@ ROLE_MODEL_ROUTING_DEFAULTS: dict[str, tuple[str, str]] = {
     "investigator": ("gpt-6-luna", "max"),
     "implementer": ("gpt-6-luna", "max"),
     "curator": ("gpt-6-luna", "max"),
-    "reviewer": ("gpt-6.1-sol", "high"),
-    "focused-implementer": ("gpt-6.1-sol", "high"),
-    "reasoning-specialist": ("gpt-6.1-sol", "high"),
+    "reviewer": (SOL_DEFAULT_MODEL, "high"),
+    "focused-implementer": (SOL_DEFAULT_MODEL, "high"),
+    "reasoning-specialist": (SOL_DEFAULT_MODEL, "high"),
     "verifier": ("gpt-6-luna", "max"),
 }
 
@@ -747,9 +771,9 @@ def agent_profiles(execution_constraint: str | None = None) -> dict[str, tuple[s
         values = {name: ("gpt-6-luna", "xhigh", role) for name, (_, _, role) in values.items()}
     for binding in iter_codex_bindings():
         if binding.generated_profile and binding.astra_medium_native_profile:
-            values[f"{binding.astra_medium_native_profile}.toml"] = ("gpt-6-astra", "medium", binding.role_id)
+            values[f"{binding.astra_medium_native_profile}.toml"] = (ASTRA_DEFAULT_MODEL, "medium", binding.role_id)
         if binding.generated_profile and binding.exceptional_native_profile:
-            values[f"{binding.exceptional_native_profile}.toml"] = ("gpt-6-astra", "xhigh", binding.role_id)
+            values[f"{binding.exceptional_native_profile}.toml"] = (ASTRA_DEFAULT_MODEL, "xhigh", binding.role_id)
     return values
 
 
@@ -810,7 +834,7 @@ def render_registry_document() -> bytes:
     lines.extend(["", "Controller-only exceptional native profiles (same stable role IDs; defaults above remain unchanged):", ""])
     for binding in iter_codex_bindings():
         if binding.astra_medium_native_profile:
-            lines.append(f"- `{binding.astra_medium_native_profile}` → `{binding.role_id}`: `gpt-6-astra`, `medium`; `{binding.astra_medium_native_profile}.toml`.")
+            lines.append(f"- `{binding.astra_medium_native_profile}` → `{binding.role_id}`: `{ASTRA_DEFAULT_MODEL}`, `medium`; `{binding.astra_medium_native_profile}.toml`.")
         if binding.exceptional_native_profile:
-            lines.append(f"- `{binding.exceptional_native_profile}` → `{binding.role_id}`: `gpt-6-astra`, `xhigh`; `{binding.exceptional_native_profile}.toml`.")
+            lines.append(f"- `{binding.exceptional_native_profile}` → `{binding.role_id}`: `{ASTRA_DEFAULT_MODEL}`, `xhigh`; `{binding.exceptional_native_profile}.toml`.")
     return ("\n".join(lines) + "\n").encode("utf-8")

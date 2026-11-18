@@ -445,6 +445,13 @@ def bootstrap(
                 "recovery_action": "Replay the original standalone maintenance contract",
                 **guidance}
     result = _bootstrap(root, hook_attestation)
+    if result.get("status") != "BOOTSTRAP_UNAVAILABLE":
+        # Read-only and non-blocking: SessionStart already attempted the
+        # automatic refresh; report only a catalog that is still stale.
+        from . import catalog_refresh
+        catalog_state = catalog_refresh.state(lifecycle._host_home_path())
+        if catalog_state.get("status") == catalog_refresh.STALE:
+            result["model_catalog"] = catalog_state
     result.update(guidance)
     # Controller-only navigation hint; present only when a project identity
     # exists. It is never delivered to children.

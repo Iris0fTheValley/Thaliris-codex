@@ -195,6 +195,13 @@ An explicit codex-install contract may select exact obsolete global instruction
 spans and complete before/after hashes through instruction_migrations; default
 installation preserves unmarked user tails. Use the existing maintenance
 generation and ownership checks, never a second install into user home.
+The receipt-owned model catalog follows the Codex CLI. When the CLI changes, the
+owning Controller's SessionStart refreshes only that catalog file and its receipt entry
+from the CLI (the recorded bundled or online source, patched exactly as installed);
+children, readonly and fenced actors never trigger it. If that cannot be done safely,
+nothing is written and codex-bootstrap reports `model_catalog` with `MODEL_CATALOG_STALE`
+and the exact `codex-model-catalog-refresh` command for the Controller. Ordinary work is
+not blocked; a running session may keep its loaded catalog until a new session.
 In user-facing status describe work and concrete blockers plainly; keep receipts,
 hashes, attestations and lifecycle details out of that prose and report blocked work honestly.
 
@@ -246,11 +253,11 @@ Choose the minimum necessary fresh role for the Workstream's work shape:
 | --- | --- | --- |
 | Investigator | Investigator | gpt-6-luna/max |
 | Curator | Curator | gpt-6-luna/max |
-| Reasoning Specialist | Reasoning specialist | gpt-6.1-sol/high |
+| Reasoning Specialist | Reasoning specialist | gpt-6.2-sol/high |
 | Implementer | Implementer | gpt-6-luna/max |
-| Focused Implementer | Focused implementer | gpt-6.1-sol/high |
+| Focused Implementer | Focused implementer | gpt-6.2-sol/high |
 | Verifier | Verifier | gpt-6-luna/max |
-| Reviewer | Reviewer | gpt-6.1-sol/high |
+| Reviewer | Reviewer | gpt-6.2-sol/high |
 
 For every Thaliris auxiliary task, including preparation and discovery before the
 main Workstream, select an exact registered Thaliris `agent_type`. Generic native
@@ -296,7 +303,7 @@ those same semantic roles. Stable direction and deterministic convergence use
 ordinary Implementer; coupled invariants requiring sustained reasoning use Focused
 Implementer. Choose one profile per Workstream, not a ladder or size threshold.
 Substantive frontend work uses a stronger minimum: select a fresh, isolated Focused
-Implementer with at least `gpt-6.1-sol` at `high`. This includes new UI or layout,
+Implementer with at least `gpt-6.2-sol` at `high`. This includes new UI or layout,
 component architecture, responsive behavior, interaction, animation, creative SVG
 work and nontrivial visual design, even when only a few files or little code change.
 Only genuinely trivial, fully specified text/color edits or equivalent mechanical
@@ -309,9 +316,10 @@ decision instead of silently downgrading. Generated role profiles remain model-f
 Capacity pressure may defer or resequence work; it never lowers this minimum, bypasses
 Astra opt-in or changes frozen constraints.
 Any Astra selection requires current-task user authorization before spawn. Static
-Astra medium/xhigh compatibility profiles retain their fixed bindings; do not use
-them to bypass that authorization. Ordinary profiles allow native model/effort
-selection within the selected task constraints. Known children cannot choose Astra
+Astra medium/xhigh compatibility profiles retain their fixed bindings (`gpt-6.2-astra`);
+do not use them to bypass that authorization. Ordinary profiles allow native model/effort
+selection within the selected task constraints. Known children cannot choose any
+Astra-family model (`gpt-6-astra`, `gpt-6.2-astra` or a later release)
 for their own delegation. This restriction does not mechanically prove current-task
 human opt-in; preserve that decision in the selected handoff.
 The dedicated luna-only installation requires `execution_constraint: luna-only`

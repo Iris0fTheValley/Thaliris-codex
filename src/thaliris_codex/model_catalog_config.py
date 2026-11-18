@@ -48,6 +48,7 @@ _NEXT = (
 _MODEL_PROFILES = {
     "online": {
         "matched": frozenset({
+            "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra",
             "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
             "gpt-reserve", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
             "codex-auto-review",
@@ -56,6 +57,7 @@ _MODEL_PROFILES = {
     },
     "bundled": {
         "matched": frozenset({
+            "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra",
             "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna",
             "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
             "gpt-daybreak-blue-latest", "gpt-daybreak-red-latest",
@@ -65,6 +67,9 @@ _MODEL_PROFILES = {
     },
 }
 _KNOWN_TARGET_CONTEXT = {
+    "gpt-6.2-sol": (_MULTILINE_PREVIOUS, _NEXT),
+    "gpt-6.2-astra": (_MULTILINE_PREVIOUS, _NEXT),
+    "gpt-6.1-terra": (_MULTILINE_PREVIOUS, _NEXT),
     "gpt-6-astra": (_MULTILINE_PREVIOUS, _NEXT),
     "gpt-6.1-sol": (_MULTILINE_PREVIOUS, _NEXT),
     "gpt-6-sol": (_MULTILINE_PREVIOUS, _NEXT),
@@ -304,7 +309,7 @@ def read(home: Path) -> tuple[bytes, dict]:
     return raw, tomllib.loads(raw.decode("utf-8"))
 
 
-def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]:
+def export_upstream(home: Path, *, source: str = "online", timeout: float = 90) -> tuple[bytes, dict]:
     """Export from the CLI, never this installation's patched catalog.
 
     Some CLI releases swallow refresh errors. A newly created isolated cache,
@@ -364,7 +369,7 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
         started = datetime.now(timezone.utc)
         args = [executable, "debug", "models"] + (["--bundled"] if source == "bundled" else [])
         try:
-            result = subprocess.run(args, cwd=isolated, env=env, capture_output=True, timeout=90, check=False)
+            result = subprocess.run(args, cwd=isolated, env=env, capture_output=True, timeout=timeout, check=False)
         except (OSError, subprocess.SubprocessError) as exc:
             raise ValueError("UPSTREAM_EXPORT_FAILED") from exc
         if result.returncode != 0:
@@ -408,7 +413,37 @@ def export_upstream(home: Path, *, source: str = "online") -> tuple[bytes, dict]
                                "online_freshness": "VERIFIED" if source == "online" else "UNKNOWN"}
 
 
-def plan_install(home: Path, ownership: dict, *, source: str = "online", refresh: bool = False) -> tuple[dict | None, dict, bytes | None]:
+def _exported_record(home: Path, record: dict | None, source: str, raw: bytes, *,
+                     timeout: float = 90) -> tuple[dict | None, dict | None, bytes | None, dict | None, dict | None]:
+    """Export from the current CLI, patch it, and build the owned record it would establish.
+
+    Returns ``(record, failure, patched, compatibility, evidence)``; exactly
+    one of ``record`` and ``failure`` is set. Nothing is written.
+    """
+    try:
+        upstream, evidence = export_upstream(home, source=source, timeout=timeout)
+        if evidence.get("kind") != source:
+            raise ValueError("model catalog export source differs from selected maintenance source")
+        cli_version = evidence.get("cli_version")
+        patched, compatibility = patch_catalog(upstream, cli_version=cli_version, source=source)
+    except (OSError, ValueError, RuntimeError) as exc:
+        result_status = "VERSION_SUPPORT_UNKNOWN" if str(exc) == "VERSION_SUPPORT_UNKNOWN" else "UPSTREAM_REFRESH_FAILED_PRESERVED"
+        return None, status(result_status, error=str(exc)), None, None, None
+    if patched is None:
+        return None, status("TEMPLATE_INCOMPATIBILITY_PRESERVED", template_compatibility=compatibility), None, None, None
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    updated = {"path": str((home / "config.toml").absolute()), "catalog_path": str((home / NAME).absolute()),
+               "prior": {"present": False}, "fragment": record["fragment"] if record else fragment(home, newline),
+               "catalog_sha256": digest(patched), "source": evidence | {"upstream_sha256": digest(upstream)}}
+    proof = reuse_contract(source, evidence)
+    if proof is not None:
+        updated["reuse_contract"] = proof
+    validate(updated, home)
+    return updated, None, patched, compatibility, evidence
+
+
+def plan_install(home: Path, ownership: dict, *, source: str = "online", refresh: bool = False,
+                 export_timeout: float = 90) -> tuple[dict | None, dict, bytes | None]:
     original_record = ownership.get(RECORD_KEY)
     validate(original_record, home)
     record = original_record
@@ -466,25 +501,10 @@ def plan_install(home: Path, ownership: dict, *, source: str = "online", refresh
             and compatible_owned_source(original_record, source)):
         return original_record, status("MANAGED", source=original_record["source"],
                                        compatible_reuse=True), None
-    try:
-        upstream, evidence = export_upstream(home, source=source)
-        if evidence.get("kind") != source:
-            raise ValueError("model catalog export source differs from selected maintenance source")
-        cli_version = evidence.get("cli_version")
-        patched, compatibility = patch_catalog(upstream, cli_version=cli_version, source=source)
-    except (OSError, ValueError, RuntimeError) as exc:
-        result_status = "VERSION_SUPPORT_UNKNOWN" if str(exc) == "VERSION_SUPPORT_UNKNOWN" else "UPSTREAM_REFRESH_FAILED_PRESERVED"
-        return original_record, status(result_status, error=str(exc)), None
-    if patched is None:
-        return original_record, status("TEMPLATE_INCOMPATIBILITY_PRESERVED", template_compatibility=compatibility), None
-    newline = "\r\n" if b"\r\n" in raw else "\n"
-    updated = {"path": str((home / "config.toml").absolute()), "catalog_path": str((home / NAME).absolute()),
-               "prior": {"present": False}, "fragment": record["fragment"] if record else fragment(home, newline),
-               "catalog_sha256": digest(patched), "source": evidence | {"upstream_sha256": digest(upstream)}}
-    proof = reuse_contract(source, evidence)
-    if proof is not None:
-        updated["reuse_contract"] = proof
-    validate(updated, home)
+    updated, failure, patched, compatibility, evidence = _exported_record(
+        home, record, source, raw, timeout=export_timeout)
+    if failure is not None:
+        return original_record, failure, None
     if retained_backing_reclaimed:
         planned_status = "PLANNED"
     elif restored_field_reacquired:

@@ -60,3 +60,43 @@ def without_managed_fragment(contents: bytes, record: dict | None) -> bytes:
     if contents.count(fragment) != 1:
         return contents
     return contents.replace(fragment, b"", 1)
+
+
+# Real-shaped 0.170.0 rosters (codex-rs/models-manager/models.json): the bundled
+# catalog adds exactly gpt-6.2-sol and gpt-6.2-astra; both keep the gpt-6-astra /
+# gpt-6.1-sol TARGET neighbours. The online roster is the one served to 0.165.0.
+CLI_0170 = "codex-cli 0.170.0"
+ROSTER_0170 = {
+    "bundled": [
+        "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra",
+        "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+        "gpt-daybreak-blue-latest", "gpt-daybreak-red-latest", "gpt-5.5", "codex-auto-review",
+    ],
+    "online": [
+        "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra",
+        "gpt-6-sol", "gpt-reserve", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
+        "gpt-5.6-luna", "codex-auto-review",
+    ],
+}
+_GPT6_FAMILY = {"gpt-6.2-sol", "gpt-6.2-astra", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"}
+
+
+def catalog_0170(source="bundled", *, previous_for=None):
+    """0.170.0-shaped catalog; ``previous_for`` moves that slug's TARGET context."""
+    multiline_previous = catalog._MULTILINE_PREVIOUS
+    models = []
+    for slug in ROSTER_0170[source]:
+        if slug == "gpt-5.5":
+            template = "known target-absent template\n"
+        else:
+            previous = multiline_previous if slug in _GPT6_FAMILY else catalog._ESCAPING_PREVIOUS
+            if slug == previous_for:
+                previous = "- An unrelated upstream line moved above the target."
+            template = "You are Codex.\n" + previous + "\n" + catalog.TARGET + "\n" + catalog._NEXT + "\nend\n"
+        entry = {"slug": slug, "model_messages": {"instructions_template": template}}
+        if slug.startswith("gpt-6.2-"):
+            entry.update(minimal_client_version="0.166.0", default_reasoning_level="low",
+                         supported_reasoning_levels=["low", "medium", "high", "xhigh", "max", "ultra"],
+                         multi_agent_version="v2")
+        models.append(entry)
+    return json.dumps({"models": models}).encode()
