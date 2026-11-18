@@ -158,7 +158,16 @@ For new work, Controller preselects the next top-level managed dispatch in that 
 registration operation (or after requirements are already registered):
 `"next_dispatch":{"role":"investigator","expected_agent_type":"thaliris-investigator","candidate":"C1","requirement_refs":["R1"]}`.
 The existing task lock and authority protect this one selection. The Hook supplies the
-Controller's existing session association. A matching owning Controller reservation
+Controller's existing session association, for a standalone runner call or for one literal
+piped into exactly one runner call (`'<json>' | & '<runner>' ... --input -`; Bash needs
+`echo`/`printf`). Any other compound form is refused by name, never injected. An absent
+association fails with `THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED` (hooks inactive or
+awaiting trust, or an unrecognized call shape; the owner is unchanged), a present but wrong
+or fenced one with `THALIRIS_CONTROLLER_NOT_OWNER`. `doctor` (`host_hook_trust`) and
+`task-status` report whether `config.toml` hook trust still matches the installed
+Thaliris entries in `hooks.json`, using the trust record the installer writes
+(`thaliris-hook-trust.json`); without that record the comparison is UNKNOWN because the
+Host's trust hash is opaque. A matching owning Controller reservation
 consumes it once and registers the newly generated exact handoff
 before Native execution, including opaque Host messages. A wrong profile/role/owner or
 conflicting readable marker refuses without consuming it; nested children inherit their

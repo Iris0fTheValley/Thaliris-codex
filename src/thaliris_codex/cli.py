@@ -54,6 +54,10 @@ def _task_status(root: Path, *, suppress_protocol_notice: bool, evidence_offset:
                                  "host_actor_assurance": "UNKNOWN", "authority_sha256": task_authority.digest(task_authority.path(root))}
         if constraint_status is not None:
             out["Task Authority"]["execution_constraint"] = constraint_status
+        trust = codex_adapter.host_hook_trust_state()
+        if trust["matches_installed_hooks"] != "YES":
+            # Inactive or untrusted hooks never attach the Controller identity.
+            out["Task Authority"]["host_hook_trust"] = {key: trust[key] for key in ("status", "recovery")}
     if not suppress_protocol_notice:
         notice = lifecycle.consume_protocol_deviation_notice(root, str(out["Task"]["id"]))
         if notice is not None:

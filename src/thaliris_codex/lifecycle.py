@@ -5238,11 +5238,90 @@ def _direct_context_root(payload: dict[str, Any]) -> Path | None:
     return Path(value)
 
 
-def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: bool = True) -> tuple[str | None, list[str]]:
+# A stdin-only producer: one literal string, optionally behind echo /
+# Write-Output (PowerShell) or echo / printf (Bash, where a bare word would run
+# a program). No expansion, call, redirection or second runner invocation.
+_STDIN_LITERAL = re.compile(r"""(?is)(?:(echo|write-output|printf)\s+)?('(?:[^']|'')*'|"[^"$`]*")""")
+# Operations whose identity the Hook injects; a compound form that hides one
+# is refused by name instead of reaching the CLI without the identity.
+IDENTITY_INJECTED_OPERATIONS = frozenset({"task-evidence-register", "task-observe"})
+_HIDDEN_IDENTITY_OPERATION = re.compile(r"(?i)thaliris[\w.-]*['\"]?\s+(?:[^|;&\r\n]*?\s)?(task-evidence-register|task-observe)(?![\w-])")
+STANDALONE_RUNNER_FORM = ("one standalone runner command, optionally fed by a single literal on stdin: "
+                          "'<json>' | & '<thaliris-run.cmd>' <operation> ... --input -")
+
+
+def _stdin_literal_producer(segment: str, dialect: str) -> bool:
+    match = _STDIN_LITERAL.fullmatch(segment.strip())
+    if match is None:
+        return False
+    verb = (match.group(1) or "").casefold()
+    if dialect == "bash":
+        return verb in {"echo", "printf"}
+    return verb in {"", "echo", "write-output"}
+
+
+def _piped_runner_command(payload: dict[str, Any], command: str) -> str | None:
+    """Return the runner invocation of ``<literal> | <runner call>``, else None.
+
+    Only a pipeline whose earlier segment produces stdin data alone and whose
+    final segment is exactly one direct runner invocation is accepted. Any
+    other separator, redirection, expansion or a second invocation leaves the
+    command unrecognized; ambiguous commands never receive injected identity.
+    """
+    dialect = _maintenance_shell_dialect(payload)
+    separators: list[str] = []
+    segments = _split_command_separators(command.strip(), separators)
+    if segments is None:
+        return None
+    if separators == ["|"] and len(segments) == 2:
+        producer, consumer = segments
+    elif dialect == "powershell" and separators == ["|", "&"] and len(segments) == 3 and segments[1] == "":
+        # PowerShell's call operator directly after the pipe: `... | & 'runner' ...`.
+        producer, consumer = segments[0], "& " + segments[2]
+    else:
+        return None
+    if not consumer or not _stdin_literal_producer(producer, dialect):
+        return None
+    operation = _context_call({**payload, "tool_input": {**payload.get("tool_input", {}), "command": consumer}},
+                              _piped=False)[0]
+    if operation is None or operation in {"codex-install", "codex-uninstall", "controller-instructions"}:
+        return None
+    return consumer
+
+
+def _effective_runner_command(payload: dict[str, Any], command: str) -> str:
+    """The runner invocation a command denotes (the command itself, or a supported pipeline's tail)."""
+    if "|" not in command:
+        return command
+    return _piped_runner_command(payload, command) or command
+
+
+def _compound_identity_operation(payload: dict[str, Any]) -> str | None:
+    """Name an identity-injected operation hidden in an unsupported compound command."""
+    command = _bash_command(payload)
+    if command is None or _context_operation(payload) is not None:
+        return None
+    segments = _split_command_separators(command)
+    if segments is not None and len(segments) <= 1:
+        return None
+    for segment in segments or _COMMAND_SEPARATOR.split(command):
+        operation, _ = _context_call({"tool_input": {"command": segment}}, _piped=False)
+        if operation in IDENTITY_INJECTED_OPERATIONS:
+            return operation
+    # Redirection or expansion makes segments unparseable: a deny-only scan
+    # still names a visible runner call so it is refused, never injected.
+    match = _HIDDEN_IDENTITY_OPERATION.search(command)
+    return match.group(1).lower() if match else None
+
+
+def _context_call(payload: dict[str, Any], *, validate_selected_maintenance: bool = True,
+                  _piped: bool = True) -> tuple[str | None, list[str]]:
     """Recognize a direct context call and its explicit bounded retrieval targets."""
     command = _bash_command(payload)
     if command is None:
         return None, []
+    if _piped:
+        command = _effective_runner_command(payload, command)
     # A shell-tool template commonly ends in a newline. It terminates the
     # same standalone call; only separators between actual command bytes
     # make this a compound route. Keep non-whitespace suffixes visible.
@@ -5317,8 +5396,10 @@ def _context_help_requested(payload: dict[str, Any]) -> bool:
     return requested and not unsafe
 
 
-def _split_command_separators(command: str) -> list[str] | None:
+def _split_command_separators(command: str, separators: list[str] | None = None) -> list[str] | None:
     """Split shell separators outside simple quotes; reject ambiguous syntax.
+
+    ``separators``, when supplied, receives each matched separator in order.
 
     The direct-command recognizer only needs ordinary single- and
     double-quoted argument values. Separators inside those values are data.
@@ -5354,6 +5435,8 @@ def _split_command_separators(command: str) -> list[str] | None:
             separator = _COMMAND_SEPARATOR.match(command, index)
             if separator is not None:
                 segments.append(command[start:index].strip())
+                if separators is not None:
+                    separators.append(separator.group(0))
                 index = separator.end()
                 start = index
                 continue
@@ -5825,6 +5908,7 @@ def _direct_context_option(payload: dict[str, Any], names: set[str], *, digest_o
     command = _bash_command(payload)
     if command is None or _context_call(payload, validate_selected_maintenance=validate_selected_maintenance)[0] is None:
         return None
+    command = _effective_runner_command(payload, command)
     arguments = _context_arguments(command, validate_selected_maintenance=validate_selected_maintenance)
     if arguments is None:
         return None
@@ -6915,6 +6999,13 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
         if operation == "task-verify" and payload.get("readonly") is True:
             # A bound readonly role verifies through its own exact handoff, never as the Controller.
             return _permission_deny("THALIRIS_READONLY_ACTOR: Controller verification is unavailable to a readonly actor")
+        if operation is None and normalized in _CONTROLLER_EXECUTION_TOOL_NAMES:
+            hidden = _compound_identity_operation(payload)
+            if hidden is not None:
+                return _permission_deny(
+                    f"THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED: the Thaliris PreToolUse hook cannot attach the Controller"
+                    f" identity to {hidden} inside this compound command. Use {STANDALONE_RUNNER_FORM}; no other"
+                    " separator, redirection or second command.")
         if operation in {"task-evidence-register", "task-observe"}:
             if operation == "task-observe" and payload.get("readonly") is True:
                 # Readonly children have their separate exact handoff append

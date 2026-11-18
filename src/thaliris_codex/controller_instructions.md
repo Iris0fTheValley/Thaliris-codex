@@ -501,7 +501,12 @@ with no handoff or native actor. Example `fact.json` after reading current task-
 Replace the revision, candidate, registered requirement and source with exact current
 facts. The Hook supplies the Controller session association; a manually copied
 `--controller-session-id-hash` does not authenticate an actor or bypass known child,
-readonly or fence rules. Adapter output assigns `producer:controller`,
+readonly or fence rules. Run the runner as one standalone command; stdin input may come
+only from one literal piped into it (`'<json>' | & '<runner>' ... --input -`).
+`THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED` means the Hook attached no identity (hooks
+inactive or awaiting trust after a restart/reinstall, or an unrecognized call shape):
+the owner is unchanged; restart Codex once or approve the hooks, then retry standalone.
+Only `THALIRIS_CONTROLLER_NOT_OWNER` is a real wrong-owner or fenced refusal. Adapter output assigns `producer:controller`,
 `provenance:controller-local`, `handoff_id:null` and no native execution fields. This
 records facts in all execution modes without granting execution rights, delegated
 working-set ownership or independent-review status. First local write requires the

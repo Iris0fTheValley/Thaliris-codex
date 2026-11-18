@@ -2369,6 +2369,130 @@ def bootstrap_check(root: Path, *, codex_home: Path | None = None) -> dict[str, 
     return {"ok": True, **facts, "definition_recovery_status": definition_recovery_status, **_controller_bridge(), "managed_hook_abi": lifecycle.MANAGED_HOOK_ABI, "executable_adapter_protocol_version": lifecycle.CODEX_ADAPTER_PROTOCOL_VERSION, "session_restart_required": False}
 
 
+HOOK_TRUST_RECORD_NAME = "thaliris-hook-trust.json"
+HOOK_TRUST_RECORD_FORMAT = "thaliris-hook-trust-record-v1"
+_HOOK_TRUST_RECOVERY = ("restart Codex once, or approve the Thaliris hooks when Codex asks, then run the "
+                        "runner as one standalone command")
+
+
+def managed_hook_fingerprint(home: Path) -> str | None:
+    """SHA-256 of the Thaliris handler entries in the Host hooks.json, or None."""
+    path = home / "hooks.json"
+    try:
+        if runtime_identity._is_link(path) or not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return None
+    entries = []
+    for event in lifecycle.HOOK_EVENTS:
+        for entry in hooks.get(event) or []:
+            handlers = entry.get("hooks") if isinstance(entry, dict) else None
+            for handler in handlers if isinstance(handlers, list) else []:
+                if lifecycle._host_hook_command_is_managed(handler, event, home):
+                    entries.append({"event": event, "matcher": entry.get("matcher"), "handler": handler})
+    if not entries:
+        return None
+    return hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def write_hook_trust_record(home: Path, trusted_hashes: dict[str, str]) -> None:
+    """Remember what the installer trusted, so later diagnostics can compare.
+
+    The Host's trust hash is an opaque token; this record pairs the exact
+    token written to config.toml with the Thaliris handler entries it covered.
+    """
+    fingerprint = managed_hook_fingerprint(home)
+    if fingerprint is None or not trusted_hashes:
+        return
+    record = {"format": HOOK_TRUST_RECORD_FORMAT, "handlers_sha256": fingerprint,
+              "trusted_hashes": dict(sorted(trusted_hashes.items()))}
+    core._atomic_write(home / HOOK_TRUST_RECORD_NAME, (json.dumps(record, sort_keys=True) + "\n").encode("utf-8"))
+
+
+def remove_hook_trust_record(home: Path) -> None:
+    path = home / HOOK_TRUST_RECORD_NAME
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(record, dict) and record.get("format") == HOOK_TRUST_RECORD_FORMAT and not runtime_identity._is_link(path):
+        path.unlink()
+
+
+def host_hook_trust_state(codex_home: Path | None = None) -> dict[str, str]:
+    """Whether config.toml hook trust still matches the installed Thaliris hooks.
+
+    A mismatch means the Host may run with the Thaliris hooks disabled (for
+    example after a restart restored different hooks.json bytes): then no
+    PreToolUse hook attaches the Controller identity to runner calls.
+    """
+    home = _codex_home(codex_home)
+    fingerprint = managed_hook_fingerprint(home)
+    if fingerprint is None:
+        return {"status": "NOT_REGISTERED", "matches_installed_hooks": "NO",
+                "reason": "hooks.json has no Thaliris handlers", "recovery": "reinstall with codex-install"}
+    try:
+        record = json.loads((home / HOOK_TRUST_RECORD_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if not isinstance(record, dict) or record.get("format") != HOOK_TRUST_RECORD_FORMAT \
+            or not isinstance(record.get("trusted_hashes"), dict):
+        return {"status": "UNKNOWN", "matches_installed_hooks": "UNKNOWN",
+                "reason": "no trust record from an install by this adapter; the Host trust hash is opaque",
+                "recovery": _HOOK_TRUST_RECOVERY}
+    if record.get("handlers_sha256") != fingerprint:
+        return {"status": "HOOKS_CHANGED_SINCE_TRUST", "matches_installed_hooks": "NO",
+                "reason": "the Thaliris entries in hooks.json differ from the ones whose trust was recorded; "
+                          "the Host may keep them disabled until trust is re-recorded",
+                "recovery": _HOOK_TRUST_RECOVERY}
+    try:
+        config = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        config = {}
+    state = config.get("hooks", {}).get("state", {}) if isinstance(config.get("hooks"), dict) else {}
+    state = state if isinstance(state, dict) else {}
+    for key, trusted in record["trusted_hashes"].items():
+        entry = state.get(key)
+        if not isinstance(entry, dict) or entry.get("trusted_hash") != trusted or entry.get("enabled") is False:
+            return {"status": "TRUST_CHANGED_OR_DISABLED", "matches_installed_hooks": "NO",
+                    "reason": "config.toml no longer carries the recorded trust for every Thaliris hook",
+                    "recovery": _HOOK_TRUST_RECOVERY}
+    return {"status": "MATCH", "matches_installed_hooks": "YES",
+            "reason": "config.toml trust matches the installed Thaliris hooks (disk only; Host load is UNKNOWN)",
+            "recovery": "NONE"}
+
+
+def require_controller_owner(root: Path, task_id: str, controller_session_id_hash: str | None, purpose: str) -> str:
+    """Refuse a Controller-only write with a stable, cause-specific code.
+
+    An absent hash means the Hook never attached the identity (hooks inactive
+    or awaiting trust, or a call shape the Hook cannot recognize); it says
+    nothing about the ledger owner. A present but wrong or fenced hash is a
+    real ownership refusal.
+    """
+    if controller_session_id_hash is None:
+        raise core.ThalirisError(
+            "THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED",
+            f"{purpose}: the Thaliris PreToolUse hook did not attach the Controller identity",
+            recovery=("likely causes: the Thaliris hooks are inactive or awaiting trust after a Codex restart or "
+                      "reinstall, or the call shape is one the hook cannot recognize; "
+                      f"{_HOOK_TRUST_RECOVERY} ({lifecycle.STANDALONE_RUNNER_FORM}). "
+                      "The ledger owner is unchanged; do not re-associate or abandon the task for this"),
+            details={"controller_session_id_hash": "ABSENT", "host_hook_trust": host_hook_trust_state()})
+    owner = lifecycle.active_controller_owner(root, task_id)
+    if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
+        raise core.ThalirisError(
+            "THALIRIS_CONTROLLER_NOT_OWNER", f"{purpose} requires an unfenced owning Controller",
+            recovery="run it from the owning Controller session; a copied or fenced session hash is not current",
+            details={"controller_session_id_hash": "PRESENT",
+                     "owner": "ABSENT" if owner is None else "FENCED" if lifecycle._session_fenced(root, owner) else "DIFFERENT"})
+    return owner
+
+
 def task_evidence_register(root: Path, role: str, base_revision: int, input_file: str,
                            controller_session_id_hash: str | None = None) -> dict:
     """Extend ordinary registration with one Controller-selected next dispatch."""
@@ -2405,9 +2529,7 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
             # The withdrawn selection stays as history; nothing was dispatched.
             if task_authority.check(root) is None:
                 raise ValueError("dispatch selection cancellation requires current task authority")
-            owner = lifecycle.active_controller_owner(root, task_id)
-            if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
-                raise ValueError("dispatch selection cancellation requires the unfenced owning Controller")
+            require_controller_owner(root, task_id, controller_session_id_hash, "dispatch selection cancellation")
             cancelled = ledger.get("next_evidence_dispatch")
             if cancelled is None:
                 raise ValueError("no unconsumed dispatch selection to cancel")
@@ -2428,9 +2550,7 @@ def task_evidence_register(root: Path, role: str, base_revision: int, input_file
             if cancelled is not None:
                 response["cancelled_next_dispatch"] = {key: cancelled[key] for key in ("role", "expected_agent_type", "candidate", "requirement_refs")}
             return response
-        owner = lifecycle.active_controller_owner(root, task_id)
-        if owner is None or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner):
-            raise ValueError("dispatch selection requires an unfenced owning Controller")
+        owner = require_controller_owner(root, task_id, controller_session_id_hash, "dispatch selection")
         reservations = lifecycle._pending_reservations(ledger)
         if ledger.get("next_evidence_dispatch") is not None or reservations:
             reserved = bool(reservations)
@@ -2565,11 +2685,9 @@ def _task_observe_locked(root: Path, role: str, handoff_id: str | None, agent_id
     task = core._load_state(root, active=True)
     if actor == "controller" and handoff_id is None:
         anchor = task_authority.check(root)
-        owner = lifecycle.active_controller_owner(root, task["task_id"])
-        if (anchor is None or anchor["task_id"] != task["task_id"] or owner is None
-                or owner != controller_session_id_hash or lifecycle._session_fenced(root, owner)
-                or agent_id_hash is not None):
+        if anchor is None or anchor["task_id"] != task["task_id"] or agent_id_hash is not None:
             raise ValueError("Controller local observation requires the unfenced owning Controller and current task authority")
+        require_controller_owner(root, task["task_id"], controller_session_id_hash, "Controller local observation")
         if {"provenance", "handoff_id", "native_actor", "submitted_by", "producer", "task_id"} & body.keys():
             raise ValueError("Controller local observation provenance is assigned by the adapter; omit handoff and native identity fields")
         revision = body.pop("base_revision", None)
@@ -2770,6 +2888,7 @@ def doctor(root: Path) -> dict[str, object]:
     root = core._repo_root(root)
     result = report(root)
     home = _codex_home()
+    result["host_hook_trust"] = host_hook_trust_state(home)
     manifest = home / runtime_identity.MANIFEST_NAME
     runtime_drift = (runtime_identity.diagnose_manifest(manifest.read_bytes())
                      if manifest.is_file() and not manifest.is_symlink()

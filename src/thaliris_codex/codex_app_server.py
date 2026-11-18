@@ -431,6 +431,7 @@ def trust_installed_host_hooks(
             "changed": changed,
             "config_path": config_path,
             "keys": [hook["key"] for hook in after.values()],
+            "trusted_hashes": {hook["key"]: hook["currentHash"] for hook in after.values()},
         }
 
 

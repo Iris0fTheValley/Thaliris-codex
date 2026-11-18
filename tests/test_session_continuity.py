@@ -202,9 +202,13 @@ def test_owner_cancels_and_replaces_an_unconsumed_selection(evidence_task):
     source.write_text(json.dumps({"cancel_next_dispatch": {"reason": "route to Reviewer instead"},
                                   "next_dispatch": replacement}), encoding="utf-8")
     before = _protected_evidence_bytes(root, task_id)
-    for wrong in (None, lifecycle_module._identity_hash("other-session")):
-        with pytest.raises(ValueError, match="owning Controller"):
+    # An absent association (Hook attached nothing) and a wrong one refuse with
+    # distinct codes; neither mutates the selection.
+    for wrong, code in ((None, "THALIRIS_CONTROLLER_IDENTITY_NOT_INJECTED"),
+                        (lifecycle_module._identity_hash("other-session"), "THALIRIS_CONTROLLER_NOT_OWNER")):
+        with pytest.raises(core.ThalirisError) as refused:
             codex_adapter.task_evidence_register(root, "controller", core.task_show(root)["state"]["revision"], str(source), wrong)
+        assert refused.value.code == code
     assert _protected_evidence_bytes(root, task_id) == before
     for invalid in ({"cancel_next_dispatch": {}}, {"cancel_next_dispatch": {"reason": " "}},
                     {"cancel_next_dispatch": {"reason": "x", "role": "reviewer"}}):

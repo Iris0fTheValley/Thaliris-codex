@@ -781,6 +781,9 @@ def _finish_install(home, transition):
         enabled_count = int(trust.get("enabled_count", 0))
         if trust.get("changed"):
             changed_files.append("config.toml")
+        if trust_status == "TRUSTED" and isinstance(trust.get("trusted_hashes"), dict):
+            # Diagnostics compare later config.toml trust with this record.
+            adapter.write_hook_trust_record(home, trust["trusted_hashes"])
     except (codex_app_server.CodexAppServerError, OSError, ValueError, RuntimeError) as exc:
         trust_error = str(exc)
         trust_status = "HOST_HOOK_TRUST_INSTALL_FAILED"
@@ -980,6 +983,7 @@ def _finish_uninstall(home, transition):
     audits = [host_transition.archive_name(transition)]
     try:
         trust_removed = codex_app_server.remove_owned_hook_trust(home, keys) if keys else 0
+        adapter.remove_hook_trust_record(home)
         wait_guidance = wait_guidance_config.apply(home, finish.get("wait_guidance_record"), remove=True)
         catalog_result = catalog.apply(home, finish.get("model_catalog_record"), remove=True)
         hint = mode_hint_config.apply(home, finish.get("mode_hint_record"), remove=True)
