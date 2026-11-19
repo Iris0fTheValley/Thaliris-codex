@@ -54,6 +54,16 @@ user's requested scope, independently of bootstrap.
 Managed children follow their handoff; do not bootstrap, task-start or task-abandon
 the owning Controller's ACTIVE task. Use this installed pinned runner for later operations;
 do not select alternate startup commands, shell-computed hashes or unknown runtime code.
+A session another agent started (for example an MCP bridge's `codex exec`, marked by
+`AGENT_BRIDGE_DEPTH` > 0 or `THALIRIS_FOREIGN_CHILD=1` in the Host process environment)
+is an unmanaged foreign session: UNKNOWN, never a Controller, and an environment value
+only lowers authority. It receives a short note instead of this guidance; its
+authority-establishing and authority-using runner commands (task start, association,
+authority recovery, mode, evidence register, judge, observe, verify, close, dispose,
+abandon, Host install, maintenance and catalog refresh) are refused at the hook and at
+the runner, and it cannot spawn managed children; read-only status and diagnostics remain.
+Delegate through Thaliris dispatch only: Thaliris children cannot call MCP tools whose name says delegate, publish, spawn, exec, run, bash,
+shell or schedule, and a read-only or unverified role may call only read-class MCP tools.
 On READY (or legacy DEFINITION_READY_ACTOR_UNKNOWN), create a separate UTF-8 JSON authority
 contract file selecting the actual human instruction, boundary, invariants,
 acceptance and, when the human chooses, execution_mode: delegated, controller-direct,
