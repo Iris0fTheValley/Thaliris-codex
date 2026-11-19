@@ -18,7 +18,7 @@ from typing import Any
 
 from thaliris import core
 
-from . import roles, runtime_identity, host_preflight, task_authority, diagnostics, write_detection
+from . import roles, runtime_identity, host_preflight, task_authority, diagnostics, write_detection, foreign_session
 
 HOOK_COMMAND_PREFIX = "thaliris audit-hook"
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop")
@@ -1798,6 +1798,9 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
         if event == "PreToolUse":
             if payload.get("fenced") is True:
                 return _permission_deny("THALIRIS_FENCED_ACTOR")
+            foreign = _foreign_pre_tool_decision(root, payload)
+            if foreign is not None:
+                return foreign
             tool = payload.get("tool_name") or payload.get("tool")
             normalized = _tool_basename(tool) if isinstance(tool, str) else ""
             if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _release_maintenance_attempt(payload):
@@ -1881,6 +1884,10 @@ def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_
                 return decision
             return _pre_tool_output(payload, root, managed_hook_abi)
         if event == "SessionStart":
+            if foreign_session.marker() is not None:
+                # An agent-started session is not a Controller: no Controller
+                # guidance, no navigation pointers, no session telemetry.
+                return _foreign_session_start_output(payload)
             _record_session_start(root, payload)
             return _session_start_output(root, payload)
         if event == "UserPromptSubmit":
@@ -2283,6 +2290,16 @@ def _record_session_start(root: Path, payload: dict[str, Any]) -> None:
             # contract can populate it without reinterpreting disk state.
             state[_HOST_ROLE_CATALOG_STATUS] = HOST_ROLE_CATALOG_UNKNOWN
         _write_capture(path, state)
+
+
+def _foreign_session_start_output(payload: dict[str, Any]) -> str:
+    """Short unmanaged-session note for an agent-started session."""
+    if payload.get("source") not in {"startup", "resume", "clear", "compact"}:
+        return ""
+    return json.dumps({"hookSpecificOutput": {
+        "hookEventName": "SessionStart",
+        "additionalContext": foreign_session.NOTE,
+    }}, ensure_ascii=False, separators=(",", ":"))
 
 
 def _session_start_output(root: Path, payload: dict[str, Any]) -> str:
@@ -6172,6 +6189,11 @@ def _parallel_readonly_actor(root: Path, payload: dict[str, Any]) -> bool:
 def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
     """Allow reads with telemetry; block only mechanical protocol mutations."""
     _best_effort_record(_record_child_runtime_event, root, payload, "PreToolUse")
+    mcp_tool = payload.get("tool_name") or payload.get("tool")
+    if foreign_session.is_mcp_tool(mcp_tool):
+        denied = _mcp_child_denial(root, payload, mcp_tool)
+        if denied:
+            return denied
     ordinary = None
     if managed_task_state(root)[0] == "ACTIVE":
         bound, diagnostic = _bound_child_pretool_diagnostic(root, payload)
@@ -7176,6 +7198,84 @@ def _controller_actor_assurance(payload: dict[str, Any]) -> str:
     PID, process ancestry, SessionSource string, or absent field repairs this.
     """
     return "CHILD" if payload.get("agent_id") is not None or payload.get("agent_type") is not None else "UNKNOWN"
+
+
+def _foreign_session(root: Path, payload: dict[str, Any]) -> str | None:
+    """Name the environment marker of an unmanaged foreign session, or None.
+
+    A session started by another agent (``AGENT_BRIDGE_DEPTH`` > 0 or
+    ``THALIRIS_FOREIGN_CHILD=1`` in the Host process environment the hook inherits)
+    is UNKNOWN and not a Controller. The environment only lowers authority: it
+    mints nothing. A valid, live Thaliris child binding is the one exception, so
+    a bound role session is judged by its own binding.
+    """
+    marked = foreign_session.marker()
+    if marked is None:
+        return None
+    try:
+        if payload.get("agent_id") is not None and _bound_managed_child(root, payload):
+            return None
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        pass
+    return marked
+
+
+def _foreign_pre_tool_decision(root: Path, payload: dict[str, Any]) -> str | None:
+    """Foreign-session PreToolUse policy: None continues, a string is the final output.
+
+    Refuses authority-establishing or authority-using runner commands and managed
+    Thaliris spawns. Read-only status, diagnostics and ordinary work are untouched.
+    """
+    marked = _foreign_session(root, payload)
+    if marked is None:
+        return None
+    tool = payload.get("tool_name") or payload.get("tool")
+    normalized = _tool_basename(tool) if isinstance(tool, str) else ""
+    if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES:
+        operation = _context_operation(payload)
+        if operation == "codex-bootstrap":
+            # The runner answers a foreign session with a short note, never guidance.
+            return ""
+        if operation in foreign_session.DENIED_COMMANDS:
+            return _permission_deny(foreign_session.command_denial(f"thaliris {operation}"))
+        command = _bash_command(payload)
+        hidden = foreign_session.mentions_denied_command(command) if command is not None else None
+        if hidden is not None:
+            return _permission_deny(foreign_session.command_denial(f"thaliris {hidden}"))
+    if normalized in {"spawn_agent", "Agent"} and (
+            _managed_spawn_requested(payload) or _native_spawn_agent_type(payload) in _native_agent_roles()):
+        return _permission_deny("THALIRIS_FOREIGN_SESSION: an unmanaged foreign session (started by another agent) "
+                                "cannot spawn managed Thaliris children; it is UNKNOWN and holds no Controller standing.")
+    return None
+
+
+def _mcp_child_denial(root: Path, payload: dict[str, Any], tool: str) -> str:
+    """Refuse MCP tools that let a Thaliris child escape its role.
+
+    Covers a bound or registered role session, a native agent typed as a Thaliris
+    role, and any subagent of a foreign session. A generic native subagent of an
+    ordinary session and the Controller are unaffected. Spawn-class tools are
+    refused for every covered child; a read-only or unverified role may call
+    read-class tools only. ``writes`` comes from the live binding, never from a
+    claimed agent_type.
+    """
+    declared = _native_agent_roles().get(_native_spawn_agent_type({"tool_input": payload}))
+    record = None
+    try:
+        task_id = _active_task_id(root)
+        if task_id is not None:
+            state = _load_lifecycle(_lifecycle_path(root, task_id), task_id)
+            record = _bound_child_record(state, payload) or _ordinary_child_record(root, state, payload)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        record = None
+    if record is None and declared is None and _foreign_session(root, payload) is None:
+        return ""
+    binding = roles.get_codex_binding(record["role"]) if record is not None else None
+    writes: bool | None = binding.repo_write_allowed if binding is not None else None
+    if payload.get("readonly") is True or record is not None and record.get("parallel_readonly") is True:
+        writes = False
+    reason = foreign_session.mcp_denial(tool, writes)
+    return _permission_deny(reason) if reason else ""
 
 
 def _session_fence_path(root: Path) -> Path:

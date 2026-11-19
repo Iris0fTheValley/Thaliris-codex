@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 from . import __version__
-from . import codex_adapter, codex_bootstrap, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics, observation_transport, project_identity
+from . import codex_adapter, codex_bootstrap, foreign_session, lifecycle, task_authority, roles, host_maintenance, runtime_identity, diagnostics, observation_transport, project_identity
 from thaliris import core, identity
 from thaliris.errors import TASK_REVISION_CONFLICT, ThalirisError, error_envelope
 from thaliris.core import TaskStateSchemaIncompatible, artifact_get, catalog, document_get, milestone_check, rollback, stale, task_artifact, task_get, task_promote, task_show, task_status, task_update
@@ -447,6 +447,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(out, sort_keys=True, separators=(",", ":")))
             return 0
         root = args.root.resolve()
+        if args.command != "audit-hook" and foreign_session.marker() is not None:
+            # A session started by another agent is UNKNOWN, never a Controller. The environment
+            # only lowers authority; it is refused before any project state is read.
+            if args.command == "codex-bootstrap":
+                _write_utf8_line(json.dumps(foreign_session.bootstrap_note(), ensure_ascii=False, separators=(",", ":")))
+                return 0
+            if args.command in foreign_session.DENIED_COMMANDS:
+                raise ValueError(foreign_session.command_denial(f"thaliris {args.command}"))
         if args.command == "execution-wait" and not args.arguments:
             from .execution_observation import guide
             _write_utf8_line(json.dumps(guide(include_source=args.tool_source), ensure_ascii=False))

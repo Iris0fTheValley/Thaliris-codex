@@ -436,7 +436,10 @@ def bootstrap(
     *,
     controller_guidance_sha256: str | None = None,
 ) -> dict[str, object]:
-    from . import host_transition
+    from . import foreign_session, host_transition
+    if foreign_session.marker() is not None:
+        # An agent-started session is UNKNOWN: no init, no Controller guidance.
+        return foreign_session.bootstrap_note()
     guidance = controller_guidance_fields(controller_guidance_sha256)
     if host_transition.pending(lifecycle._host_home_path()):
         return {"ok": False, "status": "HOST_TRANSITION_PENDING", "init_invoked": False,

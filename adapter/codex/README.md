@@ -469,6 +469,37 @@ to children. Nothing is added to bootstrap or SessionStart.
 
 ## Enforcement and assurance
 
+### MCP delegation guard and foreign sessions
+
+Codex names an MCP tool `mcp__<server>__<tool>`; the PreToolUse matcher is already `*`, so
+these calls reach the hook and the managed hook spec (and its provenance-only hash) is
+unchanged. For a Thaliris child (a bound or registered role session, a native agent typed
+as a Thaliris role, or any subagent of a foreign session) the hook classifies the tool part
+of the name by words (`foreign_session.mcp_class`): **spawn** (`delegate`, `publish`,
+`spawn`, `exec`, `run`, `bash`, `shell`, `schedul*`), **mutating** (`task`, `write`, `edit`,
+`create`, `delete`, `cancel`), **read** (`read`, `get`, `list`, `search`, `fetch`, `query`,
+`status`, `health`, `wait`, `output`) or **unknown**. Spawn tools are refused for every role.
+A read-only or unverified role (an agent_type claim without a live binding is unverified) may
+call read tools only; a writing role is refused spawn tools only. The denial names the tool
+and says delegation must go through Thaliris dispatch. The Controller and a generic native
+subagent of an ordinary session are unaffected. This is a name heuristic, not a sandbox.
+
+A session started by another agent is not a Controller. `AGENT_BRIDGE_DEPTH` > 0 (or an
+unreadable value) or `THALIRIS_FOREIGN_CHILD=1` in the environment the hook and the runner
+inherit, with no valid live child binding, classifies it as an unmanaged foreign session. The
+environment only lowers authority; no value mints Controller or child standing, and
+`_controller_actor_assurance` never reads it. Such a session gets a short note at
+SessionStart and `codex-bootstrap` (no init, no guidance, no navigation pointers); its
+authority-establishing and authority-using runner commands (`foreign_session.DENIED_COMMANDS`:
+task-start, task-associate, task-recover-authority, task-mode, evidence register, judge,
+check, observe, verify, close, dispose, abandon, update, artifact, promote, install,
+uninstall, maintenance plan, catalog refresh, init, rollback, identity writes) are refused
+both by the PreToolUse hook (including a command that hides the direct invocation in shell
+text) and by the runner itself, and it cannot spawn managed Thaliris children. Read-only
+status and diagnostics remain. Residual: a foreign process that scrubs its own environment
+and calls the runner outside a Codex hook sees no marker at the runner; it still holds no
+Controller owner hash, and the hook layer is unaffected by a child's own environment.
+
 Project bootstrap `READY` means definitions are available, not that a Host actor is authenticated. An explicit Controller-selected UTF-8 contract (`human_instruction`, `boundary`, `invariants`, `acceptance`, and optional `execution_mode`, defaulting to `delegated`) admits task intent without requiring a bootstrap receipt or one-shot Hook bearer. Optional legacy proofs remain strictly checked when supplied. The contract is governance, not universal authentication; Host Root assurance remains `UNKNOWN`.
 
 Every Task ID owns its state, Authority anchor, child bindings, lifecycle reservations and recovery evidence. A new task gets a new ID and can start while an older task remains `ACTIVE`, `UNKNOWN`, has an orphan reservation, or has damaged Authority. It does not inherit old state from a matching repository path. The current session is associated explicitly by Task ID; `task-associate` records navigation with an Authority digest/revision CAS and leaves Host actor assurance `UNKNOWN`. Hooks use that mapping or an exact Task ID selector. Missing or damaged Authority blocks only managed control operations that depend on it; ordinary work, bounded reads and diagnostics remain available. `task-status` is a bounded routing observation; `task-show` is available for explicit diagnostics.
