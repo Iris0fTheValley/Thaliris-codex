@@ -54,6 +54,56 @@ and [routing protocol](../../docs/thaliris-routing-protocol.md).
 
 ## Handoff and role isolation
 
+### Managed Claude handoff from Codex
+
+A Codex Controller can reserve a read-only `investigator`, `reviewer`, or
+`reasoning-specialist` handoff on Claude Code. Use the pinned adapter runner, an
+ACTIVE authority record, and the Core pairing in `release/core.lock.json` with
+the cross-Host protocol. Load the relevant adapter updates in each Host. The
+native Claude Code executable must be available on `PATH` with working authentication.
+A frozen host-specific execution constraint or single-agent task disallows this route.
+
+Place the selected handoff in a UTF-8 JSON file.
+
+```json
+{"candidate":"C1","requirement_refs":["R1"],"prompt":"Review the selected behavior in src/example.py and report findings with source references.","claude_model":"sonnet","claude_effort":"high"}
+```
+
+In the associated Codex session, substitute the literal installed runner path,
+repository path, selected task ID, and current revision.
+
+```powershell
+& '<installed runner>' --root '<project root>' --task-id '<task ID>' xhost-reserve --role reviewer --base-revision <revision> --input '<handoff file>'
+```
+
+The reservation returns `launch_args` for the same pinned runner and associated
+Controller session. The Hook supplies a one-use launch ticket. The launcher
+returns a small receipt. Use the owned execution tool's supported wait if it
+yields a running session.
+
+```powershell
+& '<installed runner>' --root '<project root>' --task-id '<task ID>' xhost-run --handoff '<handoff ID>'
+```
+
+Use the same handoff ID to fetch the foreign final.
+
+```powershell
+& '<installed runner>' --root '<project root>' --task-id '<task ID>' xhost-result --handoff '<handoff ID>'
+```
+
+The launcher pre-registers the exact Claude session, records the associated
+Controller's native session hash as the transport identity, and checkpoints the
+Codex authority before feeding the prompt. It stores the final digest and body,
+foreign usage, and typed claims. Dispose the handoff to request cancellation.
+A wall-clock timeout terminates the subprocess tree and records `failed` when
+it has a partial result or `cancelled` when it has none. A repeat uses a new
+handoff. An unresolved live foreign run blocks mechanical task closure.
+
+For Claude-to-Codex work, Codex hooks check the exact pre-registered session,
+task, repository, and handoff using read-only access. The launcher and receiving
+hooks restrict the child to the dedicated file inspection tools. Both
+directions share the [Core cross-Host protocol](https://github.com/Iris0fTheValley/Thaliris/blob/main/docs/thaliris-cross-host-protocol.md).
+
 Authorized parent native spawn carries the sole task-specific input. Core does not
 construct or inject a child projection. Fresh roles use V2 fork_turns="none" or
 V1 fork_context=false. The default Controller work method is delegated: a long-lived

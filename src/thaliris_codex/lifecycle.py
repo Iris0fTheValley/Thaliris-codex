@@ -124,7 +124,7 @@ _OBVIOUS_WRITE = re.compile(
 )
 _COMMAND_SEPARATOR = re.compile(r"(?:\r?\n|&&|\|\||\||&|;)")
 _CONTEXT_OPERATIONS = frozenset({
-    "controller-instructions",
+    "controller-instructions", "xhost-reserve", "xhost-run", "xhost-result",
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "init", "codex-bootstrap", "codex-install", "codex-uninstall", "codex-maintenance-plan", "codex-model-catalog-refresh", "doctor", "stale", "milestone-check", "memory-status", "uninstall",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-show",
@@ -136,7 +136,7 @@ _CONTEXT_OPERATIONS = frozenset({
     "identity-note", "identity-suggest",
 })
 _ACTIVE_ROOT_CONTEXT_OPERATIONS = frozenset({
-    "controller-instructions",
+    "controller-instructions", "xhost-reserve", "xhost-run", "xhost-result",
     "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
     "codex-bootstrap", "codex-maintenance-plan", "doctor", "milestone-check", "memory-status", "task-update", "task-status", "task-get", "artifact-get",
     "catalog", "document-get", "task-artifact", "task-close", "task-promote",
@@ -155,7 +155,7 @@ _CHILD_CONTEXT_READS = frozenset({
 # Controller-only refresh of the receipt-owned model catalog (catalog_refresh).
 _CATALOG_REFRESH_OPERATION = "codex-model-catalog-refresh"
 _CHILD_CONTEXT_MUTATIONS = frozenset({
-    "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency",
+    "task-recover-authority", "task-mode", "task-associate", "task-dispose-dependency", "xhost-reserve", "xhost-run", "xhost-result",
     "task-start", "task-abandon", "task-recover-state", "task-update", "task-artifact", "task-close", "task-promote", "codex-install",
     "rollback", "init", "uninstall", "codex-uninstall", "codex-model-catalog-refresh",
     "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain",
@@ -173,7 +173,7 @@ _CONSTRAINT_EXEMPT_OPERATIONS = frozenset({
     "controller-instructions", "version", "doctor", "catalog", "document-get",
 })
 _RAW_CORE_IDENTITY_STATE = re.compile(r"(?i)thaliris[-_]?(?:core)?[^|;&]*identity-(?:offer|note|suggest)(?![-\w])")
-_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]+(?:task-authority|host-capability)|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
+_CONTROL_STATE_TARGET = re.compile(r"(?i)(?:\.thaliris[\\/]+(?:task-authority|host-capability|xhost-sessions)|\.project-identity[\\/]+(?:IDENTITY\.md|ledger\.json|versions|amendments|challenges|relations)|\.context[\\/](?:state\.json|tasks[\\/][^\s\"']+|audit[\\/](?:lifecycle|external-recovery|abandoned|session-tasks|agent-tasks)(?:[\\/][^\s\"']+)?))")
 _DURABLE_PATH_TARGET = re.compile(r"(?i)(?:^|[\s\"'=])((?:\.agent-memory|\.milestones)(?:[\\/][^\s\"'|;&<>]*)?)")
 _START_ATTESTATION_TTL_NS = 120 * 1_000_000_000
 
@@ -1615,6 +1615,14 @@ def _inline_observation_transport(payload: object) -> dict[str, Any] | None:
 def _handle_hook_routed(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
     if not isinstance(payload, dict):
         return ""
+    from . import xhost
+    if (foreign_session.marker() == f"{foreign_session.MARKER_ENV}=1"
+            or xhost.has_selector(_session_id_hash(payload))):
+        # A receiver is never a Controller routing/telemetry source. Resolve
+        # only its current workspace and the exact pre-registered foreign ID.
+        output = xhost.incoming_hook(_hook_repository_root(root, payload), event, payload)
+        if output is not None:
+            return output
     if event == "PreToolUse":
         tool = payload.get("tool_name") or payload.get("tool")
         normalized = _tool_basename(tool) if isinstance(tool, str) else ""
@@ -1787,7 +1795,7 @@ def _managed_control_dependency(payload: dict[str, Any], root: Path) -> bool:
         or normalized in _FRESH_CHILD_REUSE_TOOL_NAMES | {"interrupt_agent", "close_agent"}
         and (_managed_spawn_requested({"tool_input": payload}) or _managed_collaboration_target(root, payload))
         or normalized == "spawn_agent" and _managed_spawn_requested(payload)
-        or _control_state_target(payload) is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)))
+        or _control_state_target(payload, root) is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)))
 
 
 def _handle_hook_selected(root: Path, event: str, payload: object, managed_hook_abi: str | None = None) -> str:
@@ -3768,6 +3776,7 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
     Select one handoff (its children, pending reservation and the identity
     collisions observed for it) or one exact conflict id that has no handoff.
     """
+    from . import xhost
     task_id = core.selected_task(root)
     if task_id is None or not isinstance(reason, str) or not reason.strip() or len(reason) > 4096:
         raise ValueError("TASK_DEPENDENCY_DISPOSITION_REQUIRED")
@@ -3784,6 +3793,17 @@ def task_dispose_dependency(root: Path, handoff_id: str | None, base_revision: i
         if task_authority.digest(path) != expected_lifecycle:
             raise ValueError("TASK_LIFECYCLE_CHANGED")
         ledger = _load_lifecycle(path, task_id)
+        foreign = xhost.handoff_in(state, handoff_id) if handoff_id is not None else None
+        if foreign is not None and foreign.get("executor_host") == "claude":
+            cancel_reason = " ".join(reason.split())[:core.FOREIGN_CANCEL_REASON_MAX]
+            if not xhost.cancel(state, handoff_id, cancel_reason):
+                raise ValueError("TASK_DEPENDENCY_HANDOFF_NOT_LIVE")
+            ledger.setdefault("dependency_dispositions", []).append({"kind": "foreign-run", "handoff_id": handoff_id,
+                "reason": reason, "management_disposition": _DISPOSED, "native_execution": "UNKNOWN"})
+            _write_evidence_reservation(root, state, path, ledger)
+            xhost.signal_cancel(ledger.get(xhost.DIRECT_RUNS, {}).get(handoff_id))
+            return {"ok": True, "task_id": task_id, "revision": state["revision"], "handoff_id": handoff_id,
+                "management_disposition": _DISPOSED, "native_execution": "UNKNOWN", "death_proof": "UNKNOWN"}
         collisions = ledger.get("identity_collisions") or []
         if not isinstance(collisions, list):
             raise ValueError("TASK_DEPENDENCY_CONFLICT_MALFORMED: preserve identity collision evidence for a separate repair decision")
@@ -4708,6 +4728,10 @@ def native_execution_diagnostic(root: Path) -> dict[str, Any]:
     if task_id is None:
         add("active-task-unavailable")
         return report()
+    from . import xhost
+    for foreign in xhost.live_handoffs(core._load_state(root, active=True)):
+        add("foreign-run-unresolved", handoff_id=foreign["id"], run_state=foreign["run_state"],
+            next_step="observe the launched foreign run or explicitly dispose the selected handoff")
     try:
         value = _read_lifecycle_document(path)
     except FileNotFoundError:
@@ -6000,12 +6024,71 @@ def _visible_durable_paths(payload: dict[str, Any]) -> list[str]:
     return targets
 
 
-def _control_state_target(payload: dict[str, Any]) -> str | None:
+def _native_patch_targets(payload: dict[str, Any], root: Path) -> list[str] | None:
+    """Recognize an unambiguous native patch; keep unknown forms on the old guard."""
+    tool = payload.get("tool_name") or payload.get("tool")
+    arguments = payload.get("tool_input")
+    if not isinstance(tool, str) or _tool_basename(tool) != "apply_patch" or not isinstance(arguments, dict):
+        return None
+    patches = [arguments[key] for key in ("patch", "input") if key in arguments]
+    if len(patches) != 1 or not isinstance(patches[0], str):
+        return None
+    lines = patches[0].strip().split("\n")
+    lines = [line.removesuffix("\r") for line in lines]
+    if len(lines) < 3 or lines[0].strip() != "*** Begin Patch" or lines[-1].strip() != "*** End Patch":
+        return None
+    if set(arguments) - {"patch", "input"}:
+        return ["unsafe native patch target"]
+    targets = []
+    operation = None
+    for line in lines[1:-1]:
+        header = re.fullmatch(r"\*\*\* (Add File|Delete File|Update File|Move to): (.+)", line.lstrip())
+        if header is not None:
+            kind, name = header.groups()
+            if kind == "Move to" and operation != "Update File":
+                return ["unsafe native patch target"]
+            operation = kind
+            targets.append(name)
+        elif operation is None or not (line.startswith(("+", "-", " ", "@@")) or line == "*** End of File"):
+            return ["unsafe native patch target"]
+    if not targets:
+        return None
+    cwd = payload.get("cwd")
+    base = Path(cwd) if isinstance(cwd, str) and Path(cwd).is_absolute() else root
+    paths = []
+    for name in targets:
+        parts = re.split(r"[\\/]", name)
+        # Refuse traversal, Windows drive-relative/alternate-stream syntax,
+        # trailing-dot/space aliases, and control characters before resolving.
+        candidate = Path(name)
+        if (any(part == ".." or part.endswith((" ", ".")) and part != "." for part in parts)
+                or any(ord(character) < 32 for character in name)
+                or ":" in name[len(candidate.drive):]
+                or candidate.drive and not candidate.is_absolute()):
+            return ["unsafe native patch target"]
+        lexical = base / candidate
+        try:
+            actual = lexical.resolve()
+            if not actual.is_relative_to(root.resolve()):
+                paths.append("unsafe native patch target")
+        except (OSError, ValueError, RuntimeError):
+            paths.append("unsafe native patch target")
+            continue
+        paths.extend((lexical.as_posix(), actual.as_posix()))
+    return paths
+
+
+def _control_state_target(payload: dict[str, Any], root: Path | None = None) -> str | None:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         return None
-    material = json.dumps(tool_input, ensure_ascii=False, sort_keys=True)
-    match = _CONTROL_STATE_TARGET.search(material)
+    cwd = payload.get("cwd")
+    patch_root = root if root is not None else Path(cwd).resolve() if isinstance(cwd, str) and cwd else Path.cwd()
+    targets = _native_patch_targets(payload, patch_root)
+    if targets is not None and "unsafe native patch target" in targets:
+        return "unsafe native patch target"
+    material = json.dumps(targets if targets is not None else tool_input, ensure_ascii=False, sort_keys=True)
+    match = _CONTROL_STATE_TARGET.search(material.replace("\\\\", "/"))
     if match is not None:
         return match.group(0).replace("\\", "/")
     # Host ownership records are control state too. This is an obvious-path
@@ -6303,7 +6386,7 @@ def _child_pre_tool_output(root: Path, payload: dict[str, Any]) -> str:
         if operation == "task-status":
             return _updated_command_output(payload, "--suppress-protocol-notice")
         return ""
-    target = _control_state_target(payload)
+    target = _control_state_target(payload, root)
     if target is not None:
         mutation = _obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)
         # Project identity files are ordinary readable repository content;
@@ -6902,6 +6985,22 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
     if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES and _compound_host_maintenance_attempt(payload):
         return _permission_deny("THALIRIS_HOST_MAINTENANCE_INTENT_REQUIRED: Host maintenance must remain one exact standalone checked command.")
     operation = _context_operation(payload) if normalized in _CONTROLLER_EXECUTION_TOOL_NAMES else None
+    if operation in {"xhost-reserve", "xhost-run"}:
+        from . import xhost
+        if managed_hook_abi != MANAGED_HOOK_ABI or not xhost.pinned_controller_command(payload):
+            return _permission_deny("XHOST_CONTROLLER_REQUIRED")
+        option = "--xhost-ticket" if operation == "xhost-reserve" else "--launch-ticket"
+        if _direct_context_option(payload, {option}, digest_only=False) is not None:
+            return _permission_deny("XHOST_CONTROLLER_REQUIRED: omit the ticket option, which the Hook supplies")
+        try:
+            if operation == "xhost-reserve":
+                ticket = xhost.issue_reservation_ticket(root, payload)
+            else:
+                handoff = _direct_context_option(payload, {"--handoff"}, digest_only=False)
+                ticket = xhost.issue_launch_ticket(root, handoff, payload)
+        except ValueError as exc:
+            return _permission_deny(str(exc))
+        return _updated_command_output(payload, option + " " + ticket)
     if operation == "controller-instructions":
         # Public instruction retrieval grants no control and survives damaged
         # task/authority state, including recovery and pre-admission use.
@@ -6941,14 +7040,14 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
             return _permission_deny("THALIRIS_TASK_AUTHORITY_CONFLICT: selected task evidence changed; preserve it and resolve before managed control")
         return ""
     explicit_start = operation == "task-start" and _direct_context_option(payload, {"--authority-contract"}, digest_only=False) is not None
-    target = _control_state_target(payload)
+    target = _control_state_target(payload, root)
     if (anchor is not None or _controller_actor_assurance(payload) == "CONTROLLER") and target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized)):
         return _permission_deny("THALIRIS_CONTROL_STATE_DIRECT_WRITE: use explicit checked Thaliris operations.")
     if _controller_actor_assurance(payload) != "CONTROLLER" and anchor is None and not explicit_start:
         # Codex 0.159.2 Review delegates share the owner's session_id and omit
         # agent fields. Session matches and field absence are not Root proof.
         # Keep ordinary work available; withhold only dangerous control grants.
-        target = _control_state_target(payload)
+        target = _control_state_target(payload, root)
         if (operation in _CHILD_CONTEXT_MUTATIONS or _compound_invalid_state_mutation(payload)
                 or state_status == "ACTIVE" and _managed_control_dependency(payload, root)
                 or target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized))):
@@ -6977,7 +7076,7 @@ def _pre_tool_output(payload: dict[str, Any], root: Path | None = None, managed_
         schema_mismatch = core.task_state_schema_diagnostic(root) if operation == "task-recover-state" else None
         if operation == "task-recover-state" and _recovery_command_admitted(root, payload, schema_mismatch):
             return _issue_task_start_attestation(root, payload, managed_hook_abi)
-        target = _control_state_target(payload)
+        target = _control_state_target(payload, root)
         if operation in _CHILD_CONTEXT_MUTATIONS or _compound_invalid_state_mutation(payload) or (
             target is not None and (_obvious_write_attempt(payload) or _obvious_mutation_tool(normalized))
         ):
@@ -7572,4 +7671,7 @@ def task_abandon(
             raise ValueError("task-abandon child fence verification failed")
         state_path.unlink()
         task_authority.checkpoint(root)
+        from . import xhost
+        for launch in lifecycle_state.get(xhost.DIRECT_RUNS, {}).values():
+            xhost.signal_cancel(launch)
     return {"ok": True, "status": "ABANDONED", "task_id": task_id, "revision": revision, "archive": str(archive.relative_to(root)).replace("\\", "/"), "lifecycle_status": "RECOVERED_INCOMPLETE"}

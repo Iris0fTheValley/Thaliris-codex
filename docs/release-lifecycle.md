@@ -172,23 +172,11 @@ is inferred from an apparently unused cache record.
 
 ## Build, gates and trust
 
-`release/core.lock.json` is the single authoritative default Core pairing used by
-both CI and release builds. It selects Core
-`f0ee56320a7e3d8bcd04ca9369804af66851fee9` (Core 0.5.3, which reads schema-6 task
-state as 7 without rewriting it, names capacity refusals, reports anchor corruption
-as `TASK_AUTHORITY_INVALID` and bounds Git calls; it builds on Core 0.5.2
-`fc170edddbc41ce09aba57d3cf30d9a50344c570`, natural Project Identity formation, on top of Core 0.5.1 `e29c8375316392823ce2d25bc64bb9d040170e7d`
-with structured
-errors, batch continuity writes and compact status/write responses; the Project
-Identity plane Adapter 0.5.0 delivers is retained; the task state schema stays 7
-and persisted state stays valid for Core 0.5.2 and 0.5.0). The prior pin
-`eb540d0c7f900449609544d107b4b308234c96f9` (Core 0.5.0) lacks the structured
-error and compact-view API Adapter 0.5.1 uses. The previous
-lock `973f0f73b79142783be1eff6e6a639743de310a0` lacks that plane, and the earlier CI
-pin `2766a9ddee6671bd9154f2e067d630377a31799c` lacks explicit non-Git behavior
-required by Adapter acceptance. Those two pins both report version 0.4.6, which
-illustrates why version checks alone are insufficient. Manual CI `core_ref` is a compatibility
-experiment and does not change the release lock.
+Codex adapter 0.6.1 requires Core 0.6.2 or newer within the 0.6 line. CI and
+release builds take the exact Core commit from `release/core.lock.json`; that
+reviewed pairing identifies the ledger and adapter protocols exercised by the
+gates. A manual CI `core_ref` runs a compatibility experiment and leaves the
+release lock unchanged.
 
 The tag-triggered `release.yml` workflow first calls the complete `ci.yml` source
 suite as a reusable workflow, with no compatibility override, so release

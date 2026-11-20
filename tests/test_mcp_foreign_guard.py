@@ -123,7 +123,11 @@ def test_foreign_session_subagents_get_the_read_only_mcp_rule(tmp_path: Path, mo
     monkeypatch.setenv(name, value)
     assert _child_call(root, "gen-1", "explorer", SPAWN_TOOL)[0] == "deny"
     assert _child_call(root, "gen-1", "explorer", "mcp__s__frobnicate")[0] == "deny"
-    assert _child_call(root, "gen-1", "explorer", "mcp__claude__bridge_health") == ("", "")
+    health = _child_call(root, "gen-1", "explorer", "mcp__claude__bridge_health")
+    if name == "THALIRIS_FOREIGN_CHILD":
+        assert health[0] == "deny" and "XHOST_FOREIGN_CHILD_READONLY" in health[1]
+    else:
+        assert health == ("", "")
 
 
 @pytest.mark.parametrize(("name", "value"), MARKERS)
@@ -141,12 +145,16 @@ def test_foreign_session_cannot_run_authority_commands_at_the_hook(tmp_path: Pat
         "cd . && thaliris task-start goal",
     ):
         decision, reason = _bash(root, command)
-        assert decision == "deny" and "THALIRIS_FOREIGN_SESSION" in reason, command
+        expected_reason = "XHOST_FOREIGN_CHILD_READONLY" if name == "THALIRIS_FOREIGN_CHILD" else "THALIRIS_FOREIGN_SESSION"
+        assert decision == "deny" and expected_reason in reason, command
     for command in ("thaliris task-status", "thaliris doctor", "thaliris version", "thaliris task-show", "echo hi"):
         decision, reason = _bash(root, command)
         assert "THALIRIS_FOREIGN_SESSION" not in reason, command
     decision, reason = _bash(root, "thaliris codex-bootstrap")
-    assert decision == "" and reason == ""
+    if name == "THALIRIS_FOREIGN_CHILD":
+        assert decision == "deny" and "XHOST_FOREIGN_CHILD_READONLY" in reason
+    else:
+        assert decision == "" and reason == ""
 
 
 def test_foreign_session_cannot_spawn_managed_children(tmp_path: Path, monkeypatch) -> None:

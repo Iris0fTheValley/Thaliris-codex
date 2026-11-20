@@ -154,7 +154,7 @@ def adaptive_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path
 def test_typed_requirement_is_registered_and_an_unchecked_compiled_one_withholds(typed_task, capsys):
     root, task_id = typed_task
     state = _state(root)
-    assert state["schema_version"] == 9
+    assert state["schema_version"] == core._STATE_SCHEMA_VERSION
     stored = {item["id"]: item for item in state["evidence_continuity"]["requirements"]}
     assert stored["R1"]["kind"] == "compiled" and "kind" not in stored["R2"]
     assert task_authority.check(root) is not None
@@ -330,7 +330,7 @@ def test_a_ledger_edit_during_a_check_run_is_refused_and_never_anchored(typed_ta
 
 def test_typed_requirement_registers_together_with_a_dispatch_selection(evidence_task):
     root, _task_id = evidence_task
-    assert _state(root)["schema_version"] == 7
+    assert _state(root)["schema_version"] == core._STATE_SCHEMA_VERSION
     source = root.parent / (root.name + "-typed-selection.json")
     source.write_text(json.dumps({
         "requirements": [{"id": "R7", "workchain_ref": "opaque", "kind": "partial", "surface": "contract"}],
@@ -340,7 +340,7 @@ def test_typed_requirement_registers_together_with_a_dispatch_selection(evidence
                                                lifecycle._identity_hash(OWNER))
     assert out["ok"] and out["next_dispatch"]["requirement_refs"] == ["R7"]
     state = _state(root)
-    assert state["schema_version"] == 9
+    assert state["schema_version"] == core._STATE_SCHEMA_VERSION
     assert state["evidence_continuity"]["requirements"] == [
         {"id": "R7", "workchain_ref": "opaque", "kind": "partial", "surface": "contract"}]
     assert task_authority.check(root) is not None
@@ -717,7 +717,7 @@ def test_claims_without_a_typed_block_are_named_and_a_task_without_features_keep
     root, task_id = evidence_task
     assert lifecycle.handle_hook(root, "PostToolUse", _event(tool_name="Bash", tool_response="ok")) == ""
     _register(root, task_id, capsys, {"id": "R1", "workchain_ref": "opaque"})
-    assert _state(root)["schema_version"] == 7
+    assert _state(root)["schema_version"] == core._STATE_SCHEMA_VERSION
     assert lifecycle.verification_lines(root, _state(root), task_authority.check(root)["contract"]) == {}
     assert lifecycle.handle_hook(root, "PostToolUse", _event(tool_name="Bash", tool_response="ok")) == ""
     code, out = _run(root, task_id, capsys, "task-update", "--role", "controller", "--base-revision", str(_revision(root)),
@@ -827,7 +827,7 @@ def test_released_predecessor_profiles_still_upgrade_only_with_exact_bytes_and_f
 def test_adapter_and_core_versions_are_paired():
     import thaliris
     import thaliris_codex
-    assert thaliris_codex.__version__ == "0.6.0"
+    assert thaliris_codex.__version__ == "0.6.1"
     project = tomllib.loads((REPOSITORY / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    assert project["version"] == "0.6.0" and project["dependencies"] == ["thaliris>=0.6.0,<0.7"]
-    assert tuple(int(part) for part in thaliris.__version__.split(".")[:2]) == (0, 6)
+    assert project["version"] == "0.6.1" and project["dependencies"] == ["thaliris>=0.6.2,<0.7"]
+    assert thaliris.__version__ == "0.6.2"

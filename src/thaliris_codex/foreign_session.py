@@ -34,6 +34,7 @@ _MARKER_TRUE = frozenset({"1", "true", "yes", "on"})
 # transport and is never refused here. ``codex-bootstrap`` answers with a short
 # unmanaged-session note instead of guidance.
 DENIED_COMMANDS = frozenset({
+    "xhost-reserve", "xhost-run", "xhost-result",
     "task-start", "task-associate", "task-recover-authority", "task-recover-state", "task-mode",
     "task-update", "task-artifact", "task-close", "task-promote", "task-abandon", "task-dispose-dependency",
     "task-evidence-register", "task-judge", "task-check", "task-observe", "task-verify", "document-maintain",

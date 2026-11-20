@@ -1064,11 +1064,11 @@ def test_only_current_or_compatible_prior_task_state_schema_is_accepted(tmp_path
     core.task_start(root, "current schema", None, None)
     path = core._state_path(root)
     state = json.loads(path.read_text(encoding="utf-8"))
-    state["schema_version"] = core._STATE_SCHEMA_VERSION - 2
+    state["schema_version"] = 0
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid task state schema"):
         core.task_show(root)
-    # One above the newest schema Core accepts (Core 0.6.0 accepts 9).
+    # One above the newest schema Core accepts.
     state["schema_version"] = max(core._SUPPORTED_SCHEMAS) + 1
     path.write_text(json.dumps(state), encoding="utf-8")
     with pytest.raises(ValueError, match="invalid task state schema"):
@@ -1236,7 +1236,7 @@ def test_routing_state_has_one_small_total_byte_budget(tmp_path: Path) -> None:
     assert not (second_root / ".context" / "state.json").exists()
 
 
-def test_large_task_status_is_bounded_while_task_show_retains_full_ledger(tmp_path: Path) -> None:
+def test_large_task_status_is_bounded_and_archived_verifications_remain_retrievable(tmp_path: Path) -> None:
     root = repo(tmp_path)
     body = "HISTORICAL_RECORD_BODY_" + "x" * 256
     started = core.task_start(root, "bounded status", None, write_json(root.parent / "large.json", {
@@ -1296,5 +1296,7 @@ def test_large_task_status_is_bounded_while_task_show_retains_full_ledger(tmp_pa
     shown = core.task_show(root)
     assert len(shown["state"]["records"]) == 500
     assert len(shown["state"]["artifact_refs"]) == 200
-    assert len(shown["state"]["verification_results"]) == 200
+    assert len(shown["state"]["verification_results"]) < 200
+    archived = core.task_get(root, "verification-0")["object"]
+    assert archived["summary"] == "VERIFICATION_BODY_0"
     assert "HISTORICAL_RECORD_BODY" in json.dumps(shown)

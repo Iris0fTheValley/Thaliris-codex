@@ -123,7 +123,9 @@ def test_init_does_not_install_project_role_identities_or_durable_fence(tmp_path
     assert not (tmp_path / ".context" / "audit" / "bootstrap-restart.json").exists()
 
 
-def test_task_start_blocks_roles_added_after_current_session_start(tmp_path: Path) -> None:
+def test_task_start_blocks_roles_added_after_current_session_start(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(lifecycle_module, "managed_executable_health", lambda: {
+        "canonical_executable_available": "YES", "canonical_executable_identity": "TEST"})
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     codex_adapter.audit_hook(tmp_path, "SessionStart", {"session_id": "same-session", "source": "startup", "cwd": str(tmp_path)})
     init = codex_adapter.init(tmp_path)
@@ -215,6 +217,8 @@ def test_missing_profile_snapshot_and_forged_catalog_field_stay_unknown(tmp_path
 
 
 def test_task_start_blocks_host_role_added_after_current_session_start(tmp_path: Path, monkeypatch, pinned_test_thaliris) -> None:
+    monkeypatch.setattr(lifecycle_module, "managed_executable_health", lambda: {
+        "canonical_executable_available": "YES", "canonical_executable_identity": "TEST"})
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     host_home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(host_home))
@@ -2285,7 +2289,7 @@ def test_direct_init_posttool_proof_admits_first_start_without_start_command_par
     assert cli.main(["--root", str(root), "task-start", "goal", "--controller-bridge-sha256", digest, "--hook-attestation", token]) == 0
     started = json.loads(capsys.readouterr().out)
     assert started["status"] == "ACTIVE"
-    assert core.task_show(root)["state"]["schema_version"] == 7
+    assert core.task_show(root)["state"]["schema_version"] == core._STATE_SCHEMA_VERSION
     with pytest.raises(ValueError, match="MANAGED_CURRENT_SESSION_NOT_ATTESTED"):
         lifecycle_module.consume_task_start_attestation(root, token, digest)
 
@@ -3671,12 +3675,7 @@ def test_exact_role_keyed_historical_profiles_migrate_without_claiming_edits(tmp
     (agents / verifier_name).write_bytes(verifier_legacy)
     first = codex_adapter.init(root)
     assert first["agent_profile_changed"] is False
-    expected_manual = (
-        ["canonical_executable_unavailable"]
-        if first["canonical_executable_available"] == "NO"
-        else []
-    )
-    assert first["manual_action_required"] == expected_manual
+    assert first["manual_action_required"] == []
     for role in ("investigator", "curator", "implementer"):
         name = f"thaliris-{role}.toml"
         assert codex_adapter._agent_profile_state((agents / name).read_bytes(), name) == "legacy"
