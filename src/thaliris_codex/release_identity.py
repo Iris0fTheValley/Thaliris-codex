@@ -11,7 +11,7 @@ REPOSITORY = "Iris0fTheValley/Thaliris-codex"
 CORE_REPOSITORY = "Iris0fTheValley/Thaliris"
 COMPATIBILITY = {"python": ">=3.11", "maintenance": "thaliris-host-maintenance-v1",
                  "runtime": "thaliris-installed-runtime-v1", "adapter_protocol": 9,
-                 "managed_hook_abi": "thaliris-hook-abi-10", "core_state_schema": 7}
+                 "managed_hook_abi": "thaliris-hook-abi-10", "core_state_schema": 12}
 
 
 def sha256(data: bytes) -> str:

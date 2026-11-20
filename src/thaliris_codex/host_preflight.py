@@ -120,6 +120,7 @@ function Degraded($detail,$code='THALIRIS_RUNTIME_DRIFT') {
   # A pending generation never exempts maintenance through another executor.
   if ($command -match '(?i)(?:^|[;&|])\s*&?\s*["'']?[^\r\n;|&]*?\s+codex-(install|uninstall)\b') { $control=$true }
   if ((Fenced $h) -or ($write -and ($h.readonly -eq $true -or [string]$h.agent_type -match '^thaliris-(reviewer|verifier)(-|$)'))) { $control=$true }
+  #XHOST_REFUSAL
   $o=@{hookEventName='PreToolUse';additionalContext=($code+': '+$detail+'; assurance UNKNOWN.')}
   if ($control) { $o.permissionDecision='deny';$o.permissionDecisionReason='THALIRIS_CONTROL_AUTHORITY_UNAVAILABLE: '+$detail }
   @{hookSpecificOutput=$o}|ConvertTo-Json -Depth 32 -Compress|Write-Output
@@ -128,6 +129,9 @@ function Degraded($detail,$code='THALIRIS_RUNTIME_DRIFT') {
     source = source.replace("    #PARALLEL_RESERVATIONS\n", "" if previous else
         "    foreach ($item in @($v.pending_authorized_spawns)) { if ($null -ne $item -and ($item.task_name_hash -ceq $hash"
         " -or $item.native_agent_id_hash -ceq $hash)) { return $true } }\n")
+    source = source.replace("  #XHOST_REFUSAL\n", "" if previous else r'''
+if ($env:THALIRIS_HANDOFF_ID -or (Present "$env:USERPROFILE/.thaliris/xhost-sessions/$(IdentityHash $h.session_id).json")) { $control=$true }
+''')
     for old, new in (("$inputJson", "$j"), ("$command", "$c"), ("$control", "$d"), ("$detail", "$e"), ("$path", "$x"), ("FreshUnmanaged", "Fresh"), ("Present", "Exists"), ("Unlinked", "Safe"), ("ManagedTarget", "Target"), ("Fenced", "Fence"), ("IdentityHash", "Hash"), ("$association", "$q"), ("$session", "$s"), ("$target", "$t"), ("$managed", "$m"), ("$agent", "$g"), ("$hash", "$b")):
         source = source.replace(old, new)
     return "\n".join(line.strip() for line in source.splitlines() if line.strip() and not line.lstrip().startswith("#"))

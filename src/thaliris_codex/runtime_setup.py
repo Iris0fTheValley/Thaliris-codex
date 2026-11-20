@@ -30,7 +30,7 @@ _HOST_PACKAGE_FAMILY_ENV = "CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY"
 _HOST_PACKAGE_FAMILY = re.compile(r"OpenAI\.Codex_[A-Za-z0-9]{13}")
 
 # Fallback only; must match the ``thaliris`` requirement in pyproject.toml.
-CORE_REQUIREMENT_FALLBACK = "thaliris>=0.6.0,<0.7"
+CORE_REQUIREMENT_FALLBACK = "thaliris>=0.6.2,<0.7"
 
 
 def _version_tuple(text: str) -> tuple[int, ...]:

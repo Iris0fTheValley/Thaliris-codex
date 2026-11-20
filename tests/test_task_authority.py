@@ -263,6 +263,26 @@ def test_healthy_hook_blocks_reviewer_git_commit_and_host_profile_patches(worksp
     assert lifecycle.handle_hook(workspace, "PreToolUse", source_patch, lifecycle.MANAGED_HOOK_ABI) == ""
 
 
+def test_native_patch_guard_checks_targets_and_rename_not_document_text(workspace):
+    start(workspace)
+    _spawn(workspace, role="implementer", native_agent_id="writer")
+    child = {"cwd": str(workspace), "session_id": "first", "turn_id": "writer-turn",
+        "agent_id": "writer", "agent_type": "thaliris-implementer", "tool_name": "functions.apply_patch"}
+    assert lifecycle._record_subagent_start(workspace, child)
+    protected = Path(".context") / "tasks" / "an-opaque-task" / "state.json"
+
+    def pretool(patch):
+        supplied = {**child, "tool_input": {"patch": "*** Begin Patch\n" + patch + "\n*** End Patch"}}
+        return lifecycle.handle_hook(workspace, "PreToolUse", supplied, lifecycle.MANAGED_HOOK_ABI)
+
+    assert pretool(f"*** Update File: docs/protocol.md\n@@\n+Task ledgers live at `{protected.as_posix()}`.") == ""
+    assert pretool(f"*** Add File: docs/example.md\n+{protected.as_posix()}") == ""
+    for target in (protected, Path("docs") / ".." / protected, Path("..") / "outside.md", workspace.parent / "outside.md"):
+        assert "THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION" in pretool(f"*** Update File: {target}\n@@\n+blocked")
+    assert "THALIRIS_ROLE_SESSION_CONTROL_STATE_MUTATION" in pretool(
+        f"*** Update File: docs/renamed.md\n*** Move to: {protected}\n@@\n+blocked")
+
+
 def test_damaged_agent_navigation_keeps_known_reviewer_peer_message_denied(workspace):
     started = start(workspace)
     _spawn(workspace, role="reviewer", native_agent_id="reviewer")

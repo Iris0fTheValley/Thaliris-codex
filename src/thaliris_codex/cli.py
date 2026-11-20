@@ -284,6 +284,17 @@ def _parser() -> argparse.ArgumentParser:
     q.add_argument("--base-revision", type=int, required=True)
     q.add_argument("--expected-lifecycle-sha256", required=True)
     q.add_argument("--reason", required=True)
+    from . import xhost
+    q = sub.add_parser("xhost-reserve", help="reserve one selected read-only Claude handoff on the current task")
+    q.add_argument("--role", required=True, choices=xhost.READONLY_ROLES)
+    q.add_argument("--base-revision", type=int, required=True)
+    q.add_argument("--input", required=True, help="UTF-8 JSON file containing the selected handoff")
+    q.add_argument("--xhost-ticket", help=argparse.SUPPRESS)
+    q = sub.add_parser("xhost-run", help="launch an exact reserved foreign handoff from the associated Controller")
+    q.add_argument("--handoff", required=True)
+    q.add_argument("--launch-ticket", help=argparse.SUPPRESS)
+    q = sub.add_parser("xhost-result", help="read the integrity-checked result of a selected foreign handoff")
+    q.add_argument("--handoff", required=True)
     q = sub.add_parser("task-associate", help="explicitly associate this session with the selected task")
     q.add_argument("--expected-authority-sha256", required=True)
     q = sub.add_parser("task-mode", help="Controller-selected execution mode transition with authority and revision CAS")
@@ -466,6 +477,8 @@ def main(argv: list[str] | None = None) -> int:
         if selected is None and args.session_id:
             selected = lifecycle._associated_task(root, {"session_id": args.session_id})
         core.select_task(root, selected)
+        if args.command in {"xhost-reserve", "xhost-run", "xhost-result"} and selected is None:
+            raise ValueError("XHOST_TASK_SELECTION_REQUIRED")
         if args.command in {"task-update", "task-artifact", "task-close", "task-promote", "task-mode", "task-associate", "task-dispose-dependency", "task-recover-authority", "task-recover-state", "task-evidence-register", "task-observe", "task-judge", "task-check", "task-verify", "document-maintain", *project_identity.MUTATIONS} and selected is None:
             raise ValueError("explicit --task-id or associated --session-id required for managed control")
         if args.command == "controller-instructions":
@@ -614,6 +627,16 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "task-recover-authority": out = task_authority.recover(root, args.expected_authority_sha256, args.reason)
         elif args.command == "task-recover-state": out = codex_adapter.task_recover_state(root, args.expected_sha256, args.abandon_active, args.hook_attestation, args.controller_bridge_sha256)
         elif args.command == "task-dispose-dependency": out = lifecycle.task_dispose_dependency(root, args.handoff_id, args.base_revision, args.expected_lifecycle_sha256, args.reason, args.conflict_id)
+        elif args.command == "xhost-reserve":
+            from . import xhost
+            out = xhost.reserve_from_hook(root, role=args.role, base_revision=args.base_revision,
+                                          input_file=args.input, ticket=args.xhost_ticket)
+        elif args.command == "xhost-run":
+            from . import xhost_runner
+            out = xhost_runner.run(root, args.handoff, args.launch_ticket)
+        elif args.command == "xhost-result":
+            from . import xhost
+            out = xhost.result(root, args.handoff)
         elif args.command == "task-associate": out = lifecycle.associate_task(root, str(core.selected_task(root)), lifecycle._identity_hash(args.session_id), args.expected_authority_sha256)
         elif args.command == "task-mode": out = task_authority.switch_mode(root, args.expected_authority_sha256, args.base_revision, args.mode, args.human_instruction)
         elif args.command == "task-update":

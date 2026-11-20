@@ -37,7 +37,7 @@ def test_controller_local_hook_cli_cas_and_schema(evidence_task, capsys, mode):
     task_authority.write(root, anchor)
     _register_requirement(root)
     before = core.task_show(root)["state"]
-    assert before["schema_version"] == 7
+    assert before["schema_version"] == core._STATE_SCHEMA_VERSION
     body = {**_observation("O-local", candidate="O2", requirement_refs=["R1"]), "base_revision": before["revision"]}
     command = f'thaliris --root "{root}" --task-id {task_id} task-observe --role controller --observation-json ' + shlex.quote(json.dumps(body))
     raw, _ = _invoke_hook_command(root, _event(), command)
@@ -51,7 +51,7 @@ def test_controller_local_hook_cli_cas_and_schema(evidence_task, capsys, mode):
     assert local["handoff_id"] is None and local["producer"] == "controller"
     assert local["provenance"] == "controller-local"
     assert not {"native_actor", "native_status", "submitted_by"} & local.keys()
-    assert after["schema_version"] == 8 and after["revision"] == before["revision"] + 1
+    assert after["schema_version"] == core._STATE_SCHEMA_VERSION and after["revision"] == before["revision"] + 1
     assert task_authority.check(root)["contract"]["execution_mode"] == mode
     saved = core._state_path(root).read_bytes()
     with pytest.raises(core.ThalirisError, match="revision"):

@@ -15,8 +15,10 @@ import pytest
 from thaliris_codex import runtime_setup, runtime_identity, host_maintenance, host_preflight, codex_adapter
 
 
-def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False, version="0.6.0"):
+def source_wheel(tmp_path, name, package, *, entry=False, legacy_cli=False, version=None):
     """Pack current test source as a disposable fixture, not a release artifact."""
+    if version is None:
+        version = {"thaliris": "0.6.2", "thaliris_codex": "0.6.1"}.get(name, "0.6.1")
     path = tmp_path / f"{name}-{version}-py3-none-any.whl"
     info = f"{name}-{version}.dist-info"
     with zipfile.ZipFile(path, "w") as wheel:
@@ -524,7 +526,7 @@ def test_prior_owned_generation_without_location_or_probe_can_upgrade(tmp_path, 
     legacy_sources = tmp_path / "legacy-sources"
     legacy_sources.mkdir()
     old_wheel = source_wheel(legacy_sources, "thaliris_codex", Path(thaliris_codex.__file__).parent,
-                            entry=True, legacy_cli=True)
+                            entry=True, legacy_cli=True, version="0.6.0")
     old_runtime = tmp_path / "prior-final-runtime"
     venv.EnvBuilder(with_pip=False, symlinks=False).create(old_runtime)
     old_python = old_runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -608,17 +610,17 @@ def test_runtime_setup_rejects_unpinned_or_changed_artifacts_before_create(tmp_p
     assert not target.exists()
 
 
-@pytest.mark.parametrize("found", ["0.6.0", "0.6.9"])
+@pytest.mark.parametrize("found", ["0.6.2", "0.6.9"])
 def test_core_range_accepts_declared_versions(found):
-    runtime_setup.verify_core_version(found, ["thaliris>=0.6.0,<0.7"])
+    runtime_setup.verify_core_version(found, ["thaliris>=0.6.2,<0.7"])
     runtime_setup.verify_core_version(found)
 
 
-@pytest.mark.parametrize("found", ["0.5.9", "0.7.0"])
+@pytest.mark.parametrize("found", ["0.6.1", "0.7.0"])
 def test_core_range_refuses_outside_versions_with_exception(found):
     with pytest.raises(RuntimeError) as error:
-        runtime_setup.verify_core_version(found, ["thaliris>=0.6.0,<0.7"])
-    assert found in str(error.value) and ">=0.6.0,<0.7" in str(error.value)
+        runtime_setup.verify_core_version(found, ["thaliris>=0.6.2,<0.7"])
+    assert found in str(error.value) and ">=0.6.2,<0.7" in str(error.value)
 
 
 def test_core_range_comes_from_declared_dependency():
@@ -626,4 +628,7 @@ def test_core_range_comes_from_declared_dependency():
     runtime_setup.verify_core_version("0.8.5", ["thaliris>=0.8.1,<0.9"])
     with pytest.raises(RuntimeError):
         runtime_setup.verify_core_version("0.6.0", ["thaliris>=0.8.1,<0.9"])
-    assert runtime_setup.core_version_range([]) == ((0, 6, 0), (0, 7))
+    assert runtime_setup.core_version_range([]) == ((0, 6, 2), (0, 7))
+    runtime_setup.verify_core_version("0.6.2")
+    with pytest.raises(RuntimeError):
+        runtime_setup.verify_core_version("0.6.1")

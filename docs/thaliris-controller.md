@@ -539,6 +539,27 @@ schema-8-capable Core; old handoff observations keep their original provenance.
 
 ## Handoff and operational acceptance
 
+### Send a read-only handoff to Claude
+
+With a compatible installed Codex adapter and Claude Code available, use `xhost-reserve`
+for an investigator, reviewer, or reasoning specialist. Select the exact task, current
+revision and a JSON file containing `candidate`, `requirement_refs` and `prompt`.
+Optional `claude_model` and `claude_effort` select the foreign model and reasoning effort.
+The task's frozen mode and execution constraint still govern dispatch.
+
+Invoke the same pinned runner with the returned `launch_args`, beginning with
+`xhost-run --handoff <id>`, in the associated Controller session. The launcher
+returns a short receipt. Use the owned execution tool's supported wait if it yields
+a running session. Keep selected facts and work instructions in the reservation
+prompt. Read the final using
+`xhost-result --handoff <id>` on the same selected task. Core records the foreign
+result, typed claims and usage once. Apply the ordinary verification, evidence and
+product acceptance rules to the result.
+
+Dispose the exact handoff with the current task revision and lifecycle digest to
+request cancellation. Treat cancellation and process termination as separate
+observations. A repeat uses a new reservation.
+
 Provide a decision-complete handoff: selected local goal and acceptance, confirmed facts,
 hard invariants and decided boundaries, authoritative source/derived relationships,
 affected surfaces, usable verification entry, and decision-changing unknowns.
